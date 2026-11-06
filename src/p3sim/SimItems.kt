@@ -698,12 +698,12 @@ object SimItems {
     }
 
     /**
-     * The components Hypixel adds to every stack: item model (when [model] is given, under hypixel_skyblock:item/),
-     * tooltip style, the hidden-components list; and no unbreakable where Hypixel sends none.
+     * The components Hypixel adds to every stack: its look ([HypixelPack.look]: item model when [model] is given, tooltip
+     * style), the hidden-components list; and no unbreakable where Hypixel sends none. [vanilla] is the model to draw
+     * without Hypixel's pack when the base item looks nothing like the real one.
      */
-    fun hy(s: ItemStack, model: String?, style: String, unbreakable: Boolean = true, hidden: List<String> = Lore.HIDDEN): ItemStack {
-        if (model != null) s.set(DataComponents.ITEM_MODEL, net.minecraft.resources.Identifier.parse("hypixel_skyblock:item/$model"))
-        s.set(DataComponents.TOOLTIP_STYLE, net.minecraft.resources.Identifier.parse("hypixel_skyblock:$style"))
+    fun hy(s: ItemStack, model: String?, style: String, unbreakable: Boolean = true, hidden: List<String> = Lore.HIDDEN, vanilla: String? = null): ItemStack {
+        HypixelPack.look(s, model, style, vanilla)
         val types = java.util.LinkedHashSet<net.minecraft.core.component.DataComponentType<*>>()
         for (h in hidden) net.minecraft.core.registries.BuiltInRegistries.DATA_COMPONENT_TYPE.getValue(net.minecraft.resources.Identifier.parse(h))?.let { types.add(it) }
         s.set(DataComponents.TOOLTIP_DISPLAY, net.minecraft.world.item.component.TooltipDisplay(false, types))
@@ -754,17 +754,14 @@ object SimItems {
 
     // Superboom is paper with Hypixel's item model: no BlockItem, so the client never
     // "places" it (no place sound, swing or resend). Still infinite (never consumed) and needs a block target.
-    val SUPERBOOM get() = item(Items.PAPER, "SUPERBOOM_TNT", Lore.SUPERBOOM_TNT_NAME, Lore.SUPERBOOM_TNT, glint = true).also { it.count = 64; hy(it, "uncategorized/superboom_tnt", "rare", unbreakable = false) }
+    val SUPERBOOM get() = item(Items.PAPER, "SUPERBOOM_TNT", Lore.SUPERBOOM_TNT_NAME, Lore.SUPERBOOM_TNT, glint = true).also { it.count = 64; hy(it, "uncategorized/superboom_tnt", "rare", unbreakable = false, vanilla = "tnt") }
     val HYPERION get() = item(Items.IRON_SWORD, "HYPERION", Lore.HYPERION_NAME, Lore.HYPERION, glint = true).also { hy(it, "uncategorized/hyperion", "mythic") }
     /** Bonzo's Staff as Hypixel sends it: glyph + "Heroic" name, epic tooltip, fragged model, glint. Lore stats are one real item's. */
     val BONZO get() = item(Items.BLAZE_ROD, "STARRED_BONZO_STAFF", "§5\uE068 Heroic Bonzo's Staff §6✪✪✪✪✪", listOf(
         "§7Gear Score: §d845 §8(1,213)", "§7Damage: §c+250 §8(+1,350)", "§7Strength: §c+185 §8(+550)", "§7Intelligence: §a+300 §8(+700)", "",
         "§9Ferocity: §a+10", "", "§7§8This item can be reforged!", "",
         "§6Ability: Showtime  §e§lRIGHT CLICK", "§7Shoots balloons that create a large explosion", "§7on impact, dealing up to §c16,956.3 §7damage.", "§8Mana Cost: §341", "",
-        "§5§lEPIC DUNGEON SWORD"), glint = true).also {
-        it.set(DataComponents.ITEM_MODEL, net.minecraft.resources.Identifier.parse("hypixel_skyblock:item/island_relevant/dungeons/bonzos_staff_fragged"))
-        it.set(DataComponents.TOOLTIP_STYLE, net.minecraft.resources.Identifier.parse("hypixel_skyblock:epic"))
-    }
+        "§5§lEPIC DUNGEON SWORD"), glint = true).also { HypixelPack.look(it,"island_relevant/dungeons/bonzos_staff_fragged", "epic") }
     val SPIRIT_BOW get() = item(Items.BOW, "ITEM_SPIRIT_BOW", "§5Spirit Shortbow", listOf("§7Shortbow: instantly shoots!"), glint = true)
     val DUNGEONBREAKER get() = item(Items.DIAMOND_PICKAXE, "DUNGEONBREAKER", "§cDungeonbreaker", breakerLore(charges), glint = true).also {
         hy(it, null, "special", unbreakable = false, hidden = Lore.HIDDEN_BREAKER)
@@ -839,12 +836,12 @@ object SimItems {
         val s = ItemStack(Items.FEATHER)
         s.count = quiverArrows.coerceIn(1, 64)
         s.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true)
-        s.set(DataComponents.ITEM_MODEL, net.minecraft.resources.Identifier.parse("hypixel_skyblock:item/uncategorized/flint_arrow"))
         s.set(DataComponents.CUSTOM_NAME, Component.literal("Flint Arrow").withStyle { it.withItalic(false).withColor(net.minecraft.ChatFormatting.WHITE) })
         val lore = listOf("§7Damage: §c+1", "", "§8Stats added when shot!", "§f§lCOMMON ARROW", "§8§m                                ",
             "§7Arrows Remaining: §a" + "%,d".format(java.util.Locale.ROOT, quiverArrows), "", "§8This item is a preview of your", "§8currently selected arrow.")
         s.set(DataComponents.LORE, ItemLore(lore.map { l -> Sim.legacy(l).copy().withStyle { it.withItalic(false) } }))
         s.set(DataComponents.CUSTOM_DATA, CustomData.of(CompoundTag().also { it.putString("quiver_arrow", "true") }))
+        HypixelPack.look(s, "uncategorized/flint_arrow", null, vanilla = "arrow")
         return s
     }
 

@@ -91,6 +91,12 @@ object SimWorld {
 
     private fun create() {
         mc.gui.setScreen(GenericMessageScreen(Component.literal("Building the F7 boss...")))
+        // The items are Hypixel's and need Hypixel's pack, which leaving a server always drops: ADS loads the game's
+        // cached copy first and builds the world once it is in (HypixelPack). No cached copy: built straight away, vanilla look.
+        HypixelPack.loadThen { try { build() } catch (t: Throwable) { failed("build", t) } }
+    }
+
+    private fun build() {
         // Hypixel's sky: 0 to 255 and no sky light. Without the pack (it could not be written) the world is a vanilla overworld, as it was before.
         val envPack = installEnvPack()
         val dataConfiguration = if (!envPack) WorldDataConfiguration.DEFAULT

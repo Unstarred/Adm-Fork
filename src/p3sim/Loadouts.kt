@@ -56,7 +56,7 @@ object Loadouts {
         if (glint) s.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true)
         if (dye != null) s.set(DataComponents.DYED_COLOR, net.minecraft.world.item.component.DyedItemColor(dye))
         if (id != null) s.set(DataComponents.CUSTOM_DATA, CustomData.of(CompoundTag().also { it.putString("id", id); it.putBoolean("p3sim", true) }))
-        if (style != null) SimItems.hy(s, null, style)
+        if (style != null) SimItems.hy(s, null, style) else HypixelPack.look(s, null, null)
         return s
     }
 
