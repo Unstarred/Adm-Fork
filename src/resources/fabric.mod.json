@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "adm",
+  "version": "${version}",
+  "name": "ADM",
+  "description": "Advanced Dungeons Mod, an Odin addon for Hypixel SkyBlock dungeons: M7 phase-3 role rotation, leap-menu POV previews, ADS (Advanced Dungeon Simulator) and Party Finder stats.",
+  "authors": ["engineerandrew"],
+  "license": "All-Rights-Reserved",
+  "provides": ["engineerclient"],
+  "environment": "client",
+  "mixins": ["engineerclient.mixins.json", "engineerclient.odin.mixins.json"],
+  "entrypoints": {
+    "client": [
+      { "adapter": "kotlin", "value": "com.engineerclient.EngineerClient" }
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "fabric-api": ">=0.161.0",
+    "fabric-language-kotlin": ">=1.14.1+kotlin.2.4.20",
+    "minecraft": "~26.3",
+    "odin": ">=0.3.7"
+  }
+}

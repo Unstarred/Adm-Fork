@@ -1,0 +1,235 @@
+package com.engineerclient.p3sim
+
+import net.minecraft.world.entity.EntityTypes
+import net.minecraft.core.BlockPos
+import net.minecraft.core.particles.ParticleTypes
+import net.minecraft.sounds.SoundEvents
+import net.minecraft.world.entity.EntityType
+import net.minecraft.world.entity.LightningBolt
+import net.minecraft.world.entity.decoration.ArmorStand
+import net.minecraft.world.entity.projectile.hurtingprojectile.LargeFireball
+import net.minecraft.world.entity.projectile.hurtingprojectile.WitherSkull
+import net.minecraft.world.level.Level
+import net.minecraft.world.phys.HitResult
+import net.minecraft.world.phys.Vec3
+import java.util.Locale
+import kotlin.math.cos
+import kotlin.math.floor
+import kotlin.math.sin
+import kotlin.random.Random
+
+/**
+ * A P3 start's lead-in: Storm's death line to Goldor's "Who dares trespass", [LEAD] ticks as in the
+ * game since Hypixel's boss update (it was 102), his "At least my son died by your hands." at
+ * [SON]. You're on your P3 spot with the P3 hotbar; the party has already leapt down to the SS
+ * (they leave Yellow 5-20 ticks after the line and land on (108, 120, 94)). Storm's body spins at
+ * Yellow, where he nearly always dies, under its lightning storm ([StormCorpse]).
+ */
+class StormEnd : Fight.Phase("Storm end") {
+    override val restart get() = Fight.Start.P3
+    private var body: BossWither? = null
+
+    override fun start() {
+        // Everyone on their own spawn.
+        Sim.forEachPlayer { p ->
+            val spot = Spots.p3Start(1)
+            Sim.tp(p, spot.x, spot.y, spot.z, spot.yaw, spot.pitch)
+            SimItems.giveHotbar(p, p3 = true)
+        }
+        Party.standAt(SS_LANDING)
+        // The bots set off for where they start P3 now, there by its start.
+        Party.startLeadIn(LEAD - GoldorPhase.LEAD_IN)
+        val b = BossWither("Storm", DEATH_AT, armoured = false)
+        body = b
+        StormFx.line(b, "I should have known that I stood no chance.")
+        // Hypixel: the bar usually still shows 0.45 at the line and drops to 0 about 4 ticks later.
+        BossBar.show("§c§lStorm", 0.45f)
+        StormCorpse(b).start()
+    }
+
+    override fun tick() {
+        Party.tickLeadIn(t)
+        when (t) {
+            4 -> BossBar.progress(0f)
+            SON -> StormFx.line(body, "At least my son died by your hands.")
+            // LEAD_IN early: the first lever credit can land 1-2 ticks before "Who dares"; the line itself still lands at LEAD.
+            LEAD - GoldorPhase.LEAD_IN -> Fight.begin(GoldorPhase(1, arrived = true))
+        }
+    }
+
+    companion object {
+        /**
+         * Storm's death line to Goldor's first line, and to his "At least my son..." (62 and 42 in
+         * every post-update recording, 234 runs; 102 and 62 before it).
+         */
+        const val LEAD = 62
+        const val SON = 42
+        /** Where he dies: pinned under Yellow (the median of recorded bodies). */
+        val DEATH_AT = Vec3(44.6, 172.9, 65.2)
+        /** The party after its leap onto the SS player. */
+        val SS_LANDING = listOf(Vec3(108.3, 120.0, 94.0), Vec3(107.4, 120.0, 92.8), Vec3(108.3, 120.0, 95.4), Vec3(107.0, 120.0, 94.6))
+    }
+}
+
+/**
+ * What Storm does after his death line, into P3. His body never falls over at the line: it stays where
+ * the crush pinned it, spinning 40° a tick, with a wither.hurt (hostile, 15, 1.0) every 9-11 ticks;
+ * explode (2, ~0.6) at +0 and +4, a wooden-door break (3, ~0.9) at ~+12. Since Hypixel's boss update
+ * his health goes to 0 (the vanilla death fall) at +60, 2 ticks before Goldor's line, and he is
+ * removed at +80 (it was +200 and +220). Meanwhile, as before the update, 480 lightning bolts: 24
+ * spirals from his body on a fixed schedule ([SPIRALS], the same in every fight to a tick or two),
+ * each 20 bolts 2 blocks apart walking out to 38 blocks, one every [STEP] ticks, turning 90° a bolt;
+ * the last strikes at +366 (Goldor's n ~ 304). Ticks are the server's own (its gameTime, from Boss
+ * Recorder files of both eras). Runs on [Fight.later], so it outlives the phase.
+ */
+internal class StormCorpse(private val body: BossWither) {
+
+    private val at = body.pos
+    private var n = 0
+    private var yaw = body.e.yRot.toDouble()
+    private var nextHurt = 0
+    private val bolts = HashMap<Int, MutableList<Vec3>>()
+
+    init {
+        for (s in SPIRALS) {
+            val a0 = Random.nextDouble(360.0)
+            for (j in 0 until 20) {
+                val a = Math.toRadians(a0 + 90.0 * j)
+                bolts.getOrPut(s + j * STEP) { ArrayList() } += Vec3(at.x + 2.0 * j * cos(a), at.y, at.z + 2.0 * j * sin(a))
+            }
+        }
+    }
+
+    fun start() = step()
+
+    private fun step() {
+        tick()
+        n++
+        if (n <= LAST) Fight.later(1, "storm corpse") { step() }
+    }
+
+    private fun tick() {
+        if (n < DEAD) {
+            yaw += 40.0
+            val r = Math.toRadians(yaw)
+            body.moveTo(at, at.add(-sin(r), 0.0, cos(r)))
+            if (n == nextHurt) { Sim.sound(SoundEvents.WITHER_HURT, 15f, 1f, at, net.minecraft.sounds.SoundSource.HOSTILE); nextHurt += Random.nextInt(9, 12) }
+        }
+        when (n) {
+            0, 4 -> Sim.sound(SoundEvents.GENERIC_EXPLODE, 2f, 0.6f, at, net.minecraft.sounds.SoundSource.BLOCKS)
+            12 -> Sim.sound(SoundEvents.ZOMBIE_BREAK_WOODEN_DOOR, 3f, 0.9f, at)
+            DEAD -> body.dieAnim()
+            GONE -> body.remove()
+        }
+        bolts[n]?.forEach { StormFx.bolt(it.x, it.z, it.y, thunder = true) }
+    }
+
+    companion object {
+        const val DEAD = 60
+        const val GONE = 80
+        /**
+         * Spiral starts after the death line: 20 apart, then 15, then 10 (the bolts on his body in 22
+         * Boss Recorder fights, on the server's gameTime; the old list here was the same schedule
+         * read off a ping count that ran ~12% fast).
+         */
+        val SPIRALS = listOf(0, 20, 40, 60, 75, 90, 105, 120, 135, 150, 160, 170, 180, 190, 200, 210, 220, 230, 240, 250, 260, 270, 280, 290)
+        /** Ticks between a spiral's bolts (19 steps: its last 76 after its first). */
+        const val STEP = 4
+        val LAST = SPIRALS.last() + 19 * STEP
+    }
+}
+
+/** Storm's own effects: his lines, the bolts, the projectiles; used by [P2Storm] and [StormEnd]. */
+internal object StormFx {
+    /**
+     * A `[BOSS] Storm` line: the chat line, wither.ambient (5, 1.19) at him (at his body, not at
+     * you), and the speech stand: `§4§l<line>` 4.1 above him, following him, ~40 ticks (spawned the
+     * next tick on Hypixel).
+     */
+    fun line(w: BossWither?, text: String) {
+        Sim.chat("§4[BOSS] Storm§r§c: $text")
+        Sim.sound(SoundEvents.WITHER_AMBIENT, 5f, 1.19f, w?.pos)
+        w ?: return
+        val s = ArmorStand(EntityTypes.ARMOR_STAND, Sim.level)
+        s.isInvisible = true; s.setNoGravity(true); s.isPermanentlyInvulnerable = true; s.isSilent = true
+        Station.setMarker(s)
+        s.setCustomName(Sim.legacy("§4§l$text"))
+        s.isCustomNameVisible = true
+        s.snapTo(w.pos.x, w.pos.y + SPEECH_Y, w.pos.z, 0f, 0f)
+        Sim.spawn(s)
+        speech += s to w
+        Fight.later(40, "storm speech") { s.discard(); speech.removeIf { it.first === s } }
+    }
+
+    private val speech = ArrayList<Pair<ArmorStand, BossWither>>()
+    private const val SPEECH_Y = 4.1
+
+    /** Speech stands keep up with him. */
+    fun follow() {
+        speech.removeIf { it.first.isRemoved }
+        speech.forEach { (s, w) -> s.snapTo(w.pos.x, w.pos.y + SPEECH_Y, w.pos.z, 0f, 0f) }
+    }
+
+    fun clearSpeech() { speech.forEach { it.first.discard() }; speech.clear() }
+
+    /** A visual-only bolt (vanilla's flash and thunder) on the ground at (x, z), looking down from [fromY]. */
+    fun bolt(x: Double, z: Double, fromY: Double, thunder: Boolean = false): Vec3 {
+        val p = Vec3(x, ground(x, z, fromY), z)
+        val b = LightningBolt(EntityTypes.LIGHTNING_BOLT, Sim.level)
+        b.setVisualOnly(true)
+        b.snapTo(p.x, p.y, p.z, 0f, 0f)
+        Sim.spawn(b)
+        // A visual-only bolt plays no sound of its own here: in the lead-in Hypixel sends the thunder per bolt, at it (vol 10000, pitch 0.8-1.0, WEATHER).
+        if (thunder) Sim.sound(SoundEvents.LIGHTNING_BOLT_THUNDER, 10000f, 0.8f + Random.nextFloat() * 0.2f, p, net.minecraft.sounds.SoundSource.WEATHER)
+        return p
+    }
+
+    /** The top of the first solid block at or below [fromY] (14 down at most), else [fromY]. */
+    fun ground(x: Double, z: Double, fromY: Double): Double {
+        val bx = floor(x).toInt(); val bz = floor(z).toInt()
+        var y = floor(fromY).toInt()
+        repeat(15) {
+            // 26.3 dropped blocksMotion() for the blocks_motion tag.
+            if (Sim.level.getBlockState(BlockPos(bx, y, bz)).`is`(net.minecraft.tags.BlockTags.BLOCKS_MOTION)) return y + 1.0
+            y--
+        }
+        return fromY
+    }
+
+    /** Hypixel's damage numbers: thousands commas, one decimal, none when it's .0 ("10,047", "9,292.1"). */
+    fun dmg(v: Double): String = String.format(Locale.US, "%,.1f", v).removeSuffix(".0")
+
+    /** A hit line of Storm's (exact colours). */
+    fun hit(what: String, v: Double, trueDamage: Boolean = false) =
+        Sim.chat("§cStorm's§r§7 $what hit you for §r§c${dmg(v)}§r§7 ${if (trueDamage) "true " else ""}damage.")
+
+    /** The particles where a projectile of his bursts (no block damage: the arena stays as built). */
+    fun burst(at: Vec3) = Sim.level.sendParticles(ParticleTypes.EXPLOSION, at.x, at.y, at.z, 1, 0.0, 0.0, 0.0, 0.0)
+}
+
+/**
+ * Storm's Lightning Fireball: a vanilla large fireball (the fire-charge sprite) with Hypixel's push
+ * of 0.15 a tick (launch speed 0.15, then 0.74 / 1.55 / 2.0 blocks a tick averaged over
+ * ticks 1-10 / 10-20 / 20-30, vanilla's 0.95 inertia with power 0.15). It never explodes on its own:
+ * the impact is [onImpact]'s.
+ */
+internal class StormFireball(level: Level, private val onImpact: (Vec3) -> Unit) : LargeFireball(EntityTypes.FIREBALL, level) {
+    override fun onHit(result: HitResult) {
+        if (level().isClientSide || isRemoved) return
+        onImpact(result.location)
+        discard()
+    }
+
+    override fun tick() { super.tick(); if (tickCount > 200) discard() }
+}
+
+/** One of his wither skulls (power 0.1); bursts harmlessly. */
+internal class StormSkull(level: Level) : WitherSkull(EntityTypes.WITHER_SKULL, level) {
+    override fun onHit(result: HitResult) {
+        if (level().isClientSide || isRemoved) return
+        StormFx.burst(result.location)
+        discard()
+    }
+
+    override fun tick() { super.tick(); if (tickCount > 200) discard() }
+}
