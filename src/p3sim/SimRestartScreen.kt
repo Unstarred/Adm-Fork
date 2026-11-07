@@ -428,7 +428,8 @@ class SimRestartScreen : Screen(Component.literal(P3Sim.FULL_NAME)) {
         private fun luck() = Math.round(value * 40).toInt() * 5 - 100
         override fun updateMessage() { message = Component.literal("$name: ${if (luck() < 0) "§c" else ""}${luck()}%") }
         // Saved with the rest when the menu closes ([removed]): applyValue runs on every step of a drag.
-        override fun applyValue() { @Suppress("UNCHECKED_CAST") (s as NumberSetting<Int>).value = luck() }
+        @Suppress("UNCHECKED_CAST")
+        override fun applyValue() { (s as NumberSetting<Int>).value = luck() }
     }
 
     /** Practice's start timer, 0 to 5 s in tenths. */
