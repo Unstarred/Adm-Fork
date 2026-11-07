@@ -1,4 +1,4 @@
-package com.engineerclient.mixin;
+package com.engineerclient.mixin.odin;
 
 import com.engineerclient.practice.InfNumbersSim;
 import com.odtheking.odin.utils.skyblock.dungeon.terminals.terminalhandler.TerminalHandler;

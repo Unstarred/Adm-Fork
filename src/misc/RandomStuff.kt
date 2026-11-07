@@ -58,7 +58,7 @@ object RandomStuff : Module(
      * With it on the numbers terminal ("Click in order!") is drawn without its 1-10, so the only
      * thing to go on is the solver's three order colours - you click the colour, not the number.
      *
-     * Two places draw those numbers, so two read this: [com.engineerclient.mixin.NumbersHandlerMixin]
+     * Two places draw those numbers, so two read this: [com.engineerclient.mixin.odin.NumbersHandlerMixin]
      * for the text Odin itself draws (every render type, and the practice sim), and
      * [com.engineerclient.mixin.TerminalNumberMixin] for the vanilla stack count, which the Normal
      * render type still shows on the slots Odin hands back to vanilla.
