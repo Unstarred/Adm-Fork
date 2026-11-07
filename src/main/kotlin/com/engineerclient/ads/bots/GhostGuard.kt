@@ -1,0 +1,48 @@
+package com.engineerclient.ads.bots
+
+import com.engineerclient.EngineerClient
+import net.minecraft.client.Minecraft
+import net.minecraft.core.BlockPos
+import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket
+import net.minecraft.world.level.block.state.BlockState
+import com.engineerclient.ads.P3Sim
+import com.engineerclient.ads.core.SimServer
+import com.engineerclient.ads.fight.Fight
+import com.engineerclient.ads.plan.Practice
+
+object GhostGuard {
+    private val mc get() = Minecraft.getInstance()
+    private const val EVERY = 15
+    private const val R = 5
+    private var ticks = 0
+
+    private var suspects: Map<BlockPos, BlockState>? = null
+
+    fun clientTick() {
+        if (!P3Sim.inSim || SimServer.level == null) return
+        if (++ticks % EVERY != 0) return
+        val p = mc.player ?: return
+        val level = mc.level ?: return
+        val c = p.blockPosition()
+        val snap = HashMap<BlockPos, BlockState>(1200)
+        for (y in -3..4) for (z in -R..R) for (x in -R..R) {
+            val pos = c.offset(x, y, z)
+            snap[pos] = level.getBlockState(pos)
+        }
+        SimServer.run("ghost check") { compare(snap) }
+    }
+
+    private fun compare(snap: Map<BlockPos, BlockState>) {
+        val level = SimServer.level ?: return
+        val player = SimServer.player ?: return
+        val diff = snap.filter { (pos, s) -> level.getBlockState(pos).block !== s.block }
+        val last = suspects.orEmpty()
+        val ghosts = diff.filter { (pos, s) -> last[pos] == s }
+        suspects = diff - ghosts.keys
+        if (ghosts.isEmpty()) return
+        ghosts.keys.forEach { player.connection.send(ClientboundBlockUpdatePacket(level, it)) }
+        EngineerClient.logger.info("[p3sim] ghost blocks fixed ({}): {}", ghosts.size,
+            ghosts.entries.take(8).joinToString("; ") { (pos, s) -> "${pos.x},${pos.y},${pos.z} game ${s.block.descriptionId.substringAfterLast('.')} server ${level.getBlockState(pos).block.descriptionId.substringAfterLast('.')}" } +
+                " | phase ${Fight.phase?.javaClass?.simpleName} practice ${Practice.active} n ${Fight.serverTick}")
+    }
+}

@@ -1,0 +1,53 @@
+package com.engineerclient.features.mapprediction
+
+object GameStats {
+    val MIXES = arrayOf(
+        intArrayOf(1, 2, 1, 1, 2, 496),
+        intArrayOf(2, 1, 1, 2, 1, 375),
+        intArrayOf(1, 2, 0, 2, 2, 366),
+        intArrayOf(2, 1, 2, 1, 1, 299),
+        intArrayOf(1, 2, 2, 0, 2, 212),
+        intArrayOf(2, 2, 1, 2, 0, 135),
+        intArrayOf(2, 0, 2, 1, 2, 115),
+        intArrayOf(2, 0, 1, 2, 2, 114),
+        intArrayOf(1, 2, 1, 2, 1, 71),
+        intArrayOf(2, 2, 2, 1, 0, 63),
+        intArrayOf(1, 1, 2, 1, 2, 57),
+        intArrayOf(1, 1, 1, 2, 2, 49),
+        intArrayOf(1, 2, 2, 1, 1, 42),
+        intArrayOf(2, 1, 2, 2, 0, 25),
+        intArrayOf(2, 0, 2, 2, 1, 23),
+        intArrayOf(0, 1, 2, 2, 1, 14),
+        intArrayOf(1, 1, 2, 2, 1, 10),
+        intArrayOf(0, 0, 2, 2, 2, 7),
+        intArrayOf(0, 2, 1, 2, 2, 5),
+        intArrayOf(0, 2, 2, 2, 0, 4),
+        intArrayOf(0, 2, 2, 1, 2, 3),
+        intArrayOf(1, 2, 2, 2, 0, 1),
+    )
+
+    val MIX_RATE = doubleArrayOf(
+        0.000146641,
+        0.000183419,
+        0.000168415,
+        0.000169566,
+        0.000142038,
+        0.000217853,
+        0.000134868,
+        0.000171964,
+        0.0000880279,
+        0.000201344,
+        0.0000642913,
+        0.0000680194,
+        0.0000720673,
+        0.0000896165,
+        0.0000747073,
+        0.000270991,
+        0.0000309437,
+        0.000240711,
+        0.0000265031,
+        0.000294645,
+        0.0000245930,
+        0.0000390623,
+    )
+}

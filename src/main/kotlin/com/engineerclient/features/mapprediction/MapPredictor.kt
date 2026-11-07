@@ -1,0 +1,938 @@
+package com.engineerclient.features.mapprediction
+
+import kotlin.math.abs
+import kotlin.math.exp
+import kotlin.math.ln
+import kotlin.math.roundToInt
+import kotlin.random.Random
+
+enum class Kind { NORMAL, ENTRANCE, PUZZLE, TRAP, YELLOW, BLOOD, FAIRY, RARE }
+
+enum class Shape(val size: Int) { TWO(2), THREE(3), FOUR(4), BOX(4), L(3), ONE(1) }
+
+object Cls {
+    const val BIG = 0
+    const val NORMAL = 1
+    const val PUZZLE = 2
+    const val TRAP = 3
+    const val YELLOW = 4
+    const val BLOOD = 5
+    const val FAIRY = 6
+    const val RARE = 7
+    const val COUNT = 8
+}
+
+object Edge {
+    const val UNKNOWN: Byte = 0
+    const val NONE: Byte = 1
+    const val DOOR: Byte = 2
+    const val WITHER: Byte = 3
+    const val BLOOD: Byte = 4
+    const val SAME: Byte = 5
+    fun isDoor(k: Byte) = k == DOOR || k == WITHER || k == BLOOD
+}
+
+class MapView(val w: Int, val h: Int, val puzzles: Int, val rules: FloorRules = FloorRules.F7) {
+    val roomAt = IntArray(w * h) { -1 }
+    val kinds = ArrayList<Kind>()
+    val shapes = ArrayList<Shape>()
+    val roomTiles = ArrayList<IntArray>()
+    val names = ArrayList<String?>()
+    var secretTotals = IntArray(0)
+    var puzzleSlots: List<String?> = emptyList()
+    private val edges = ByteArray(w * h * 2)
+
+    fun addRoom(kind: Kind, tiles: IntArray, name: String? = null): Int? {
+        val shape = shapeOf(tiles, w) ?: return null
+        if (tiles.any { it !in 0 until w * h || roomAt[it] >= 0 }) return null
+        val id = kinds.size
+        kinds += kind; shapes += shape; roomTiles += tiles.copyOf(); names += name
+        for (t in tiles) roomAt[t] = id
+        return id
+    }
+
+    private fun edgeId(a: Int, b: Int): Int = when (b - a) {
+        1 -> a * 2
+        w -> a * 2 + 1
+        -1 -> b * 2
+        else -> b * 2 + 1
+    }
+
+    fun edge(a: Int, b: Int): Byte = edges[edgeId(a, b)]
+    fun setEdge(a: Int, b: Int, k: Byte) { edges[edgeId(a, b)] = k }
+
+    fun closeEdges(doorAt: (Int, Int) -> Byte?) {
+        for (t in 0 until w * h) for (n in intArrayOf(if (t % w + 1 < w) t + 1 else -1, if (t / w + 1 < h) t + w else -1)) {
+            if (n < 0) continue
+            val a = roomAt[t]; val b = roomAt[n]
+            setEdge(t, n, when {
+                a < 0 && b < 0 -> Edge.UNKNOWN
+                a == b -> Edge.SAME
+                else -> doorAt(t, n) ?: Edge.NONE
+            })
+        }
+    }
+
+    fun connectedPart(): MapView {
+        val ent = kinds.indexOf(Kind.ENTRANCE); if (ent < 0) return this
+        val seen = BooleanArray(kinds.size); seen[ent] = true
+        val queue = ArrayDeque(listOf(ent))
+        while (queue.isNotEmpty()) {
+            val i = queue.removeFirst()
+            for (t in roomTiles[i]) for (nb in neighbours(t)) {
+                val o = roomAt[nb]
+                if (o < 0 || seen[o] || !Edge.isDoor(edge(t, nb))) continue
+                seen[o] = true; queue.addLast(o)
+            }
+        }
+        if (seen.all { it }) return this
+        val out = MapView(w, h, puzzles, rules)
+        for (i in kinds.indices) if (seen[i]) out.addRoom(kinds[i], roomTiles[i], names[i])
+        out.secretTotals = secretTotals; out.puzzleSlots = puzzleSlots
+        out.closeEdges { a, b -> edge(a, b).takeIf { Edge.isDoor(it) } }
+        return out
+    }
+
+    internal fun neighbours(t: Int): IntArray {
+        val x = t % w; val z = t / w; val o = ArrayList<Int>(4)
+        if (x + 1 < w) o += t + 1; if (x > 0) o += t - 1; if (z + 1 < h) o += t + w; if (z > 0) o += t - w
+        return o.toIntArray()
+    }
+
+    fun key(): String = buildString {
+        append(w).append('x').append(h).append(':').append(rules.floor).append(':').append(puzzles).append(':')
+        for (i in kinds.indices) append(kinds[i].ordinal).append(roomTiles[i].joinToString(",")).append(names[i] ?: "").append(';')
+        append(secretTotals.joinToString(",")).append(':')
+        append(puzzleSlots.joinToString(",") { it ?: "?" }).append(':')
+        append(edges.joinToString(""))
+    }
+
+    fun structureKey(): String = buildString {
+        append(w).append('x').append(h).append(':').append(rules.floor).append(':')
+        for (i in kinds.indices.sortedBy { roomTiles[it].min() }) {
+            append(if (kinds[i] == Kind.ENTRANCE) 'E' else 'r').append(roomTiles[i].sorted().joinToString(",")).append(';')
+        }
+        append(':').append(edges.joinToString(""))
+    }
+
+    fun refines(older: MapView): Boolean {
+        if (w != older.w || h != older.h || puzzles != older.puzzles || rules.floor != older.rules.floor) return false
+        for (i in older.kinds.indices) {
+            val tiles = older.roomTiles[i]
+            val j = roomAt[tiles[0]]
+            if (j < 0 || roomTiles[j].size != tiles.size || !sameKind(j, older.kinds[i])) return false
+            for (t in tiles) if (roomAt[t] != j) return false
+            val name = older.names[i]
+            if (name != null && names[j] != name) return false
+        }
+        for (k in edges.indices) { val o = older.edges[k]; if (o != Edge.UNKNOWN && edges[k] != o) return false }
+        if (older.puzzleSlots.isNotEmpty()) {
+            if (puzzleSlots.size != older.puzzleSlots.size) return false
+            for (i in older.puzzleSlots.indices) if (older.puzzleSlots[i] != null && puzzleSlots[i] != older.puzzleSlots[i]) return false
+        }
+        return true
+    }
+
+    private fun sameKind(j: Int, old: Kind): Boolean {
+        val k = kinds[j]
+        if (k == old) return true
+        if (k != Kind.NORMAL && k != Kind.RARE || old != Kind.NORMAL && old != Kind.RARE) return false
+        val ts = roomTiles[j]
+        return ts.size == 1 && neighbours(ts[0]).count { Edge.isDoor(edge(ts[0], it)) } == 1
+    }
+
+    companion object {
+        fun shapeOf(tiles: IntArray, w: Int): Shape? {
+            if (tiles.isEmpty()) return null
+            val xs = tiles.map { it % w }; val zs = tiles.map { it / w }
+            val bw = xs.max() - xs.min() + 1; val bh = zs.max() - zs.min() + 1
+            if (tiles.toSet().size != tiles.size) return null
+            return when (tiles.size) {
+                1 -> Shape.ONE
+                2 -> if (bw * bh == 2) Shape.TWO else null
+                3 -> if (bw == 2 && bh == 2) Shape.L else if (bw * bh == 3) Shape.THREE else null
+                4 -> if (bw == 2 && bh == 2) Shape.BOX else if (bw * bh == 4) Shape.FOUR else null
+                else -> null
+            }
+        }
+    }
+}
+
+class Split(val tile: Int, val door: Byte, val rooms: Float, val tiles: Float, val expect: FloatArray, val secrets: Float = 0f)
+
+class BigRoom(val tiles: IntArray, val chance: Float)
+
+class PredictedDoor(val a: Int, val b: Int, val chance: Float, val wither: Float, val blood: Float, val fairy: Float)
+
+class NamedRoom(val tiles: IntArray, val name: RoomName, val chance: Float)
+
+class Prediction(val w: Int, val h: Int, val probs: Array<FloatArray?>, val splits: List<Split>, val samples: Int, val level: Int,
+                 val bigRooms: List<BigRoom> = emptyList(), val namedRooms: List<NamedRoom> = emptyList(),
+                 val doors: List<PredictedDoor> = emptyList(),
+                 val raw: Array<FloatArray?> = probs)
+
+internal class Tally(cells: Int, entries: Int) {
+    val counts = Array(cells) { DoubleArray(Cls.COUNT) }
+    val splitRooms = DoubleArray(entries)
+    val splitTiles = DoubleArray(entries)
+    val splitCls = Array(entries) { DoubleArray(Cls.COUNT) }
+    val splitSecrets = DoubleArray(entries)
+    val bigCounts = HashMap<Long, Double>()
+    val nameCounts = HashMap<Long, Double>()
+    val doorCounts = HashMap<Int, DoubleArray>()
+    var weight = 0.0
+
+    fun addScaled(o: Tally, k: Double) {
+        for (i in counts.indices) { val a = counts[i]; val b = o.counts[i]; for (c in a.indices) a[c] += k * b[c] }
+        for (i in splitRooms.indices) {
+            splitRooms[i] += k * o.splitRooms[i]; splitTiles[i] += k * o.splitTiles[i]; splitSecrets[i] += k * o.splitSecrets[i]
+            val a = splitCls[i]; val b = o.splitCls[i]; for (c in a.indices) a[c] += k * b[c]
+        }
+        for ((key, v) in o.bigCounts) bigCounts.merge(key, k * v, Double::plus)
+        for ((key, v) in o.nameCounts) nameCounts.merge(key, k * v, Double::plus)
+        for ((key, v) in o.doorCounts) { val a = doorCounts.getOrPut(key) { DoubleArray(4) }; for (c in 0 until 4) a[c] += k * v[c] }
+        weight += k * o.weight
+    }
+
+    fun prediction(w: Int, h: Int, cells: IntArray, entries: IntArray, entryDoor: ByteArray, samples: Int, level: Int,
+                   calibrate: ((FloatArray) -> FloatArray)?): Prediction? {
+        if (samples == 0 || weight <= 0) return null
+        val n = w * h
+        val raw = arrayOfNulls<FloatArray>(n)
+        cells.forEachIndexed { i, t ->
+            val c = counts[i]
+            if (c.sum() > 0) raw[t] = FloatArray(Cls.COUNT) { (c[it] / weight).toFloat() }
+        }
+        val probs = if (calibrate == null) raw else Array(n) { raw[it]?.let(calibrate) }
+        val splits = entries.mapIndexed { i, t ->
+            Split(t, entryDoor[t], (splitRooms[i] / weight).toFloat(), (splitTiles[i] / weight).toFloat(), FloatArray(Cls.COUNT) { (splitCls[i][it] / weight).toFloat() },
+                (splitSecrets[i] / weight).toFloat())
+        }
+        val big = bigCounts.entries.filter { it.value / weight >= 0.05 }.sortedByDescending { it.value }
+            .map { (m, v) -> BigRoom((0 until n).filter { (m shr it) and 1L == 1L }.toIntArray(), (v / weight).toFloat()) }
+        val named = nameCounts.entries.filter { it.value / weight >= 0.001 }.sortedByDescending { it.value }.map { (key, v) ->
+            NamedRoom((0 until n).filter { ((key / 256) shr it) and 1L == 1L }.toIntArray(), MapStats.NAMES[(key % 256).toInt()], (v / weight).toFloat())
+        }
+        val doors = doorCounts.entries.filter { it.value[0] / weight >= 0.05 }.sortedByDescending { it.value[0] }.map { (key, d) ->
+            PredictedDoor(key / n, key % n, (d[0] / weight).toFloat(), (d[1] / weight).toFloat(), (d[2] / weight).toFloat(), (d[3] / weight).toFloat())
+        }
+        return Prediction(w, h, probs, splits, samples, level, big, named, doors, raw)
+    }
+}
+
+class MapPredictor(private val view: MapView, gameProcess: Boolean = true) {
+    private val w = view.w
+    private val h = view.h
+    private val n = w * h
+    private val rules = view.rules
+    private val unknown: IntArray
+    private val column: IntArray
+    private val open: IntArray
+    private val cells: IntArray
+    private val isUnk = BooleanArray(n)
+    private val tileIdx = IntArray(n) { -1 }
+    private val entryDoor = ByteArray(n)
+    private val entries: IntArray
+    private val entryIndex = IntArray(n) { -1 }
+    private var bad = false
+
+    private val found = IntArray(Cls.COUNT)
+    private val knownBig = IntArray(5)
+    private var entTile = -1
+    private var head = -1
+    private var headDist = -1
+    private var fairyDist = -1
+    private val remP: Int
+    private val needDead: Int
+    private val topUp: Boolean
+    private val combos: List<IntArray>
+    private val pinKeys: IntArray
+    private val pinBefore: IntArray
+    private val frame = IntArray(n) { it }
+
+    private val tally: Tally
+    private var secrets: SecretNames? = null
+    private var secretsOn = false
+    private val unnamedKnown = ArrayList<Int>()
+    private val poolSecrets = MapStats.meanSecrets(view.names.filterNotNull().toSet() + rules.missingNames)
+    private var classicAccepted = 0
+    private var classicLevel = 0
+    private var levelTries = 0L
+    private var wgt = 0.0
+    private var gameSampler: GameSampler? = null
+
+    val usesGameProcess: Boolean get() = gameSampler != null
+    internal val game: GameSampler? get() = gameSampler
+    internal var gameError: Exception? = null
+        private set
+
+    private fun dropGame(e: Exception) { gameError = e; gameSampler = null }
+
+    private var makeGame: (() -> GameSampler)? = null
+    internal fun newGameLane(): GameSampler? = makeGame?.invoke()
+    internal val secretsActive: Boolean get() = secretsOn
+    internal val pinCount: Int get() = pinKeys.size
+
+    val accepted: Int get() = gameSampler?.accepted ?: classicAccepted
+    val level: Int get() = if (gameSampler != null) 0 else classicLevel
+
+    init {
+        val unk = ArrayList<Int>(); val col = ArrayList<Int>(); val opn = ArrayList<Int>(); val all = ArrayList<Int>()
+        for (t in 0 until n) {
+            val x = t % w; val z = t / w
+            if (view.roomAt[t] >= 0 || z >= rules.h) continue
+            if (x < rules.w) { unk += t; all += t }
+            else if (rules.puzzleColumn && x == rules.w) when {
+                view.roomAt[t - 1] < 0 -> { opn += t; all += t }
+                Edge.isDoor(view.edge(t - 1, t)) -> { col += t; all += t }
+            }
+        }
+        unknown = unk.toIntArray(); column = col.toIntArray(); open = opn.toIntArray(); cells = all.toIntArray()
+        for (t in unknown) isUnk[t] = true
+        cells.forEachIndexed { i, t -> tileIdx[t] = i }
+        val ents = ArrayList<Int>()
+        for (t in unknown + column) for (nb in neighbours(t)) {
+            if (view.roomAt[nb] < 0) continue
+            val k = view.edge(t, nb)
+            if (!Edge.isDoor(k)) continue
+            if (entryDoor[t] != 0.toByte()) bad = true
+            entryDoor[t] = k
+            if (t !in ents) ents += t
+        }
+        entries = ents.toIntArray()
+        entries.forEachIndexed { i, t -> entryIndex[t] = i }
+        if (entries.isEmpty() && unknown.isNotEmpty()) bad = true
+
+        countFound()
+        remP = maxOf(0, view.puzzles - found[Cls.PUZZLE])
+        needDead = remP + (if (!rules.trap || found[Cls.TRAP] > 0) 0 else 1) + (if (found[Cls.YELLOW] > 0) 0 else 1) + (if (found[Cls.BLOOD] > 0) 0 else 1)
+        topUp = rules.puzzleColumn && view.puzzles + (if (rules.trap) 1 else 0) + 1 <= rules.deadEndTarget
+        combos = rules.combos.filter { c -> (0 until 5).all { c[it] >= knownBig[it] } }
+        val pins = pinPuzzles()
+        pinKeys = IntArray(pins.size) { pins[it][0] }; pinBefore = IntArray(pins.size) { pins[it][1] }
+        setUpSecrets()
+        turnFrame()
+        tally = Tally(cells.size, entries.size)
+        if (gameProcess && !bad && cells.isNotEmpty()) {
+            try {
+                val sn = secrets; val on = secretsOn; val unnamed = unnamedKnown.toIntArray()
+                val make = { GameSampler(view, cells, tileIdx, entries, entryIndex, entryDoor, pinKeys, pinBefore, sn, on, unnamed, poolSecrets) }
+                val g = make()
+                if (g.possible) { gameSampler = g; makeGame = make }
+            } catch (e: Exception) { gameError = e }
+        }
+    }
+
+    private fun countFound() {
+        var entId = -1
+        for (i in view.kinds.indices) {
+            val c = clsOf(view.kinds[i], view.shapes[i])
+            found[c]++
+            if (view.shapes[i] != Shape.ONE) knownBig[view.shapes[i].ordinal]++
+            if (view.kinds[i] == Kind.ENTRANCE) { entId = i; entTile = view.roomTiles[i][0] }
+        }
+        if (entId >= 0) walkKnownPath(entId)
+    }
+
+    private fun turnFrame() {
+        if (rules.bigTile != null && w == 6 && h == 6 && entTile >= 0) {
+            val ex = entTile % w; val ez = entTile / w
+            val f = SYM.firstOrNull { s -> val (x, z) = s(ex, ez); z == 0 && x <= 2 } ?: SYM[0]
+            for (t in 0 until n) { val (x, z) = f(t % w, t / w); frame[t] = z * w + x }
+        }
+    }
+
+    private fun setUpSecrets() {
+        if (view.secretTotals.isEmpty() || n > 64) return
+        val byName = MapStats.NAMES.associateBy { it.name }
+        val used = HashSet<String>(); var known = 0
+        for (i in view.kinds.indices) {
+            val name = view.names[i] ?: fixedName(view.kinds[i])
+            if (name != null) {
+                val rn = byName[name] ?: return
+                if (!used.add(name)) return
+                known += rn.secrets
+            } else unnamedKnown += poolOfKnown(i)
+        }
+        val targets = view.secretTotals.map { it - known }.filter { it >= 0 }.toIntArray()
+        if (targets.isEmpty()) return
+        secrets = SecretNames(used, targets, rules.missingNames); secretsOn = true
+    }
+
+    private fun pinPuzzles(): List<IntArray> {
+        val slots = view.puzzleSlots
+        if (!rules.puzzleOrder || slots.size != view.puzzles) return emptyList()
+        val puzzles = view.kinds.indices.filter { view.kinds[it] == Kind.PUZZLE }
+        val keys = puzzles.map { orderKey(view.roomTiles[it][0]) }
+        val pins = ArrayList<IntArray>()
+        slots.forEachIndexed { rank, name ->
+            if (name == null) return@forEachIndexed
+            val i = puzzles.indexOfFirst { isTabPuzzle(view.names[it], name) }
+            if (i < 0) return@forEachIndexed
+            pins += intArrayOf(keys[i], rank - keys.count { it < keys[i] })
+        }
+        pins.sortBy { it[0] }
+        for (j in pins.indices) if (pins[j][1] !in 0..remP || j > 0 && pins[j][1] < pins[j - 1][1]) return emptyList()
+        return pins
+    }
+
+    fun certainNames(p: Prediction?): List<NamedRoom>? {
+        val sn = secrets ?: return null
+        if (bad || n > 64) return null
+        val rooms = ArrayList<IntArray>(); val pools = ArrayList<Int>()
+        val open = ArrayList<Int>(); val openChances = ArrayList<FloatArray>()
+        for (i in view.kinds.indices) if (view.names[i] == null && fixedName(view.kinds[i]) == null) { rooms += view.roomTiles[i]; pools += poolOfKnown(i) }
+        if (cells.isNotEmpty()) {
+            val raw = (p ?: return null).raw
+            val big = HashMap<Int, IntArray>()
+            for (b in p.bigRooms) if (b.chance >= CERTAIN) for (t in b.tiles) big[t] = b.tiles
+            val taken = HashSet<Int>()
+            for (t in cells) {
+                val q = raw[t] ?: continue
+                val room = q.sum()
+                if (room <= 1 - CERTAIN) continue
+                if (room < CERTAIN) return null
+                if (q[Cls.BIG] >= CERTAIN) {
+                    val b = big[t] ?: return null
+                    if (taken.add(b.min())) { rooms += b; pools += (MapView.shapeOf(b, w) ?: return null).ordinal }
+                    continue
+                }
+                val c = (0 until Cls.COUNT).maxBy { q[it] }
+                if (c != Cls.BIG && q[c] >= CERTAIN) { rooms += intArrayOf(t); pools += poolOfCls(c, Shape.ONE); continue }
+                if (DEAD_ENDS.sumOf { q[it].toDouble() } < CERTAIN) return null
+                open += rooms.size; openChances += FloatArray(Cls.COUNT) { if (it in DEAD_ENDS) q[it] / room else 0f }
+                rooms += intArrayOf(t); pools += -1
+            }
+        }
+        if (rooms.isEmpty()) return null
+        return typedNames(sn, rooms, pools, open, openChances)
+    }
+
+    private fun typedNames(sn: SecretNames, rooms: ArrayList<IntArray>, pools: ArrayList<Int>, open: ArrayList<Int>, openChances: ArrayList<FloatArray>): List<NamedRoom>? {
+        val want = IntArray(Cls.COUNT) { c -> openChances.sumOf { it[c].toDouble() }.roundToInt() }
+        val options = openChances.map { ch -> DEAD_ENDS.filter { ch[it] >= 0.001f } }
+        if (options.fold(1.0) { a, o -> a * o.size } > MAX_TYPINGS) return null
+        val chance = HashMap<Long, Double>()
+        var total = 0.0
+        val pick = IntArray(open.size)
+        val counts = IntArray(Cls.COUNT)
+        fun typing(j: Int, prior: Double) {
+            if (j == open.size) {
+                if ((0 until Cls.COUNT).any { counts[it] != want[it] }) return
+                val ps = pools.toIntArray()
+                for ((k, r) in open.withIndex()) ps[r] = poolOfCls(pick[k], Shape.ONE)
+                val res = sn.solve(ps) ?: return
+                val wgt = prior * res.likelihood
+                if (!(wgt > 0)) return
+                total += wgt
+                for (r in rooms.indices) res.byPool[ps[r]]?.forEachIndexed { k, share ->
+                    if (share > 0) chance.merge(r * 256L + MapStats.NAMES.indexOf(sn.avail[ps[r]][k]), wgt * share, Double::plus)
+                }
+                return
+            }
+            for (c in options[j]) {
+                pick[j] = c; counts[c]++
+                typing(j + 1, prior * openChances[j][c])
+                counts[c]--
+            }
+        }
+        typing(0, 1.0)
+        if (!(total > 0)) return null
+        val out = ArrayList<NamedRoom>()
+        for ((key, wgt) in chance) {
+            val share = wgt / total
+            if (share >= 0.001) out += NamedRoom(rooms[(key / 256).toInt()], MapStats.NAMES[(key % 256).toInt()], share.toFloat())
+        }
+        return out
+    }
+
+    private fun orderKey(t: Int): Int = (t % w) * h + t / w
+
+    private fun fixedName(k: Kind): String? = when (k) { Kind.ENTRANCE -> "Entrance"; Kind.BLOOD -> "Blood"; Kind.FAIRY -> "Fairy"; else -> null }
+
+    private fun poolOfKnown(i: Int): Int = poolOfKnown(view, i)
+
+    private fun neighbours(t: Int): IntArray {
+        val x = t % w; val z = t / w
+        val out = IntArray(4); var k = 0
+        if (x + 1 < w) out[k++] = t + 1
+        if (x > 0) out[k++] = t - 1
+        if (z + 1 < h) out[k++] = t + w
+        if (z > 0) out[k++] = t - w
+        return out.copyOf(k)
+    }
+
+    private fun inRoom(tiles: IntArray, s: Int, t: Int): Int {
+        if (s == t) return 0
+        val dist = IntArray(tiles.size) { -1 }
+        val si = tiles.indexOf(s); if (si < 0) return 99
+        dist[si] = 0
+        val q = IntArray(tiles.size); var qh = 0; var qt = 0; q[qt++] = si
+        while (qh < qt) {
+            val u = q[qh++]
+            for (j in tiles.indices) if (dist[j] < 0 && isAdjacent(tiles[u], tiles[j])) {
+                dist[j] = dist[u] + 1
+                if (tiles[j] == t) return dist[j]
+                q[qt++] = j
+            }
+        }
+        return 99
+    }
+
+    private fun isAdjacent(a: Int, b: Int): Boolean {
+        val d = abs(a - b)
+        return (d == 1 && a / w == b / w) || d == w
+    }
+
+    private fun walkKnownPath(entId: Int) {
+        var cur = entId; var at = entTile; var dist = 0
+        val onPath = hashSetOf(entId)
+        for (step in 0 until 40) {
+            if (view.kinds[cur] == Kind.FAIRY) fairyDist = dist
+            var next: IntArray? = null
+            loop@ for (q in view.roomTiles[cur]) for (nb in neighbours(q)) {
+                val o = view.roomAt[nb]
+                if (o == cur) continue
+                val k = view.edge(q, nb)
+                if (!Edge.isDoor(k)) continue
+                if (step > 0 && k != Edge.WITHER && k != Edge.BLOOD) continue
+                if (o >= 0 && o in onPath) continue
+                next = intArrayOf(o, q, nb); break@loop
+            }
+            val d = next ?: break
+            val nd = dist + inRoom(view.roomTiles[cur], at, d[1]) + 1
+            if (d[0] < 0) { head = d[2]; headDist = nd; break }
+            onPath += d[0]; cur = d[0]; at = d[2]; dist = nd
+        }
+    }
+
+    fun run(samples: Int, maxTries: Int, rnd: Random): Int {
+        if (bad || cells.isEmpty()) { classicLevel = 3; return 0 }
+        gameSampler?.let { g ->
+            val kept = try { g.run(samples, maxTries, rnd) } catch (e: Exception) { dropGame(e); return 0 }
+            if (g.failed) { gameSampler = null; return 0 }
+            return kept
+        }
+        var kept = 0; var tries = 0
+        while (kept < samples && tries < maxTries && classicLevel <= 2) {
+            tries++; levelTries++
+            if (tryOne(rnd)) { kept++; classicAccepted++ }
+            else if (classicAccepted == 0 && levelTries >= LEVEL_TRIES) { if (secretsOn) secretsOn = false else classicLevel++; levelTries = 0 }
+        }
+        return kept
+    }
+
+    private fun clsOf(k: Kind, s: Shape): Int = when (k) {
+        Kind.NORMAL, Kind.ENTRANCE -> if (s == Shape.ONE) Cls.NORMAL else Cls.BIG
+        Kind.PUZZLE -> Cls.PUZZLE
+        Kind.TRAP -> Cls.TRAP
+        Kind.YELLOW -> Cls.YELLOW
+        Kind.BLOOD -> Cls.BLOOD
+        Kind.FAIRY -> Cls.FAIRY
+        Kind.RARE -> Cls.RARE
+    }
+
+    private fun pick(weights: DoubleArray, count: Int, rnd: Random): Int {
+        var total = 0.0; for (i in 0 until count) total += weights[i]
+        var s = rnd.nextDouble() * total
+        for (i in 0 until count) { if (s < weights[i]) return i; s -= weights[i] }
+        return count - 1
+    }
+
+    private fun tryOne(rnd: Random): Boolean {
+        val todo = bigRoomsToCome(rnd)
+        val owner = IntArray(n) { -1 }
+        val rooms = ArrayList<IntArray>(); val roomShape = ArrayList<Shape>()
+        if (!placeBigRooms(todo, owner, rooms, roomShape, rnd)) return false
+        for (t in unknown) if (owner[t] < 0) { owner[t] = rooms.size; rooms += intArrayOf(t); roomShape += Shape.ONE }
+        val layoutW = bunchWeight(owner, roomShape)
+        val firstColumn = rooms.size
+        for (t in column) { owner[t] = rooms.size; rooms += intArrayOf(t); roomShape += Shape.ONE }
+        val r = rooms.size
+
+        val nbs = Array(r) { ArrayList<Int>() }
+        val slots = Array(r) { ArrayList<ArrayList<Int>>() }
+        doorSlots(owner, nbs, slots)
+
+        val rm = r + open.size
+        val parent = IntArray(rm) { -2 }; val inTile = IntArray(rm); val outTile = IntArray(rm); val root = IntArray(rm) { -1 }
+        val order = ArrayList<Int>(r)
+        if (!growDoorTree(r, owner, nbs, slots, parent, inTile, outTile, root, order, rnd)) return false
+        val deg = IntArray(rm)
+        for (i in 0 until r) { deg[i]++; if (parent[i] >= 0) deg[parent[i]]++ }
+        val dead = (0 until r).filter { roomShape[it] == Shape.ONE && deg[it] == 1 }.toMutableList()
+        val canTopUp = topUp || level > 0 && rules.puzzleColumn
+        var short = needDead - dead.size
+        if (level < 2) {
+            if (short < 0) {
+                if (!(view.puzzles == 5 && short >= -2 && rnd.nextDouble() < MapStats.RARE_RATE)) return false
+                short = 0
+            }
+            if (!canTopUp && (short > 0 || column.isNotEmpty())) return false
+        } else short = if (canTopUp) maxOf(0, short) else 0
+
+        val type = IntArray(rm) { -1 }
+        wgt = layoutW
+        if (!placeBlood(owner, rooms, roomShape, r, order, parent, inTile, outTile, root, deg, dead, firstColumn, type, rnd)) return false
+
+        val columnRooms = dead.filter { it >= firstColumn }.toMutableList()
+        if (!addColumnRooms(owner, rooms, roomShape, parent, inTile, outTile, root, deg, short, type, columnRooms, rnd)) return false
+        val all = rooms.size
+
+        if (!typeDeadEnds(rooms, dead, firstColumn, type, columnRooms, rnd)) return false
+
+        val cls = IntArray(all) { if (type[it] >= 0) type[it] else if (roomShape[it] == Shape.ONE) Cls.NORMAL else Cls.BIG }
+        var names: SecretNames.Result? = null
+        val sn = secrets
+        if (secretsOn && sn != null && unnamedKnown.size + all <= SecretNames.MAX_ROOMS) {
+            val pools = IntArray(unnamedKnown.size + all) { if (it < unnamedKnown.size) unnamedKnown[it] else poolOfCls(cls[it - unnamedKnown.size], roomShape[it - unnamedKnown.size]) }
+            names = sn.solve(pools)
+            if (names != null) {
+                if (names.likelihood <= 0.0) return false
+                wgt *= names.likelihood
+            }
+        }
+
+        addToTally(all, type, cls, names, sn, rooms, roomShape, parent, inTile, outTile, root)
+        return true
+    }
+
+    private fun bigRoomsToCome(rnd: Random): ArrayList<Shape> {
+        val todo = ArrayList<Shape>()
+        if (level < 2 && combos.isNotEmpty()) {
+            val cw = DoubleArray(combos.size) { combos[it][5].toDouble() }
+            val c = combos[pick(cw, combos.size, rnd)]
+            for (i in 0 until 5) repeat(c[i] - knownBig[i]) { todo += Shape.entries[i] }
+        } else {
+            val pool = ArrayList<Shape>(); for (i in 0 until 5) repeat(maxOf(0, 2 - knownBig[i])) { pool += Shape.entries[i] }
+            pool.shuffle(rnd)
+            repeat(minOf(pool.size, maxOf(0, rules.maxBig - knownBig.sum()))) { todo += pool[it] }
+        }
+        todo.shuffle(rnd); todo.sortByDescending { it.size }
+        return todo
+    }
+
+    private fun placeBigRooms(todo: List<Shape>, owner: IntArray, rooms: ArrayList<IntArray>, roomShape: ArrayList<Shape>, rnd: Random): Boolean {
+        if (rules.reserve > 0) {
+            val k = minOf(unknown.size, Math.round(rules.reserve * unknown.size / (rules.w * rules.h - 1.0)).toInt())
+            val cs = unknown.copyOf()
+            for (i in 0 until k) { val j = i + rnd.nextInt(cs.size - i); val tmp = cs[i]; cs[i] = cs[j]; cs[j] = tmp; owner[cs[i]] = HELD }
+        }
+        val candTiles = ArrayList<IntArray>(); var cw = DoubleArray(64)
+        for (shape in todo) {
+            candTiles.clear()
+            val anchorW = if (w == 6 && h == 6) rules.anchorWeights?.get(shape.ordinal) else null
+            for (oi in PLACEMENTS[shape.ordinal].indices) for (t0 in unknown) {
+                val offs = PLACEMENTS[shape.ordinal][oi]
+                val x0 = t0 % w; val z0 = t0 / w
+                val tiles = IntArray(offs.size / 2); var ok = true; var ents = 0
+                for (c in tiles.indices) {
+                    val x = x0 + offs[c * 2]; val z = z0 + offs[c * 2 + 1]
+                    if (x >= w || z >= h) { ok = false; break }
+                    val t = z * w + x
+                    if (!isUnk[t] || owner[t] != -1) { ok = false; break }
+                    if (entryDoor[t] != 0.toByte()) ents++
+                    tiles[c] = t
+                }
+                if (!ok || ents > 1) continue
+                if (candTiles.size == cw.size) cw = cw.copyOf(cw.size * 2)
+                var wt = 1.0
+                val bigTile = rules.bigTile
+                if (bigTile != null && w == 6 && h == 6) for (t in tiles) wt *= bigTile[frame[t]]
+                if (anchorW != null) wt *= anchorW[oi][t0]
+                cw[candTiles.size] = wt
+                candTiles += tiles
+            }
+            if (candTiles.isEmpty()) return false
+            val tiles = candTiles[pick(cw, candTiles.size, rnd)]
+            for (t in tiles) owner[t] = rooms.size
+            rooms += tiles; roomShape += shape
+        }
+        return true
+    }
+
+    private fun bunchWeight(owner: IntArray, roomShape: List<Shape>): Double {
+        var layoutW = 1.0
+        if (rules.bunch > 0.0) {
+            var blocks = 0
+            for (z in 0 until rules.h - 1) for (x in 0 until rules.w - 1) {
+                val t = z * w + x
+                if (isOne(t, owner, roomShape) && isOne(t + 1, owner, roomShape) && isOne(t + w, owner, roomShape) && isOne(t + w + 1, owner, roomShape)) blocks++
+            }
+            layoutW = exp(rules.bunch * blocks)
+        }
+        return layoutW
+    }
+
+    private fun doorSlots(owner: IntArray, nbs: Array<ArrayList<Int>>, slots: Array<ArrayList<ArrayList<Int>>>) {
+        for (t in unknown) for (nt in intArrayOf(if (t % w + 1 < w) t + 1 else -1, if (t / w + 1 < h) t + w else -1)) {
+            if (nt < 0 || !isUnk[nt] || owner[nt] == owner[t]) continue
+            val a = owner[t]; val b = owner[nt]
+            var ia = nbs[a].indexOf(b)
+            if (ia < 0) { nbs[a] += b; slots[a].add(ArrayList()); nbs[b] += a; slots[b].add(ArrayList()); ia = nbs[a].size - 1 }
+            slots[a][ia] += t * n + nt
+            slots[b][nbs[b].indexOf(a)] += nt * n + t
+        }
+    }
+
+    private fun growDoorTree(r: Int, owner: IntArray, nbs: Array<ArrayList<Int>>, slots: Array<ArrayList<ArrayList<Int>>>, parent: IntArray, inTile: IntArray, outTile: IntArray, root: IntArray, order: ArrayList<Int>, rnd: Random): Boolean {
+        for (t in entries) { val o = owner[t]; parent[o] = -1; inTile[o] = t; root[o] = entryIndex[t]; order += o }
+        while (order.size < r) {
+            var u = -1; var v = -1
+            if (rnd.nextDouble() < GROW) {
+                val last = order[order.size - 1]
+                val fr = nbs[last].filter { parent[it] == -2 }
+                if (fr.isNotEmpty()) { u = last; v = fr[rnd.nextInt(fr.size)] }
+            }
+            if (u < 0) {
+                var cnt = 0
+                for (a in order) for (b in nbs[a]) if (parent[b] == -2) { cnt++; if (rnd.nextDouble() * cnt < 1) { u = a; v = b } }
+            }
+            if (u < 0) return false
+            val sl = slots[u][nbs[u].indexOf(v)]
+            val p = sl[rnd.nextInt(sl.size)]
+            parent[v] = u; outTile[v] = p / n; inTile[v] = p % n; root[v] = root[u]; order += v
+        }
+        return true
+    }
+
+    private fun placeBlood(owner: IntArray, rooms: ArrayList<IntArray>, roomShape: ArrayList<Shape>, r: Int, order: ArrayList<Int>, parent: IntArray, inTile: IntArray, outTile: IntArray, root: IntArray, deg: IntArray, dead: List<Int>, firstColumn: Int, type: IntArray, rnd: Random): Boolean {
+        if (found[Cls.BLOOD] == 0) {
+            val hb = if (head >= 0) entryIndex[head] else -1
+            val hr = if (head >= 0) owner[head] else -1
+            val dist = IntArray(r) { -1 }
+            if (hb >= 0) for (o in order) {
+                if (root[o] != hb) continue
+                dist[o] = if (o == hr) headDist else dist[parent[o]] + inRoom(rooms[parent[o]], inTile[parent[o]], outTile[o]) + 1
+            }
+            val cand = IntArray(dead.size); val fair = IntArray(dead.size); val ws = DoubleArray(dead.size); var nc = 0
+            val bloodDoor = head >= 0 && entryDoor[head] == Edge.BLOOD
+            for (b in dead) {
+                if (b >= firstColumn) continue
+                if (level == 0 && hb < 0) continue
+                if (hb >= 0 && root[b] != hb) continue
+                if (bloodDoor != (b == hr) && (bloodDoor || level == 0)) continue
+                val d = dist[b]
+                var wb = if (level == 0) rules.walk.getOrElse(d) { 0f }.toDouble() else 1.0
+                if (wb <= 0) continue
+                var f = -1
+                if (found[Cls.FAIRY] > 0) { if (level == 0 && d != fairyDist + rules.fairyBeforeBlood) continue }
+                else {
+                    var u = parent[b]
+                    while (u >= 0) {
+                        if (roomShape[u] == Shape.ONE && (if (level == 0) dist[u] == d - rules.fairyBeforeBlood else deg[u] >= 2)) { f = u; break }
+                        u = parent[u]
+                    }
+                    if (f < 0 && level == 0) continue
+                }
+                wb *= rules.bloodFromEntrance.getOrElse(manhattan(rooms[b][0])) { 0f }
+                if (f >= 0) wb *= rules.fairyFromEntrance.getOrElse(manhattan(rooms[f][0])) { 0f }
+                if (wb <= 0) continue
+                cand[nc] = b; fair[nc] = f; ws[nc] = wb; nc++
+            }
+            if (nc == 0) {
+                if (level < 2) return false
+                if (bloodDoor) type[hr] = Cls.BLOOD
+            } else {
+                var total = 0.0; for (i in 0 until nc) total += ws[i]
+                wgt *= if (level == 0) total else 1.0
+                val k = pick(ws, nc, rnd)
+                type[cand[k]] = Cls.BLOOD
+                if (fair[k] >= 0) type[fair[k]] = Cls.FAIRY
+            }
+        } else if (found[Cls.FAIRY] == 0 && level == 0) return false
+        return true
+    }
+
+    private fun addColumnRooms(owner: IntArray, rooms: ArrayList<IntArray>, roomShape: ArrayList<Shape>, parent: IntArray, inTile: IntArray, outTile: IntArray, root: IntArray, deg: IntArray, short: Int, type: IntArray, columnRooms: MutableList<Int>, rnd: Random): Boolean {
+        if (short > 0) {
+            val hosts = open.filter { t -> val o = owner[t - 1]; roomShape[o] != Shape.ONE || deg[o] >= 2 && type[o] != Cls.FAIRY }.toMutableList()
+            if (hosts.size < short && level < 2) return false
+            hosts.shuffle(rnd)
+            for (t in hosts.take(short)) {
+                val o = owner[t - 1]; val c = rooms.size
+                owner[t] = c; rooms += intArrayOf(t); roomShape += Shape.ONE
+                parent[c] = o; outTile[c] = t - 1; inTile[c] = t; root[c] = root[o]; deg[c] = 1; deg[o]++
+                columnRooms += c
+            }
+        }
+        return true
+    }
+
+    private fun typeDeadEnds(rooms: ArrayList<IntArray>, dead: List<Int>, firstColumn: Int, type: IntArray, columnRooms: MutableList<Int>, rnd: Random): Boolean {
+        val rest = dead.filter { type[it] < 0 && it < firstColumn }.toMutableList(); rest.shuffle(rnd)
+        columnRooms.shuffle(rnd); rest += columnRooms
+        var placed = false
+        if (pinKeys.isNotEmpty() && level < 2 && columnRooms.isEmpty() && rest.size >= remP) {
+            val stretch = Array(pinKeys.size + 1) { ArrayList<Int>() }
+            for (o in rest) { val k = orderKey(rooms[o][0]); var g = 0; while (g < pinKeys.size && pinKeys[g] < k) g++; stretch[g] += o }
+            var before = 0; var ways = 1.0
+            for (g in stretch.indices) {
+                val c = (if (g < pinKeys.size) pinBefore[g] else remP) - before
+                if (c > stretch[g].size) return false
+                ways *= choose(stretch[g].size, c)
+                for (o in stretch[g].take(c)) { type[o] = Cls.PUZZLE; rest.remove(o) }
+                before += c
+            }
+            wgt *= ways / choose(rest.size + remP, remP)
+            placed = true
+        }
+        var ri = 0
+        if (rules.trap && found[Cls.TRAP] == 0 && ri < rest.size) type[rest[ri++]] = Cls.TRAP
+        if (found[Cls.YELLOW] == 0 && ri < rest.size) type[rest[ri++]] = Cls.YELLOW
+        if (!placed) repeat(remP) { if (ri < rest.size) type[rest[ri++]] = Cls.PUZZLE }
+        while (ri < rest.size) type[rest[ri++]] = Cls.RARE
+        return true
+    }
+
+    private fun addToTally(all: Int, type: IntArray, cls: IntArray, names: SecretNames.Result?, sn: SecretNames?, rooms: ArrayList<IntArray>, roomShape: ArrayList<Shape>, parent: IntArray, inTile: IntArray, outTile: IntArray, root: IntArray) {
+        tally.weight += wgt
+        val blood = (0 until all).firstOrNull { type[it] == Cls.BLOOD } ?: -1
+        val onPath = BooleanArray(all)
+        if (blood >= 0) { var u = blood; while (u >= 0) { onPath[u] = true; u = parent[u] } }
+        for (v in 0 until all) {
+            val u = parent[v]; if (u < 0) continue
+            val a = minOf(outTile[v], inTile[v]); val b = maxOf(outTile[v], inTile[v])
+            val d = tally.doorCounts.getOrPut(a * n + b) { DoubleArray(4) }
+            d[0] += wgt
+            if (onPath[u] && onPath[v]) { if (v == blood) d[2] += wgt else d[1] += wgt }
+            if (type[u] == Cls.FAIRY || type[v] == Cls.FAIRY) d[3] += wgt
+        }
+        for (o in 0 until all) {
+            val c = cls[o]
+            if (names != null && sn != null) {
+                var m = 0L; for (t in rooms[o]) m = m or (1L shl t)
+                val pool = poolOfCls(c, roomShape[o])
+                names.byPool[pool]?.forEachIndexed { k, share -> if (share > 0) tally.nameCounts.merge(m * 256 + MapStats.NAMES.indexOf(sn.avail[pool][k]), wgt * share, Double::plus) }
+            }
+            val b = root[o]
+            if (b >= 0) {
+                tally.splitRooms[b] += wgt; tally.splitTiles[b] += wgt * rooms[o].size; tally.splitCls[b][c] += wgt
+                tally.splitSecrets[b] += wgt * poolSecrets[poolOfCls(c, roomShape[o])]
+            }
+            for (t in rooms[o]) tally.counts[tileIdx[t]][c] += wgt
+            if (roomShape[o] != Shape.ONE && n <= 64) { var m = 0L; for (t in rooms[o]) m = m or (1L shl t); tally.bigCounts.merge(m, wgt, Double::plus) }
+        }
+    }
+
+    private fun calibrated(p: FloatArray): FloatArray {
+        val cal = rules.calibration ?: return p
+        return calibrate(p, cal, view.kinds.size)
+    }
+
+    private fun isOne(t: Int, owner: IntArray, roomShape: List<Shape>): Boolean {
+        val k = view.roomAt[t]
+        return if (k >= 0) view.shapes[k] == Shape.ONE else owner[t] >= 0 && roomShape[owner[t]] == Shape.ONE
+    }
+
+    private fun manhattan(t: Int): Int = if (entTile < 0) 0 else abs(t % w - entTile % w) + abs(t / w - entTile / w)
+
+    fun prediction(): Prediction? {
+        gameSampler?.let { g -> try { return g.prediction() } catch (e: Exception) { dropGame(e) } }
+        return tally.prediction(w, h, cells, entries, entryDoor, classicAccepted, classicLevel, ::calibrated)
+    }
+
+    companion object {
+        const val CERTAIN = 0.999f
+
+        private val DEAD_ENDS = intArrayOf(Cls.PUZZLE, Cls.TRAP, Cls.YELLOW, Cls.RARE)
+
+        private const val MAX_TYPINGS = 4096.0
+
+        fun certainShapes(p: Prediction, at: Float = CERTAIN): List<IntArray> {
+            fun sureBig(t: Int) = maxOf(p.probs.getOrNull(t)?.get(Cls.BIG) ?: 0f, p.raw.getOrNull(t)?.get(Cls.BIG) ?: 0f) >= at
+            fun sure1x1(q: FloatArray?) = q != null && q.sum() >= at && q[Cls.BIG] <= 1 - at
+            val out = ArrayList<IntArray>()
+            val inBig = HashSet<Int>()
+            for (b in p.bigRooms) {
+                if (b.chance < at || b.tiles.any { it in inBig || !sureBig(it) }) continue
+                inBig += b.tiles.toList()
+                out += b.tiles
+            }
+            for (t in p.raw.indices) {
+                if (t in inBig) continue
+                if (sure1x1(p.probs.getOrNull(t)) || sure1x1(p.raw[t])) out += intArrayOf(t)
+            }
+            return out
+        }
+
+        internal fun calibrate(p: FloatArray, cal: Array<DoubleArray>, roomsKnown: Int): FloatArray {
+            val k = (roomsKnown - 6) / 3.0
+            val s = DoubleArray(p.size); var z = 0.0
+            for (c in p.indices) if (p[c] > 0f) { s[c] = exp(cal[0][c] * ln(p[c] + 0.001) + cal[1][c] + cal[2][c] * k); z += s[c] }
+            if (z <= 0) return p
+            val total = p.sum()
+            return FloatArray(p.size) { (s[it] / z * total).toFloat() }
+        }
+
+        fun isTabPuzzle(room: String?, tab: String): Boolean = room != null && (room == tab || tab == "Higher Or Lower" && room.endsWith(" Blaze"))
+
+        internal fun poolOfKnown(view: MapView, i: Int): Int {
+            val shape = view.shapes[i]
+            return when (view.kinds[i]) {
+                Kind.NORMAL, Kind.RARE -> if (shape != Shape.ONE) shape.ordinal else {
+                    val t = view.roomTiles[i][0]
+                    if (view.kinds[i] == Kind.RARE || view.neighbours(t).count { Edge.isDoor(view.edge(t, it)) } == 1) MapStats.POOL_RARE else MapStats.POOL_1X1
+                }
+                Kind.PUZZLE -> MapStats.POOL_PUZZLE
+                Kind.TRAP -> MapStats.POOL_TRAP
+                Kind.YELLOW -> MapStats.POOL_YELLOW
+                Kind.BLOOD -> MapStats.POOL_BLOOD
+                Kind.FAIRY -> MapStats.POOL_FAIRY
+                Kind.ENTRANCE -> MapStats.POOL_ENTRANCE
+            }
+        }
+
+        fun splitSecrets(view: MapView, splits: List<Split>): FloatArray {
+            val avg = FloatArray(splits.size) { splits[it].secrets }
+            val sum = avg.sum()
+            if (view.secretTotals.isEmpty() || sum <= 0f) return avg
+            val byName = MapStats.NAMES.associateBy { it.name }
+            val mean = MapStats.meanSecrets(view.names.filterNotNull().toSet() + view.rules.missingNames)
+            var known = 0.0
+            for (i in view.kinds.indices) {
+                val name = view.names[i]
+                known += if (name != null) (byName[name] ?: return avg).secrets.toDouble() else mean[poolOfKnown(view, i)]
+            }
+            val left = view.secretTotals.average() - known
+            if (left <= 0) return avg
+            val k = (left / sum).toFloat()
+            return FloatArray(avg.size) { avg[it] * k }
+        }
+
+        internal fun poolOfCls(c: Int, shape: Shape): Int = when (c) {
+            Cls.BIG -> shape.ordinal
+            Cls.NORMAL -> MapStats.POOL_1X1
+            Cls.PUZZLE -> MapStats.POOL_PUZZLE
+            Cls.TRAP -> MapStats.POOL_TRAP
+            Cls.YELLOW -> MapStats.POOL_YELLOW
+            Cls.BLOOD -> MapStats.POOL_BLOOD
+            Cls.FAIRY -> MapStats.POOL_FAIRY
+            else -> MapStats.POOL_RARE
+        }
+
+        internal fun choose(m: Int, k: Int): Double {
+            if (k < 0 || k > m) return 0.0
+            var c = 1.0; for (i in 0 until k) c = c * (m - i) / (i + 1)
+            return c
+        }
+
+        private const val HELD = -3
+
+        private const val GROW = 0.3
+        private const val LEVEL_TRIES = 30_000L
+
+        internal val PLACEMENTS = arrayOf(
+            arrayOf(intArrayOf(0, 0, 1, 0), intArrayOf(0, 0, 0, 1)),
+            arrayOf(intArrayOf(0, 0, 1, 0, 2, 0), intArrayOf(0, 0, 0, 1, 0, 2)),
+            arrayOf(intArrayOf(0, 0, 1, 0, 2, 0, 3, 0), intArrayOf(0, 0, 0, 1, 0, 2, 0, 3)),
+            arrayOf(intArrayOf(0, 0, 1, 0, 0, 1, 1, 1)),
+            arrayOf(intArrayOf(0, 0, 1, 0, 0, 1), intArrayOf(0, 0, 1, 0, 1, 1), intArrayOf(0, 0, 0, 1, 1, 1)),
+        )
+
+        private val SYM: List<(Int, Int) -> Pair<Int, Int>> = listOf(
+            { x, z -> x to z }, { x, z -> (5 - z) to x }, { x, z -> (5 - x) to (5 - z) }, { x, z -> z to (5 - x) },
+            { x, z -> (5 - x) to z }, { x, z -> z to x }, { x, z -> x to (5 - z) }, { x, z -> (5 - z) to (5 - x) },
+        )
+    }
+}

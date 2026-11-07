@@ -1,0 +1,270 @@
+package com.engineerclient.features.splits
+
+import com.engineerclient.EngineerClient
+import com.engineerclient.util.noFormatting
+import com.engineerclient.util.setting
+import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
+import com.odtheking.odin.clickgui.settings.impl.ActionSetting
+import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
+import com.odtheking.odin.clickgui.settings.impl.DropdownSetting
+import com.odtheking.odin.clickgui.settings.impl.HUDSetting
+import com.odtheking.odin.clickgui.settings.impl.HudElement
+import com.odtheking.odin.clickgui.settings.impl.KeybindSetting
+import com.odtheking.odin.clickgui.settings.impl.SelectorSetting
+import com.odtheking.odin.clickgui.settings.impl.StringSetting
+import com.odtheking.odin.features.ModuleManager
+import com.odtheking.odin.features.impl.skyblock.Splits
+import com.odtheking.odin.utils.Colors
+import com.odtheking.odin.utils.render.text
+import com.odtheking.odin.utils.skyblock.Island
+import com.odtheking.odin.utils.skyblock.LocationUtils
+import com.odtheking.odin.utils.skyblock.SplitsManager
+import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
+import com.odtheking.odin.utils.skyblock.dungeon.Floor
+import com.odtheking.odin.utils.skyblock.floor7SplitGroup
+import net.minecraft.client.gui.GuiGraphicsExtractor
+
+object OdinSplitsLook {
+
+
+    private enum class Look(private val label: String) { ODIN_SPLITS("Odin"), ENGINEER_SPLITS("ADM"); override fun toString() = label }
+    private enum class PaceFloor { F7, M7 }
+    enum class PaceFrom(private val label: String) { RECENT("Recent Runs"), TARGETS("Targets"); override fun toString() = label }
+
+    private val look = SelectorSetting("Look", Look.ENGINEER_SPLITS,
+        desc = "Odin's look, or ADM's: lines as Name > time (ticks), with a Pace line on top, the projected finish from the targets under Pace. Added by ADM.")
+
+    val engineer: Boolean get() = look.value == Look.ENGINEER_SPLITS
+
+    private val colourByTime = BooleanSetting("Color Based Off Time", true,
+        desc = "Floor 7 split times coloured by how fast they were (dark green to black), here and in Sub Splits. Off: each time in its split's own colour. Added by ADM.")
+
+    private val showPb = BooleanSetting("Show PB", false,
+        desc = "Times that tie or beat your best for that split in gold. Off: they get their colour from the time like any other. Added by ADM.")
+        .withDependency { colourByTime.value }
+
+    private val showLag = BooleanSetting("Show Lag", true, desc = "ADM look: the Lag line on top, the time lost to lag so far this run (floor 7).")
+        .withDependency { engineer }
+    private val showPace = BooleanSetting("Show Pace", true, desc = "ADM look: the Pace line, the projected finish.")
+        .withDependency { engineer }
+
+    private val enterAfterEntry = BooleanSetting("Enter After Entry", true, desc = "ADM look: only show the Enter line (Boss Entry) once you are in the boss, not counting up through the clear.")
+        .withDependency { engineer && bool("Boss Entry Split", true) }
+
+    private val pace = DropdownSetting("Pace", desc = "The target times Pace projects the finish from.").withDependency { engineer }
+
+    private val paceFrom = SelectorSetting("Pace From", PaceFrom.RECENT,
+        desc = "What Pace counts each split still to come as. Recent Runs: your typical time for it, the median of your last 20 (until 5 are kept, its target), so Pace is where this run will likely finish. Targets: the boxes below (or PBs), which add up to faster than you usually run.")
+        .withDependency { engineer && pace.value }
+
+    private val paceFloor = SelectorSetting("Pace Targets", PaceFloor.F7,
+        desc = "Which floor's targets the boxes below are for. Pace uses the ones for the floor you are on; other floors and Kuudra have no targets, so there Pace is the time so far.")
+        .withDependency { engineer && pace.value }
+
+    private fun boxes(floor: String, master: Boolean, index: Int) = EngineerLook.targetLabels(master).map { name ->
+        StringSetting("$floor $name", "", 12, desc = "How long $name should take on $floor, in seconds (61.5) or minutes (1:01.5). Blank uses your PB for it, shown grayed in the box (on F7 without a PB, its dark green time).", placeholder = "")
+            .withDependency { engineer && pace.value && paceFloor.value.ordinal == index }
+    }
+
+    private val f7 = boxes("F7", false, 0)
+    private val m7 = boxes("M7", true, 1)
+
+    private val fillFromPbs = ActionSetting("Fill From PBs", desc = "Fills the targets shown (F7 or M7) with your PB for each split, fixed from now on (blank boxes follow your PBs as they improve). Each is that split's best ever, so together they add up to faster than any run you have done.") {
+        fillFromPbs()
+    }.withDependency { engineer && pace.value }
+
+    fun install() {
+        dragonsOnRelics()
+        SubSplitGrades.byTime = { colourByTime.value }
+        SubSplitGrades.showBest = { showPb.value }
+        for (s in listOf(look, colourByTime, showPb, showLag, showPace, enterAfterEntry, pace, paceFrom, paceFloor) + f7 + m7 + fillFromPbs) Splits.registerSetting(s)
+        (Splits.settings.remove("Keybind") as? KeybindSetting)?.let { ModuleManager.keybindSettingsCache.remove(it) }
+        val all = LinkedHashMap(Splits.settings)
+        val last = all.remove(CURRENT_SPLIT_HUD)
+        Splits.settings.clear()
+        all.remove(look.name)?.let { Splits.settings[look.name] = it }
+        all.remove(colourByTime.name)?.let { Splits.settings[colourByTime.name] = it }
+        all.remove(showPb.name)?.let { Splits.settings[showPb.name] = it }
+        Splits.settings.putAll(all)
+        last?.let { Splits.settings[CURRENT_SPLIT_HUD] = it }
+        ModuleManager.loadConfigurations()
+    }
+
+    private const val CURRENT_SPLIT_HUD = "Current Split HUD"
+
+    private fun dragonsOnRelics() {
+        val i = floor7SplitGroup.indexOfFirst { it.regex.pattern.contains("All this, for nothing") }
+        if (i < 0) return
+        floor7SplitGroup[i] = floor7SplitGroup[i].copy(regex = Regex(Regex.escape(SplitTracker.RELICS_PLACED)))
+    }
+
+    private fun fillFromPbs() {
+        val master = paceFloor.value == PaceFloor.M7
+        val boxes = if (master) m7 else f7
+        var filled = 0
+        boxes.forEachIndexed { i, box ->
+            val pb = pb(i, master) ?: return@forEachIndexed
+            box.value = EngineerLook.formatSeconds(pb.ms / 1000.0)
+            filled++
+        }
+        ModuleManager.saveConfigurations()
+        EngineerClient.msg(if (filled == 0) "§7No ${if (master) "M7" else "F7"} PBs yet - finish a run first." else "§aFilled §f$filled §atargets from your ${if (master) "M7" else "F7"} PBs.")
+    }
+
+    private var failed = false
+
+    @JvmStatic
+    fun render(hud: HudElement, g: GuiGraphicsExtractor, example: Boolean): Pair<Int, Int>? {
+        val display = displayHud
+        val current = currentHud
+        if (hud !== display && hud !== current) return null
+        if (!engineer || failed) return null
+        return try {
+            if (hud === display) drawDisplay(g, example) else drawCurrent(g, example)
+        } catch (t: Throwable) {
+            failed = true
+            EngineerClient.logger.error("[ec] Engineer Splits look failed - back to Odin's look for this session", t)
+            null
+        }
+    }
+
+    private val displayHud by lazy { Splits.setting<HUDSetting>("Splits Display HUD")?.value }
+    private val currentHud by lazy { Splits.setting<HUDSetting>(CURRENT_SPLIT_HUD)?.value }
+
+    private fun bool(name: String, fallback: Boolean) = Splits.setting<BooleanSetting>(name)?.value ?: fallback
+
+    private fun options() = EngineerLook.Options(
+        bossEntry = bool("Boss Entry Split", true),
+        show0 = bool("Show 0 splits", false),
+        showTicks = Splits.showTickTime,
+        enterAfterEntry = enterAfterEntry.value,
+        showPace = showPace.value,
+        showLag = showLag.value,
+    )
+
+    private fun place(): Pair<EngineerLook.Place, Boolean> {
+        if (LocationUtils.currentArea != Island.Dungeon) return EngineerLook.Place.OTHER to false
+        val floor = DungeonUtils.floor ?: return EngineerLook.Place.DUNGEON to false
+        val master = floor.name.startsWith("M")
+        return (if (floor.floorNumber == 7) EngineerLook.Place.FLOOR7 else EngineerLook.Place.DUNGEON) to master
+    }
+
+    private fun targets(place: EngineerLook.Place, master: Boolean): List<Double?>? {
+        if (place != EngineerLook.Place.FLOOR7) return null
+        return (if (master) m7 else f7).indices.map { i ->
+            (typical(i, master) ?: target(i, master) ?: darkGreen(i, master))?.let { it.ms / 1000.0 }
+        }
+    }
+
+    private fun target(i: Int, master: Boolean): SplitPace.Clocks? {
+        (if (master) m7 else f7).getOrNull(i)?.let { box -> EngineerLook.parseSeconds(box.value)?.let { return secs(it) } }
+        return pb(i, master)
+    }
+
+    fun paceTarget(label: String, master: Boolean): SplitPace.Clocks? =
+        SplitPace.ORDER.indexOf(label).takeIf { it >= 0 }?.let { typical(it, master) ?: target(it, master) }
+
+    private fun typical(i: Int, master: Boolean): SplitPace.Clocks? {
+        if (paceFrom.value != PaceFrom.RECENT) return null
+        val label = SplitPace.ALL.getOrNull(i) ?: return null
+        return DungeonSplits.typical(if (master) "M7" else "F7", label)
+    }
+
+    private fun pb(i: Int, master: Boolean): SplitPace.Clocks? {
+        val floor = if (master) "M7" else "F7"
+        val id = SplitPace.ALL.getOrNull(i)?.let { SplitPace.SPLIT_IDS[it] }
+        val ours = id?.let { sid -> DungeonSplits.bestOf(floor, sid)?.takeIf { SubSplitGrades.canBeBest(sid, it, floor) }?.let { SplitPace.clocks(sid, it) } }
+        val odin = PB_NAMES.getOrNull(i)?.let { Splits.dungeonPBsList[(if (master) Floor.M7 else Floor.F7).ordinal].get(it) }
+            ?.let { secs(it.toDouble()) }
+            ?.takeIf { c -> if (id != null) SubSplitGrades.canBeBest(id, SubSplitGrades.value(id, c.ms, c.ticks), floor) else c.ms >= 1000 }
+        return listOfNotNull(ours, odin).minByOrNull { it.ms }
+    }
+
+    private fun darkGreen(i: Int, master: Boolean): SplitPace.Clocks? =
+        if (master) null else SplitPace.ORDER.getOrNull(i)?.let { SplitPace.ref(it) }
+
+    private fun secs(s: Double) = SplitPace.Clocks(Math.round(s * 1000), Math.round(s * 20))
+
+    private val placeholderField = runCatching { StringSetting::class.java.getDeclaredField("placeholder").apply { isAccessible = true } }.getOrNull()
+
+    @JvmStatic
+    fun refreshPlaceholders() {
+        val field = placeholderField ?: return
+        for ((master, boxes) in listOf(false to f7, true to m7)) boxes.forEachIndexed { i, box ->
+            val text = pb(i, master)?.let { "PB " + EngineerLook.formatSeconds(it.ms / 1000.0) }
+                ?: darkGreen(i, master)?.let { EngineerLook.formatSeconds(it.ms / 1000.0) + " (no PB)" } ?: ""
+            runCatching { field.set(box, text) }
+        }
+    }
+
+    fun f7Target(name: String): Double? {
+        val i = PB_NAMES.indexOf(name).takeIf { it >= 0 } ?: return null
+        return targets(EngineerLook.Place.FLOOR7, false)?.getOrNull(i)
+    }
+
+    private val PB_NAMES by lazy { listOf("§2Blood Open", "§bBlood Clear", "§dPortal Entry") + floor7SplitGroup.map { it.name } }
+
+    private fun grade(name: String, ms: Long, ticks: Long, over: Boolean, master: Boolean): String? {
+        val id = SubSplitGrades.MAIN_SPLITS[name.noFormatting().trim()] ?: return null
+        val floor = if (master) "M7" else "F7"
+        val value = SubSplitGrades.value(id, ms, ticks)
+        DungeonSplits.recordBest(floor, id, value, over)
+        return SubSplitGrades.colour(id, value, over, DungeonSplits.bestOf(floor, id), floor, "")
+            .takeIf { it.isNotEmpty() }
+    }
+
+    private fun rows(): List<EngineerLook.Row> =
+        SplitsManager.currentRows().map { EngineerLook.Row(it.name, it.time, it.tickTime, it.isCurrent) }
+
+    private fun exampleRows(): List<EngineerLook.Row> {
+        val names = listOf("§2Blood Open", "§bBlood Clear", "§dPortal Entry") + floor7SplitGroup.map { it.name } + "§1Total"
+        val secs = listOf(59.0, 30.1, 4.2, 25.5, 45.9, 35.0, 3.1, 0.0, 0.0, 0.0)
+        return names.mapIndexed { i, n -> EngineerLook.Row(n, (secs[i] * 1000).toLong(), (secs[i] * 20).toLong() - (if (secs[i] > 0) 1 else 0), i == 6) }
+    }
+
+    private const val LINE = 9
+
+    private fun drawDisplay(g: GuiGraphicsExtractor, example: Boolean): Pair<Int, Int> {
+        val (place, master) = if (example) EngineerLook.Place.FLOOR7 to (paceFloor.value == PaceFloor.M7) else place()
+        val rows = if (example) exampleRows() else rows()
+        val opts = options()
+        val lines = EngineerLook.lines(rows, opts, place, master, targets(if (example) EngineerLook.Place.FLOOR7 else place, master),
+            if (example || place != EngineerLook.Place.FLOOR7) null else { n, ms, t, over -> grade(n, ms, t, over, master) },
+            if (example || place != EngineerLook.Place.FLOOR7 || master) null else DungeonSplits.pace()?.let { it.ms to it.ticks },
+            if (example || place != EngineerLook.Place.FLOOR7) null else DungeonSplits.lag())
+        if (lines.isEmpty()) return 0 to 0
+        val font = EngineerClient.mc.font
+
+        if (!bool("Fixed Width", true)) {
+            var width = 0
+            lines.forEachIndexed { i, l ->
+                val s = EngineerLook.text(l)
+                g.text(s, 0, i * LINE, Colors.WHITE)
+                width = maxOf(width, font.width(s))
+            }
+            return width to lines.size * LINE
+        }
+
+        val nameW = EngineerLook.allLabels(rows, opts, place, master).maxOf { font.width(it) }
+        val arrow = " §b> "
+        val arrowW = font.width(arrow)
+        val widest = if (opts.showTicks) "59m 59.9s §8(§759m 59.9s§8)" else "59m 59.9s"
+        val restW = maxOf(font.width(widest), lines.maxOf { font.width(it.colour + it.time + (it.ticks?.let { t -> " §8(§7$t§8)" } ?: "")) })
+        lines.forEachIndexed { i, l ->
+            val y = i * LINE
+            g.text(l.label, nameW - font.width(l.label), y, Colors.WHITE)
+            g.text(arrow, nameW, y, Colors.WHITE)
+            g.text(l.colour + l.time + (l.ticks?.let { " §8(§7$it§8)" } ?: ""), nameW + arrowW, y, Colors.WHITE)
+        }
+        return nameW + arrowW + restW to lines.size * LINE
+    }
+
+    private fun drawCurrent(g: GuiGraphicsExtractor, example: Boolean): Pair<Int, Int> {
+        val (place, master) = if (example) EngineerLook.Place.FLOOR7 to false else place()
+        val line = EngineerLook.currentLine(if (example) exampleRows() else rows(), options(), place, master) ?: return 0 to 0
+        val s = EngineerLook.text(line)
+        val w = EngineerClient.mc.font.width(s) + 2
+        g.text(s, -w / 2, 0, Colors.WHITE)
+        return w to LINE
+    }
+}

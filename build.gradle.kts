@@ -20,22 +20,7 @@ base {
     archivesName.set("adm")
 }
 
-sourceSets.main {
-    java.setSrcDirs(listOf("src"))
-    kotlin.setSrcDirs(listOf("src"))
-    resources.setSrcDirs(listOf("src/resources"))
-}
-
-sourceSets.test {
-    java.setSrcDirs(listOf("test"))
-    kotlin.setSrcDirs(listOf("test"))
-    resources.setSrcDirs(listOf("test/resources"))
-}
-
 val gametest: SourceSet = sourceSets.create("gametest") {
-    java.setSrcDirs(listOf("gametest"))
-    kotlin.setSrcDirs(listOf("gametest"))
-    resources.setSrcDirs(listOf("gametest/resources"))
     compileClasspath += sourceSets.main.get().compileClasspath + sourceSets.main.get().output
     runtimeClasspath += sourceSets.main.get().runtimeClasspath + sourceSets.main.get().output
 }
@@ -52,6 +37,7 @@ loomRuns.create("clientGametest") {
     source(gametest)
     vmArg("-Dfabric.client.gametest")
     vmArg("-Dfabric.client.gametest.modid=adm-gametest")
+    vmArg("-Dmixin.debug.export=true")
     vmArg("-XX:StackShadowPages=32")
     environmentVariable("VK_LOADER_LAYERS_DISABLE", "~implicit~")
     runDir("build/gametest")

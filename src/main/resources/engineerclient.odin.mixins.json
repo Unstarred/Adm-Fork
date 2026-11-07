@@ -1,0 +1,34 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.engineerclient.mixin.odin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "BlockUpdateServerThreadMixin",
+    "ClickGuiOpenMixin",
+    "HudElementMixin",
+    "InvincibilityHudMixin",
+    "InvincibilityPhoenixMixin",
+    "LeapMenuRenderMixin",
+    "OdinTermTimesMixin",
+    "PanelOrderMixin",
+    "PanelOnScreenMixin",
+    "HudOnScreenMixin",
+    "PersonalBestSimMixin",
+    "SecretsCounterMixin",
+    "SimonSaysBlocksMixin",
+    "SimonSaysTicksMixin",
+    "TickTimersGoldorMixin",
+    "HighlightRenderMixin",
+    "LcmStyleMixin",
+    "LcmMapInfoMixin",
+    "MapPathHintsMixin",
+    "TpMazeRenderMixin",
+    "TerminalClickLimitMixin",
+    "NumbersHandlerMixin",
+    "LeapTermsimProtMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}
