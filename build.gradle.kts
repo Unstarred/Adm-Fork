@@ -50,7 +50,17 @@ val gametest: SourceSet = sourceSets.create("gametest") {
 }
 
 // Loom is applied with apply(plugin = ...), so its extension has no generated accessor: it is reached by name.
-(extensions.getByName("loom") as LoomGradleExtensionAPI).runs.create("clientGametest") {
+val loomRuns = (extensions.getByName("loom") as LoomGradleExtensionAPI).runs
+
+// Minecraft's own launcher starts 26.3 with -XX:StackShadowPages=32 (its version JSON's JVM arguments); Loom's dev
+// launch doesn't. Without it the dev client died in jvm.dll during resource reloads, about half of the launches, with no
+// hs_err file. A crash dump (2026-11-06) shows why: a Worker-Main thread deep in shaderc (26.3 compiles its shaders
+// with it) and then back in the JVM, which writes past the end of the thread's stack.
+loomRuns.getByName("client") {
+    vmArg("-XX:StackShadowPages=32")
+}
+
+loomRuns.create("clientGametest") {
     client()
     name("Client Gametest")
     source(gametest)
@@ -58,6 +68,7 @@ val gametest: SourceSet = sourceSets.create("gametest") {
     // client sits on the title screen and runs nothing.
     vmArg("-Dfabric.client.gametest")
     vmArg("-Dfabric.client.gametest.modid=adm-gametest")
+    vmArg("-XX:StackShadowPages=32")
     // No Vulkan implicit layers. 26.3 opens the Vulkan loader at startup even when it ends up on OpenGL (and even with
     // --graphicsBackend opengl), and the loader then injects every installed implicit layer: screen recorders' and
     // overlays' capture hooks (Medal, OBS, Steam, Epic). Benches compare runs, so nothing outside the game should be

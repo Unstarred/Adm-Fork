@@ -65,13 +65,15 @@ class FpsGameTest : FabricClientGameTest {
         val jfr = context.onClient { JvmProfiler.INSTANCE.stop() }
         val leapName = if (leapOpened) "leap-menu" else "leap-menu(NOT OPENED)"
         report(context, listOf("boss" to boss, leapName to leap, "boss-after" to after), jfr.toAbsolutePath().toString())
-        // The harness fails a test that ends with a server still running. The client lets go of the integrated server
-        // before its thread has stopped, so a few seconds more.
+        // The harness fails a test that ends with a server still running, or off the title screen. It defers the
+        // disconnect, so ADS's own TitleScreen goes up before it and "Leaving ADS" is left showing; and the client can
+        // keep its reference to the stopping server well after the level is gone. So: the level, time for the server
+        // thread to stop, then the title screen put up here.
         context.onClient { SimWorld.leave() }
-        context.waitFor({ mc -> mc.level == null && mc.singleplayerServer == null }, 20 * 60)
-        // It must also end on the title screen; leaving ADS shows "Leaving ADS" first.
+        context.waitFor({ mc -> mc.level == null }, 20 * 60)
+        context.waitTicks(20 * 10)
+        context.setScreen { TitleScreen() }
         context.waitForScreen(TitleScreen::class.java)
-        context.waitTicks(20 * 5)
     }
 
     /** [ClientGameTestContext.computeOnClient] with its exception type fixed, which Kotlin can't infer from a lambda. */
@@ -116,8 +118,11 @@ class FpsGameTest : FabricClientGameTest {
         val lines = mutableListOf("adm fps bench ${LocalDateTime.now()}", "jfr: $jfr")
         for ((name, fps) in phases) {
             val sorted = fps.sorted()
-            lines += "%-24s mean %6.1f  p50 %4d  min %4d  max %4d  n %d  %s".format(
-                name, fps.average(), sorted[sorted.size / 2], sorted.first(), sorted.last(), fps.size, fps.joinToString(","))
+            // A phase that never passed 60 measured a limiter, not the game: the window minimized, hidden or out of
+            // focus during the run (one run read a flat 20 the whole way through).
+            val limited = if (sorted.last() <= 60) "  LIMITED: window minimized or hidden? discard this run" else ""
+            lines += "%-24s mean %6.1f  p50 %4d  min %4d  max %4d  n %d  %s%s".format(
+                name, fps.average(), sorted[sorted.size / 2], sorted.first(), sorted.last(), fps.size, fps.joinToString(","), limited)
         }
         val dir = context.onClient { mc -> mc.gameDirectory.toPath().resolve("fps") }
         Files.createDirectories(dir)
