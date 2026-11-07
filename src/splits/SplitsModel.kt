@@ -2,52 +2,20 @@ package com.engineerclient.splits
 
 import java.util.Locale
 
-/*
- * The run's splits as this mod times them (the phases that sub splits, bests and Pace hang off):
- *
- *     Pace       &3   everything so far
- *     Open       &a   run start -> the Watcher's first line (the blood rush)
- *     Blood      &c   the Watcher's first line -> "You have proven yourself" (the camp)
- *     Portal     &d   -> Maxor's first line
- *     Enter      &9   Open + Blood + Portal
- *     Maxor      &5   -> Storm's first line
- *     Storm      &b   -> Goldor's first line
- *     Terms      &6   -> "The Core entrance is opening!"
- *     Goldor     &e   -> Necron's first line
- *     Necron     &c   -> EXTRA STATS on F7. Since Hypixel's boss update of 5 Oct 2026 there is no
- *                        end animation to split off: he no longer says "All this, for nothing...",
- *                        and his death is straight into the run's end. On M7 -> the Wither King's
- *                        "You... again?", his first line, said once every relic is placed (his
- *                        kill and the relics).
- *     Dragons    &d   M7: -> EXTRA STATS.
- *
- * A split only appears once it has started. Nothing here touches Minecraft, so it tests
- * headlessly: feed it chat lines with the clock readings they arrived at, then ask for the splits.
- */
-
-/** The two clocks a split is measured on: real time, and the server's own tick count. */
 data class Stamp(val realMs: Long, val tick: Int)
 
-/** One timed section. [stop] is null while it is still running — the HUD counts it up to now. */
 data class Split(val label: String, val start: Stamp, val stop: Stamp?)
 
 object SplitFormat {
 
-    /** Plain seconds to two places: `14.00s`. */
     fun seconds(ms: Long): String = String.format(Locale.ROOT, "%.2f", ms / 1000.0) + "s"
 
-    /** Minutes and seconds to one place, for Pace and Enter: `3m 8.2s`. */
     fun minutes(ms: Long): String {
-        // Rounded to the tenth before splitting, so 119.97 s carries to 2m 0.0s, not 1m 60.0s.
         val tenths = Math.round(ms / 100.0)
         return "${tenths / 600}m " + String.format(Locale.ROOT, "%.1f", tenths % 600 / 10.0) + "s"
     }
 }
 
-/**
- * One run's splits. Feed every chat line to [onChat] (colour codes stripped) and read [splits] back.
- * [reset] on world load.
- */
 class SplitTracker {
 
     private var start: Stamp? = null
@@ -60,20 +28,12 @@ class SplitTracker {
         pending = null
     }
 
-    /** A sim run starting at a phase: its index, how long each earlier phase counts as, and how long ago it began. */
     private class Pending(val phase: Int, val before: (String) -> Clock, val head: Clock)
 
-    /** A length on both clocks: ms and ticks. */
     data class Clock(val ms: Long, val ticks: Int)
 
     private var pending: Pending? = null
 
-    /**
-     * The P3 Sim: a run that begins partway, at [label]'s phase. Every phase before it is filled in
-     * as [before] long, back from the moment it starts, so Pace and Enter read as if they had been
-     * played. With [now], it starts then (no line of its own comes), [head] already into it;
-     * otherwise on its usual line.
-     */
     fun startAt(label: String, before: (String) -> Clock, now: Stamp? = null, head: Clock = Clock(0, 0)) {
         reset()
         val i = PHASES.indexOfFirst { it.label == label }.takeIf { it >= 0 } ?: return
@@ -110,14 +70,12 @@ class SplitTracker {
         }
     }
 
-    /** Every phase that has started, in order, each running until the next one starts. */
     fun splits(): List<Split> = PHASES.indices.mapNotNull { i ->
         val from = starts[i] ?: return@mapNotNull null
         val next = (i + 1 until PHASES.size).firstNotNullOfOrNull { starts[it] }
         Split(PHASES[i].label, from, next ?: end)
     }
 
-    /** The split with this label, if it has started. */
     fun split(label: String): Split? = splits().firstOrNull { it.label == label }
 
     private class Phase(val label: String, val starts: (String) -> Boolean)
@@ -135,20 +93,10 @@ class SplitTracker {
         const val NECRON = "&cNecron"
         const val DRAGONS = "&dDragons"
 
-        /**
-         * The Wither King's first line, M7 only: every relic is placed. It comes 64-69 ticks after
-         * the last one goes in (180 recorded M7 runs whose recorder placed it), and the rest of his
-         * opening follows on a fixed script (+62, +124, +310).
-         */
         const val RELICS_PLACED = "[BOSS] Wither King: You... again?"
 
         val EXTRA_STATS = Regex("^ +> EXTRA STATS <$")
 
-        /**
-         * What starts each phase. The Watcher's greeting varies, so any line of his opens Blood;
-         * the one-shot guard in [onChat] makes it the first. Every other line was checked against
-         * recorded F7 runs.
-         */
         private val PHASES = listOf(
             Phase(OPEN) { false },
             Phase(BLOOD) { it.startsWith("[BOSS] The Watcher: ") },
@@ -157,8 +105,6 @@ class SplitTracker {
             Phase(STORM) { it == "[BOSS] Storm: Pathetic Maxor, just like expected." },
             Phase(TERMS) { it == "[BOSS] Goldor: Who dares trespass into my domain?" },
             Phase(GOLDOR) { it == "The Core entrance is opening!" },
-            // "Finally, I heard so much about you." is never said on F7; Necron's first line there
-            // is always this one.
             Phase(NECRON) { it == "[BOSS] Necron: You went further than any human before, congratulations." },
             Phase(DRAGONS) { it == RELICS_PLACED },
         )

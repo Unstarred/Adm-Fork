@@ -4,6 +4,7 @@ import com.engineerclient.EngineerClient
 import net.minecraft.commands.arguments.blocks.BlockStateParser
 import net.minecraft.core.BlockPos
 import net.minecraft.core.registries.BuiltInRegistries
+import net.minecraft.server.level.ServerLevel
 import net.minecraft.world.level.block.Block
 import net.minecraft.world.level.block.Blocks
 import net.minecraft.world.level.block.state.BlockState
@@ -13,13 +14,6 @@ import java.io.DataInputStream
 import java.util.EnumSet
 import java.util.zip.GZIPInputStream
 
-/**
- * The F7 boss arena, block for block, at Hypixel's own coordinates (built from the ADR room
- * library). The sim world's void generator
- * fills each chunk from it as the chunk is first generated ([fill]), so the world is the arena from
- * its first tick, lit by the game's own lighting pass. The blocks that change during a fight
- * (gates, doors, levers, devices) are put back with [restore].
- */
 object Arena {
     class Data(val x0: Int, val y0: Int, val z0: Int, val w: Int, val h: Int, val d: Int, val states: Array<BlockState>, val cells: ShortArray) {
         fun get(x: Int, y: Int, z: Int): BlockState {
@@ -30,7 +24,6 @@ object Arena {
 
     @Volatile private var loaded: Data? = null
 
-    /** The arena, read once from the mod jar (about 13 MB in memory; dropped with [unload]). */
     val data: Data
         get() = loaded ?: synchronized(this) { loaded ?: ArenaFixes.patch(readBin("arena.bin")).also { loaded = it } }
 
@@ -74,15 +67,10 @@ object Arena {
         Blocks.AIR.defaultBlockState()
     }
 
-    /**
-     * Fills a freshly generated chunk of the sim world with its part of the arena (straight into the
-     * sections: no updates, nothing ticks). Called from the generator on a worker thread.
-     */
     fun fill(chunk: ChunkAccess) {
         if (fillBlocks(chunk)) Heightmap.primeHeightmaps(chunk, EnumSet.of(Heightmap.Types.WORLD_SURFACE_WG, Heightmap.Types.OCEAN_FLOOR_WG))
     }
 
-    /** Writes the arena's blocks (and its player heads) into [chunk]; false when the chunk is outside the arena's box. Worker thread. */
     internal fun fillBlocks(chunk: ChunkAccess): Boolean {
         val a = data
         val cx = chunk.pos.minBlockX; val cz = chunk.pos.minBlockZ
@@ -101,17 +89,12 @@ object Arena {
         return true
     }
 
-    /** Puts [pos] back to the arena's start state (with the client told, no neighbour updates). */
-    fun restore(level: net.minecraft.server.level.ServerLevel, pos: BlockPos) {
+    fun restore(level: ServerLevel, pos: BlockPos) {
         val s = data.get(pos.x, pos.y, pos.z)
         if (level.getBlockState(pos) != s) { level.setBlock(pos, s, FLAGS); ArenaFixes.reskull(level, pos) }
     }
 
-    /**
-     * Every block of the arena as built: the whole arena compared, chunk section by section, and any block that
-     * differs put back (whatever changed it, in this game or a saved one). Returns how many were.
-     */
-    fun resync(level: net.minecraft.server.level.ServerLevel): Int {
+    fun resync(level: ServerLevel): Int {
         val a = data
         var fixed = 0
         for (cx in (a.x0 shr 4)..((a.x0 + a.w - 1) shr 4)) for (cz in (a.z0 shr 4)..((a.z0 + a.d - 1) shr 4)) {
@@ -135,10 +118,9 @@ object Arena {
         return fixed
     }
 
-    fun set(level: net.minecraft.server.level.ServerLevel, pos: BlockPos, state: BlockState) {
+    fun set(level: ServerLevel, pos: BlockPos, state: BlockState) {
         if (level.getBlockState(pos) != state) level.setBlock(pos, state, FLAGS)
     }
 
-    /** Clients told, no shape or neighbour updates (nothing pops off, nothing flows). */
     const val FLAGS = Block.UPDATE_CLIENTS or Block.UPDATE_KNOWN_SHAPE
 }

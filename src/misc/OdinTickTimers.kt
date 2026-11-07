@@ -10,14 +10,6 @@ import com.odtheking.odin.events.core.EventBus
 import com.odtheking.odin.events.core.on
 import com.odtheking.odin.features.impl.boss.TickTimers
 
-/**
- * "Goldor Count Up" for Odin's Tick Timers: the Goldor Hud's Tick timer counts up from Goldor's
- * first line like a split (3.5, ... 12.2, ...) instead of down to the next death tick. The colour
- * still follows the time left to the next tick, green / yellow / red as Odin's does, so it goes
- * back to green after each tick. Registered into Odin's module like the Splits look (see
- * OdinSplitsLook); `TickTimersGoldorMixin` asks [tick] for the text where the Goldor Hud formats
- * its timer.
- */
 object OdinTickTimers {
 
     private const val TICK_PREFIX = "§7Tick:"
@@ -29,10 +21,6 @@ object OdinTickTimers {
     private var serverTicks = 0
     private var goldorStart: Int? = null
 
-    /**
-     * The Goldor Hud's timer as Odin formats it ([format]: time, max, prefix, colour or null for
-     * Odin's own), counting up instead for the Tick timer with Goldor Count Up on.
-     */
     @JvmStatic
     fun tick(time: Int, max: Int, prefix: String, format: (Int, Int, String, String?) -> String): String {
         if (!countUp.value || prefix != TICK_PREFIX) return format(time, max, prefix, null)
@@ -41,15 +29,10 @@ object OdinTickTimers {
             time >= max * 0.33f -> "§6"
             else -> "§c"
         }
-        // The HUD preview (no Goldor phase): 3.5 s.
         val elapsed = goldorStart?.let { serverTicks - it } ?: 70
         return format(elapsed, max, prefix, colour)
     }
 
-    /**
-     * The sim stopped (or a practice started): every one of Odin's tick timers off (Goldor's tick and start, Storm's
-     * pad, lightning and PY, Necron's drop, Fire Freeze), as if no boss line had come, and the count-up with them.
-     */
     fun stopAll() {
         goldorStart = null
         for (f in listOf("goldorTickTime", "goldorStartTime", "padTickTime", "lightningTickTime", "pyTickTime", "stormTick", "necronTime", "fireFreezeTime"))
@@ -57,7 +40,6 @@ object OdinTickTimers {
         runCatching { TickTimers::class.java.getDeclaredField("pyTriggered").apply { isAccessible = true }.setBoolean(TickTimers, false) }
     }
 
-    /** Adds the setting to Odin's module; before OdinSplitsLook.install, which re-reads Odin's config. */
     fun install() {
         TickTimers.registerSetting(countUp)
         on<TickEvent.Server> { serverTicks++ }

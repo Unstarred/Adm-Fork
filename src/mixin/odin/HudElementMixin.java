@@ -12,12 +12,6 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/**
- * Every Odin HUD element is made by {@code Module.HUD} from a draw function, which Odin's Compose
- * HUD layer calls to draw it and size it. That function is swapped for {@link OdinHuds}' wrapper
- * as the HUD is made, so Random Stuff's Hide Health/Mana Above % and the Engineer Splits look reach
- * the elements of Odin's own modules without touching those modules.
- */
 @Mixin(value = Module.class, remap = false)
 public class HudElementMixin {
 

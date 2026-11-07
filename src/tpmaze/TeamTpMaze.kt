@@ -38,24 +38,9 @@ import net.minecraft.world.entity.Relative
 import net.minecraft.world.entity.player.Player
 import net.minecraft.world.phys.AABB
 import net.minecraft.world.phys.Vec3
+import kotlin.math.abs
+import kotlin.math.hypot
 
-/**
- * Team TP Maze, on Odin's Puzzle Solvers: one map of the Teleport Maze for the whole party, so a team stacked in the maze (leaping
- * in to whoever is there when it's the last room) splits up instead of trying the same pads.
- *
- * Every pad pair anyone learns goes into a shared [MazeMap] in pad numbers, which are the same on every client however the room is
- * turned ([MazePads]): your own teleports (the pad you stood on, the pad you landed beside, and where the landing turned you to
- * look, which is always at the final pad), teammates' teleports seen in the world (a guess until their own client says), and the
- * maps of teammates who run this too, over Odin's websocket. The connection is Odin's lobby channel, a second one beside Odin's map
- * sync like [com.engineerclient.clearbreakdown.OdinSync]: the messages carry none of the fields Odin's map or Melody read, so their
- * handlers drop them. Each message is the sender's whole map (at most 15 pairs), sent when it changes; a client that comes in asks
- * for everyone's.
- *
- * From the map, [MazePlan] gives everyone in the maze a pad: the final pad once you're in its cell, a known way to its cell, else an
- * unused pad of your cell split by name between the teammates there who run this, else known pads to the nearest cell with unused ones. Your pad
- * is drawn with a tracer; teammates' pads in your cell carry their names; used pads say where they lead. Odin's own TP Maze boxes
- * are left out while this draws (TpMazeRenderMixin).
- */
 object TeamTpMaze {
     private val dropdown = DropdownSetting("Team TP Maze", desc = "Settings for the shared TP Maze map. Added by ADM.")
     private val on = BooleanSetting("Team Maze Solver", true,
@@ -72,10 +57,8 @@ object TeamTpMaze {
         desc = "A teammate's next pad in your cell.").withDependency { dropdown.value && on.value }
 
     private const val ROOM = "Teleport Maze"
-    /** The top of an end-portal frame. */
     private const val FRAME_TOP = 0.8125
     private const val LANDING_Y = 69.5
-    /** How far from a frame's middle a player still stands on it (the recordings: within 1.0 when on top of it). */
     private const val REACH = 1.2
 
     private var map = MazeMap()
@@ -83,15 +66,12 @@ object TeamTpMaze {
     private var mazeRoom: DungeonRoom? = null
     private var plan: Map<String, MazePlan.Advice> = emptyMap()
     private var where: Map<String, Int> = emptyMap()
-    /** The map changed since we last sent it; ticks until we may send again. */
     private var dirty = false
     private var cooldown = 0
     private var helloSent = false
     private var connected = false
-    /** Ticks since we asked for the connection, while it isn't open: past [RETRY] we ask again. */
     private var waiting = 0
     private const val RETRY = 200
-    /** Teammates whose client has said something on the channel: only they are given pads (anyone else won't see theirs). */
     private val heard = HashSet<String>()
 
     private val socket = webSocket {
@@ -104,7 +84,6 @@ object TeamTpMaze {
         for (s in listOf(dropdown, on, tracer, labels, nextColor, finalColor, usedColor, mateColor)) PuzzleSolvers.registerSetting(s)
         on<LevelEvent.Load> { EngineerClient.safely("team tp maze reset") { reset() } }
         on<RoomEnterEvent> { EngineerClient.safely("team tp maze room") { room?.takeIf { it.data?.name == ROOM }?.let { enter(it) } } }
-        // Teleports arrive on the network thread, before the game moves anyone: where they stood is read now, the rest on the client thread.
         onReceive<ClientboundPlayerPositionPacket> {
             if (!active()) return@onReceive
             val p = mc.player ?: return@onReceive
@@ -116,41 +95,50 @@ object TeamTpMaze {
             val fromX = p.x; val fromZ = p.z
             mc.execute { EngineerClient.safely("team tp maze teleport") { teleport(fromX, fromZ, x, y, z, yaw.toDouble(), exact = true) } }
         }
-        // A teammate's teleport, seen in the world: one of these two packets, depending on how the server sends it.
         onReceive<ClientboundTeleportEntityPacket> {
-            val e = teammate(id) ?: return@onReceive
-            val c = change
-            val x = if (Relative.X in relatives) e.x + c.position.x else c.position.x
-            val y = if (Relative.Y in relatives) e.y + c.position.y else c.position.y
-            val z = if (Relative.Z in relatives) e.z + c.position.z else c.position.z
-            val yaw = if (Relative.Y_ROT in relatives) e.yRot + c.yRot else c.yRot
-            seen(e, x, y, z, yaw)
+            if (!active()) return@onReceive
+            val packet = this
+            mc.execute {
+                EngineerClient.safely("team tp maze teammate") {
+                    val e = teammate(packet.id) ?: return@safely
+                    val c = packet.change
+                    val relatives = packet.relatives
+                    val x = if (Relative.X in relatives) e.x + c.position.x else c.position.x
+                    val y = if (Relative.Y in relatives) e.y + c.position.y else c.position.y
+                    val z = if (Relative.Z in relatives) e.z + c.position.z else c.position.z
+                    val yaw = if (Relative.Y_ROT in relatives) e.yRot + c.yRot else c.yRot
+                    seen(e, x, y, z, yaw)
+                }
+            }
         }
         onReceive<ClientboundEntityPositionSyncPacket> {
-            if (!hasPosition() || !hasRotation()) return@onReceive
-            val e = teammate(id) ?: return@onReceive
+            if (!hasPosition() || !hasRotation() || !active()) return@onReceive
+            val id = id
             val to = position.endPosition()
-            seen(e, to.x, to.y, to.z, yRot)
+            val yaw = yRot
+            mc.execute {
+                EngineerClient.safely("team tp maze teammate") {
+                    val e = teammate(id) ?: return@safely
+                    seen(e, to.x, to.y, to.z, yaw)
+                }
+            }
         }
         on<TickEvent.End> { EngineerClient.safely("team tp maze tick") { tick() } }
         on<RenderExtractEvent> { EngineerClient.safely("team tp maze render") { render(this) } }
         EventBus.subscribe(this)
     }
 
-    /** A teammate (not us) by entity id, while this is on. */
     private fun teammate(id: Int): Player? {
         if (!active()) return null
         val e = mc.level?.getEntity(id) as? Player ?: return null
         return e.takeIf { it !== mc.player && DungeonUtils.dungeonTeammatesNoSelf.any { t -> t.name == it.name.string } }
     }
 
-    /** A teammate's teleport from where the server last had them (the entity itself may still be drawn easing there) to (x, y, z). */
     private fun seen(e: Player, x: Double, y: Double, z: Double, yaw: Float) {
         val from = e.positionCodec.base
-        mc.execute { EngineerClient.safely("team tp maze teammate") { teleport(from.x, from.z, x, y, z, yaw.toDouble(), exact = false) } }
+        teleport(from.x, from.z, x, y, z, yaw.toDouble(), exact = false)
     }
 
-    /** Odin's own TP Maze boxes are left out (TpMazeRenderMixin) while this draws. */
     @JvmStatic fun drawsInstead(): Boolean = active() && frame != null
 
     private fun active(): Boolean = on.value && PuzzleSolvers.enabled && DungeonUtils.inDungeons && Puzzle.TP_MAZE.status != PuzzleStatus.Completed
@@ -178,7 +166,6 @@ object TeamTpMaze {
         connected = false; helloSent = false; waiting = 0
     }
 
-    /** The room's frame from three of its blocks, once Odin has found its corner and turn (all zero until then). */
     private fun frameOf(room: DungeonRoom): RoomFrame? {
         val o = room.getRealCoords(BlockPos(0, 69, 0))
         val x = room.getRealCoords(BlockPos(1, 69, 0))
@@ -187,28 +174,21 @@ object TeamTpMaze {
         return RoomFrame(o.x, o.z, x.x - o.x, x.z - o.z, z.x - o.x, z.z - o.z)
     }
 
-    /**
-     * A teleport from (fromX, fromZ) to (x, y, z) looking [yaw] (world): a pad's if it lands on a landing cell's middle at slab height
-     * and turns you to look at a pad, or into the end. [exact]: our own; a teammate's seen from outside is a guess.
-     */
     private fun teleport(fromX: Double, fromZ: Double, x: Double, y: Double, z: Double, yaw: Double, exact: Boolean) {
         val f = frame ?: return
-        if (kotlin.math.abs(y - LANDING_Y) > 0.01) return
+        if (abs(y - LANDING_Y) > 0.01) return
         val (rx, rz) = f.toRoom(x, z).let { it[0] to it[1] }
         val land = MazePads.landingAt(rx, rz)
         if (land < 0) return
         val (ox, oz) = f.toRoom(fromX, fromZ).let { it[0] to it[1] }
-        // A pad's teleport starts in the maze (a leap onto a teammate standing on a landing cell doesn't), and no pad leads into its own
-        // cell: a "landing" where you already were (a setback, a position resync) is no pad's.
         val origin = MazePads.regionAt(ox, oz)
-        if (origin < 0 || kotlin.math.hypot(ox - rx, oz - rz) < 1.5 || origin == MazePads.cell(land)) return
+        if (origin < 0 || hypot(ox - rx, oz - rz) < 1.5 || origin == MazePads.cell(land)) return
         val from = MazePads.padUnder(ox, oz, REACH)
         val ryaw = f.yawToRoom(yaw)
         var changed = false
         if (land == MazePads.END) {
             if (from in 0 until 28) changed = map.link(from, MazePads.END, exact)
         } else {
-            // A setback (Hypixel putting you back) keeps your own yaw: it looks at no pad, and isn't a pad's teleport.
             if (MazePads.aim(land, ryaw).isEmpty()) return
             changed = map.look(land, ryaw)
             if (from >= 0) changed = map.link(from, land, exact) or changed
@@ -221,7 +201,6 @@ object TeamTpMaze {
         val room = mazeRoom ?: return
         if (frame == null) frame = frameOf(room) ?: return
         val f = frame!!
-        // Everyone in the maze who plays by the plan, and where: us, and the teammates whose client we've heard from.
         val w = HashMap<String, Int>()
         mc.player?.let { p -> f.toRoom(p.x, p.z).let { r -> MazePads.regionAt(r[0], r[1]).takeIf { it >= 0 }?.let { w[self] = it } } }
         for (t in DungeonUtils.dungeonTeammatesNoSelf) {
@@ -231,23 +210,18 @@ object TeamTpMaze {
         }
         where = w
         plan = MazePlan.plan(map, w)
-        // The websocket: say hello once it's open (everyone answers with their map), then our map whenever it changes.
         if (connected && !socket.connected && ++waiting > RETRY) connect()
         if (connected && socket.connected) {
             waiting = 0
             if (!helloSent) { helloSent = socket.send(message(hello = true)); if (helloSent) dirty = false }
             if (cooldown > 0) cooldown--
             else if (dirty) {
-                // Nothing to tell (a hello we can't add to): stay quiet.
                 if (map.links(sureOnly = true).isEmpty() && map.exit == null && map.looks().isEmpty()) dirty = false
                 else if (socket.send(message(hello = false))) { dirty = false; cooldown = 4 }
             }
         }
     }
 
-    // ---- the websocket ----------------------------------------------------------------------------------------------------------
-
-    /** Our map as a message. No "playerName", "username" or "roomName": Odin's map and Melody handlers drop it. */
     private fun message(hello: Boolean): String {
         val o = JsonObject()
         o.addProperty("ecTpMaze", 1)
@@ -266,7 +240,6 @@ object TeamTpMaze {
         val from = o.get("from")?.asString ?: return
         if (from == self || DungeonUtils.dungeonTeammates.none { it.name == from }) return
         heard += from
-        // Their maze is ours: the same room corner.
         val at = o.getAsJsonArray("at")
         val anchor = frame?.anchor
         if (at != null && anchor != null && (at.size() != 2 || at[0].asInt != anchor[0] || at[1].asInt != anchor[1])) return
@@ -274,11 +247,8 @@ object TeamTpMaze {
         val exit = o.get("exit")?.asInt
         val looks = o.getAsJsonArray("looks")?.mapNotNull { e -> e.asJsonArray.takeIf { it.size() == 2 }?.let { it[0].asInt to it[1].asDouble } }?.toMap().orEmpty()
         if (map.merge(links, exit, looks)) dirty = true
-        // Someone just came in: everyone sends their map (ours goes out on the next tick).
         if (o.get("hello")?.asBoolean == true) dirty = true
     }
-
-    // ---- drawing ----------------------------------------------------------------------------------------------------------------
 
     private fun render(event: RenderExtractEvent) {
         if (!active() || DungeonUtils.currentRoomName != ROOM) return

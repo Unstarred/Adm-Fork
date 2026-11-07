@@ -6,7 +6,6 @@ import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
 
-/** {@link OdinTermTimes}' Two Decimals for Terminal Times' section splits (its chat handler). */
 @Pseudo
 @Mixin(targets = "com.odtheking.odin.features.impl.boss.TerminalTimes$2", remap = false)
 public class OdinTermTimesMixin {

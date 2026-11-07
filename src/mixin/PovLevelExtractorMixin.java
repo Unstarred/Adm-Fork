@@ -8,11 +8,6 @@ import net.minecraft.core.SectionPos;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 
-/**
- * A POV pass extracts the level from a teammate's eyes, but the section dirty-tracking grid stays
- * centred on YOUR camera: recentring it on every pass would mark its edge sections dirty, back and
- * forth, every frame.
- */
 @Mixin(LevelExtractor.class)
 public class PovLevelExtractorMixin {
 

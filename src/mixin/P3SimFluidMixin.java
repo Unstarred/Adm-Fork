@@ -11,7 +11,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** P3 Sim: the arena's lava and water stay exactly as built (Hypixel's don't flow either). Sim server only. */
 @Mixin(FlowingFluid.class)
 public class P3SimFluidMixin {
 

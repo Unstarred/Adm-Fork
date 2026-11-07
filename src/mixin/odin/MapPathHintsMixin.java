@@ -10,12 +10,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.Collection;
 
-/**
- * Odin's Dungeon Map drawing its "?" tiles (renderPathHints, in Odin's map space): Room
- * Prediction ({@link OdinMapPrediction}) draws its own instead while it has one. Odin builds differ
- * on the method's arguments (the hint tiles; newer ones also the rooms), so both are hooked and
- * whichever this Odin has is the one that applies.
- */
 @Pseudo
 @Mixin(targets = "com.odtheking.odin.features.impl.dungeon.map.MapRendererKt", remap = false)
 public class MapPathHintsMixin {

@@ -3,18 +3,22 @@ package com.engineerclient.p3sim
 import com.engineerclient.EngineerClient
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import it.unimi.dsi.fastutil.shorts.ShortOpenHashSet
 import net.minecraft.core.BlockPos
+import net.minecraft.core.SectionPos
+import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket
+import net.minecraft.world.effect.MobEffectInstance
+import net.minecraft.world.effect.MobEffects
+import net.minecraft.world.entity.EntityTypes
+import net.minecraft.world.entity.MoverType
+import net.minecraft.world.entity.ambient.Bat
+import net.minecraft.world.entity.item.FallingBlockEntity
+import net.minecraft.world.level.Level
 import net.minecraft.world.level.block.state.BlockState
+import net.minecraft.world.phys.Vec3
 import kotlin.random.Random
 import net.minecraft.world.level.block.Blocks as B
 
-/**
- * Every block the fight changes goes through here, so a restart (or leaving the world) can put the
- * arena back exactly as built. Also plays the arena's scripted animations (gates, doors, the core,
- * the floors between phases) frame by frame as recorded on Hypixel (`anims-*.json`, extracted from
- * ADR runs), and the world's own rules that are not fixed frames: Maxor's conveyor strip
- * after its recording ends.
- */
 object Blocks {
     private val touched = LinkedHashSet<BlockPos>()
 
@@ -28,58 +32,42 @@ object Blocks {
 
     fun get(pos: BlockPos): BlockState? = SimServer.level?.getBlockState(pos)
 
-    /** Puts back every block the fight changed. */
     fun restoreAll() {
         val level = SimServer.level ?: return
         anims.clear()
         done.clear()
         conveyor = null
-        // Every block the run changed or a player's game broke ahead of the server: told to every game again after.
         val hits: Set<BlockPos> = clientHits ?: emptySet()
         val sync = HashSet<BlockPos>(touched).also { it += hits }
         clientHits = null
         touched.forEach { Arena.restore(level, it) }
         touched.clear()
-        // Then the whole arena checked against how it was built: anything else that changed goes back too.
         val fixed = Arena.resync(level)
         if (fixed > 0) EngineerClient.logger.info("[p3sim] restore: {} more arena blocks put back", fixed)
-        // No ghost blocks: the true blocks sent now, and again once hits still on their way (dropped with the run's queue)
-        // have landed in the games. A section a packet (a P3 start's world has thousands: Maxor's strip, the P1 floors),
-        // not a block each: those were tens of thousands of packets to a joiner's game, a long freeze.
-        // The run's own blocks go back through the server's usual updates: only resent once, after.
         resend(hits)
         Fight.later(10, "ghost block sync") { resend(sync) }
         Fight.later(40, "ghost block sync") { resend(hits) }
     }
 
-    /**
-     * Blocks a player's game broke before the server said so (the Dungeonbreaker breaks at once on the client): if the
-     * server never answers (a reset dropped the hit, it refused it quietly), the game would keep a ghost.
-     */
     private var clientHits: HashSet<BlockPos>? = null
 
-    /** A player's game hit [pos] (and may have broken it already). */
     fun clientHit(pos: BlockPos) { (clientHits ?: HashSet<BlockPos>().also { clientHits = it }) += pos.immutable() }
 
-    /** The server's blocks at [positions] to every player in the sim: one packet per chunk section. */
     fun resend(positions: Collection<BlockPos>) {
         val level = SimServer.level ?: return
         if (positions.isEmpty()) return
-        val bySection = positions.groupBy { net.minecraft.core.SectionPos.of(it) }
+        val bySection = positions.groupBy { SectionPos.of(it) }
         val packets = bySection.mapNotNull { (sp, ps) ->
             val chunk = level.getChunkSource().getChunkNow(sp.x(), sp.z()) ?: return@mapNotNull null
             val si = chunk.getSectionIndexFromSectionY(sp.y())
             if (si < 0 || si >= chunk.sections.size) return@mapNotNull null
-            val shorts = it.unimi.dsi.fastutil.shorts.ShortOpenHashSet()
-            ps.forEach { shorts.add(net.minecraft.core.SectionPos.sectionRelativePos(it)) }
-            net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket(sp, shorts, chunk.getSection(si))
+            val shorts = ShortOpenHashSet()
+            ps.forEach { shorts.add(SectionPos.sectionRelativePos(it)) }
+            ClientboundSectionBlocksUpdatePacket(sp, shorts, chunk.getSection(si))
         }
         for (p in Sim.players()) packets.forEach { p.connection.send(it) }
     }
 
-    // ------------------------------------------------------------------ recorded animations
-
-    /** [chance] < 1: the frame happens with that chance, rolled once per fight (the P1 platforms' crumble). */
     class Frame(val dt: Int, val pos: BlockPos, val state: BlockState, val chance: Float = 1f)
     class Anim(val name: String, val event: String, val frames: List<Frame>) {
         val positions: Set<BlockPos> by lazy { frames.mapTo(HashSet()) { it.pos } }
@@ -109,7 +97,6 @@ object Blocks {
 
     fun anim(name: String): Anim? = library[name]
 
-    /** Extra data in an animation file (pillar structure and the like). */
     fun extra(file: String, key: String): JsonObject? = try {
         Blocks::class.java.getResourceAsStream("/assets/engineerclient/p3sim/$file")?.use {
             JsonParser.parseString(it.readBytes().toString(Charsets.UTF_8)).asJsonObject.getAsJsonObject(key)
@@ -117,21 +104,13 @@ object Blocks {
     } catch (t: Throwable) { null }
 
     private class Playing(val anim: Anim, val start: Int, var next: Int = 0) {
-        /** The chance frames that lost their roll. */
         val skip = BooleanArray(anim.frames.size) { anim.frames[it].chance < 1f && Random.nextFloat() >= anim.frames[it].chance }
-        /** Gates, doors and the core drop [Debris] for the blocks they remove; the next frame to look at for that. */
         val debris = anim.name.startsWith("gate") || anim.name.startsWith("door") || anim.name == "core"
         var debrisNext = 0
     }
     private val anims = ArrayList<Playing>()
-    /** Animations played or finished this fight: a second [finish] (a phase catching up on one the start already did) is a no-op. */
     private val done = HashSet<String>()
 
-    /**
-     * Starts [name] now (its frame 0 this tick). [skip]: start that many ticks in (catching up).
-     * [delay]: ticks before frame 0 (Hypixel changes gate, door and core blocks 1 tick after their chat line).
-     * [exclude]: positions the phase drives itself, left out of the recording's frames (P1's beacon column).
-     */
     fun play(name: String, skip: Int = 0, exclude: Set<BlockPos> = emptySet(), delay: Int = 0) {
         val a = library[name] ?: run { EngineerClient.logger.warn("[p3sim] no animation {}", name); return }
         done += name
@@ -143,20 +122,11 @@ object Blocks {
         if (name == STRIP) conveyor = Conveyor(p.start + a.length + STRIP_PERIOD)
     }
 
-    /**
-     * 35 invisible bats at x 52-56, y 114-120, z 54.5 in the tick the core opens, each with a gold block as
-     * its passenger (spawned with it, riding from the next tick). They hang still for 7 ticks, then drop
-     * straight down 0.5 a tick, and bat and block go together 31 ticks after spawning (nearly always 31).
-     * The block is a [CarriedBlock] (it never ticks, so it never lands and places itself: the arena stays as
-     * built); the bats keep their invisibility effect.
-     */
     private fun coreBats() {
         val gold = B.GOLD_BLOCK.defaultBlockState()
         repeat(35) {
-            val b = net.minecraft.world.entity.ambient.Bat(net.minecraft.world.entity.EntityTypes.BAT, Sim.level)
-            // Invisible, as Hypixel's are.
-            b.isSilent = true; b.isPermanentlyInvulnerable = true; b.isInvisible = true; b.addEffect(net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.INVISIBILITY, -1, 0, false, false))
-            // No flying of its own: it is placed each tick below.
+            val b = Bat(EntityTypes.BAT, Sim.level)
+            b.isSilent = true; b.isPermanentlyInvulnerable = true; b.isInvisible = true; b.addEffect(MobEffectInstance(MobEffects.INVISIBILITY, -1, 0, false, false))
             b.setNoAi(true); b.setNoGravity(true)
             val x = 52.0 + Random.nextDouble() * 4.0
             val y = 114.0 + Random.nextDouble() * 6.0
@@ -171,7 +141,6 @@ object Blocks {
         }
     }
 
-    /** Jumps [name] to its end state at once (starting a phase past it); once per fight. [exclude]: positions left as they are. */
     fun finish(name: String, exclude: Set<BlockPos> = emptySet()) {
         val a = library[name] ?: return
         if (!done.add(name)) return
@@ -179,7 +148,6 @@ object Blocks {
         a.frames.forEachIndexed { i, f -> if (!p.skip[i] && f.pos !in exclude) set(f.pos, f.state) }
     }
 
-    /** Stops [name] where it is (the strip when Maxor dies). */
     fun stop(name: String) {
         anims.removeAll { it.anim.name == name }
         if (name == STRIP) conveyor = null
@@ -198,7 +166,6 @@ object Blocks {
     private fun advance(p: Playing) {
         val now = Fight.serverTick - p.start
         val f = p.anim.frames
-        // A falling_block for each block about to go, one tick before it turns to air, as Hypixel's gate/door/core debris.
         if (p.debris) while (p.debrisNext < f.size && f[p.debrisNext].dt <= now + 1) {
             val fr = f[p.debrisNext]
             if (!p.skip[p.debrisNext] && fr.state.isAir) debris(fr.pos)
@@ -207,12 +174,10 @@ object Blocks {
         while (p.next < f.size && f[p.next].dt <= now) { if (!p.skip[p.next]) set(f[p.next].pos, f[p.next].state); p.next++ }
     }
 
-    /** Debris spawned this tick (capped: a whole gate goes in a few ticks). */
     private var debrisTick = -1
     private var debrisCount = 0
     private const val DEBRIS_PER_TICK = 48
 
-    /** A [Debris] block (no motion) where [pos]'s block is now, unless it is air already or this tick's cap is reached. */
     private fun debris(pos: BlockPos) {
         val level = SimServer.level ?: return
         val s = level.getBlockState(pos)
@@ -222,19 +187,12 @@ object Blocks {
         debrisCount++
         val e = Debris(level, s)
         e.snapTo(pos.x + 0.5, pos.y.toDouble(), pos.z + 0.5, 0f, 0f)
-        e.deltaMovement = net.minecraft.world.phys.Vec3.ZERO
+        e.deltaMovement = Vec3.ZERO
         Sim.spawn(e)
     }
 
-    // ------------------------------------------------------------------ the world at a phase start
-
-    /**
-     * A menu start: the world as the earlier phases leave it on Hypixel, so a start
-     * from the middle sees what a full run would. The phase itself then adds its own part.
-     */
     fun prepare(start: Fight.Start) {
         if (start == Fight.Start.P1) return
-        // Maxor's end: the strip where it stopped, the beacon column bedrock under red glass, the floors gone.
         finish(STRIP)
         set(73, 221, 73, B.BEDROCK.defaultBlockState())
         for (y in 222..224) set(73, y, 73, B.STAINED_GLASS.red().defaultBlockState())
@@ -242,15 +200,9 @@ object Blocks {
         if (start == Fight.Start.P2) return
         stormPillars()
         if (start != Fight.Start.P4) return
-        // P3 done: the drop hole, every gate and door, the core open (Goldor breaks nothing on his walk).
         for (a in listOf("p3start", "gate12", "door1", "ss_s1done", "gate23", "door2", "gate34", "door3", "core")) finish(a)
     }
 
-    /**
-     * Storm's pillars as they hang at Goldor's line: Purple and Yellow, the two that
-     * crushed, back up with their bottom at y183 (181-186), every block polished diorite (Hypixel
-     * puts back no plain diorite); Green and Red as built.
-     */
     private fun stormPillars() {
         val p = extra("anims-p124.json", "pillars") ?: return
         val origins = p.getAsJsonObject("origins")
@@ -265,14 +217,6 @@ object Blocks {
         }
     }
 
-    // ------------------------------------------------------------------ Maxor's conveyor strip
-
-    /**
-     * The P1 strip keeps moving after its recording (407 ticks) while Maxor lives: per row, every
-     * block takes the one west of it every 10 ticks (anims-p124.json `p1stripRule`). What comes in
-     * at the west end: the floor rows' chevrons repeat every 7 blocks, the item rows bring in air;
-     * past the gap at the beacon the floor comes in gray (as recorded).
-     */
     private class Conveyor(var next: Int)
     private var conveyor: Conveyor? = null
     private val stripRows: List<List<BlockPos>> by lazy {
@@ -284,7 +228,6 @@ object Blocks {
     private fun conveyorTick() {
         val c = conveyor ?: return
         val maxor = Fight.phase as? P1Maxor
-        // Hypixel's last update is at Maxor's death: the recording stops there too.
         if (maxor == null || maxor.status() == "Maxor dead") { stop(STRIP); return }
         if (Fight.serverTick < c.next || isPlaying(STRIP)) return
         c.next = Fight.serverTick + STRIP_PERIOD
@@ -310,36 +253,29 @@ object Blocks {
     private const val PILLAR_BOTTOM = 183
 }
 
-/**
- * Gate / door / core debris: a falling block that falls as vanilla's does but is discarded where it lands (or after
- * 10 s), never placing itself or dropping anything, so the arena stays as the animations leave it.
- */
-class Debris(level: net.minecraft.world.level.Level, state: net.minecraft.world.level.block.state.BlockState) :
-    net.minecraft.world.entity.item.FallingBlockEntity(net.minecraft.world.entity.EntityTypes.FALLING_BLOCK, level) {
-    /** An autosave never writes it (it would come back as a vanilla falling block that lands and places itself). */
+class Debris(level: Level, state: BlockState) :
+    FallingBlockEntity(EntityTypes.FALLING_BLOCK, level) {
     override fun shouldBeSaved() = false
     init {
         runCatching {
-            net.minecraft.world.entity.item.FallingBlockEntity::class.java.getDeclaredField("blockState").apply { isAccessible = true }.set(this, state)
+            FallingBlockEntity::class.java.getDeclaredField("blockState").apply { isAccessible = true }.set(this, state)
         }
     }
     override fun tick() {
         if (++time > 200) { discard(); return }
         applyGravity()
-        move(net.minecraft.world.entity.MoverType.SELF, deltaMovement)
+        move(MoverType.SELF, deltaMovement)
         if (onGround()) { discard(); return }
         deltaMovement = deltaMovement.scale(0.98)
     }
 }
 
-/** A falling block that is only carried: never ticks, so it never falls, lands or places itself. */
-class CarriedBlock(level: net.minecraft.world.level.Level, state: net.minecraft.world.level.block.state.BlockState) :
-    net.minecraft.world.entity.item.FallingBlockEntity(net.minecraft.world.entity.EntityTypes.FALLING_BLOCK, level) {
-    /** An autosave never writes it (it would come back as a vanilla falling block that lands and places itself). */
+class CarriedBlock(level: Level, state: BlockState) :
+    FallingBlockEntity(EntityTypes.FALLING_BLOCK, level) {
     override fun shouldBeSaved() = false
     init {
         runCatching {
-            net.minecraft.world.entity.item.FallingBlockEntity::class.java.getDeclaredField("blockState").apply { isAccessible = true }.set(this, state)
+            FallingBlockEntity::class.java.getDeclaredField("blockState").apply { isAccessible = true }.set(this, state)
         }
         setNoGravity(true)
     }

@@ -8,8 +8,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** P3 Sim: the drop key is the class ability (Archer: Ctrl+Q is Explosive Shot), and never drops an item. Only in the sim world. */
-// 26.3 moved the drop key's LocalPlayer.drop into MultiPlayerGameMode.dropItem.
 @Mixin(MultiPlayerGameMode.class)
 public class ArcherDropSimMixin {
     @Inject(method = "dropItem", at = @At("HEAD"), cancellable = true)

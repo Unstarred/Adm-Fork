@@ -18,23 +18,13 @@ import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.time.Duration
 
-/**
- * Once per launch, the site (/adm/api/launch, shown on its admin page) is told who is playing, which
- * modules they have on with those modules' settings, and how long they have played with the mod.
- *
- * Settings go as on/off, numbers and choices only: text, keybinds, colours and hidden settings (the ADR
- * owner token) stay here. Playtime is counted on client ticks and saved once a minute, so the total sent
- * is everything up to the end of the last session.
- */
 object LaunchStats {
     private const val URL = "https://${ADR.SITE}/adm/api/launch"
-    /** A gap longer than this between two ticks (the game frozen or the machine asleep) isn't counted. */
     private const val MAX_GAP_MS = 5_000L
     private const val SAVE_EVERY_MS = 60_000L
 
     private val file get() = EngineerClient.mc.gameDirectory.toPath().resolve("config").resolve("adm").resolve("playtime.txt")
 
-    /** Milliseconds played with the mod, all sessions. */
     private var playtimeMs = 0L
     private var lastTick = 0L
     private var lastSave = 0L
@@ -43,7 +33,6 @@ object LaunchStats {
         playtimeMs = runCatching { Files.readString(file).trim().toLong() }.getOrDefault(0L)
         ClientTickEvents.END_CLIENT_TICK.register { runCatching { count() } }
         ClientLifecycleEvents.CLIENT_STOPPING.register { save() }
-        // Started: Odin has read every module's settings by now.
         ClientLifecycleEvents.CLIENT_STARTED.register { runCatching { send() } }
     }
 
@@ -96,7 +85,7 @@ object LaunchStats {
                         .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build(),
                     HttpResponse.BodyHandlers.discarding(),
                 )
-            } // a failed send is dropped: nothing is shown or logged
+            }
         }
     }
 }

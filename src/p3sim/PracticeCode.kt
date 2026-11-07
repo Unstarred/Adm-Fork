@@ -2,22 +2,11 @@ package com.engineerclient.p3sim
 
 import java.math.BigInteger
 
-/**
- * A custom practice as a short code to share (the Practice tab's Export / Import): its start, the jobs picked,
- * checkpoints, leap waypoints and start timer, packed into as few bits as each needs, written in 79 characters
- * that paste cleanly into chat and Discord (no markdown, emoji or mention characters). About 16 characters for
- * a start and a few jobs.
- *
- * Positions are to 1/32 of a block in the arena's box, angles to 1/4 degree. Checkpoints keep no facing (only
- * where they are counts). Jobs are indices into [P3Plan.allJobs] (a fixed list), as a list or a mask, whichever
- * is shorter.
- */
 object PracticeCode {
     private const val ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!$%&()+-./=?[]^{}"
     private val BASE = BigInteger.valueOf(ALPHABET.length.toLong())
     private const val VERSION = 0
 
-    // The arena's box (arena.bin), in 1/32 blocks.
     private const val X0 = -8.0; private const val Y0 = 0.0; private const val Z0 = -8.0
     private const val POS_BITS = 13
     private const val YAW_BITS = 11
@@ -41,7 +30,6 @@ object PracticeCode {
         c.checkpoints.forEach { w.spot(it, false) }
         w.put(c.leaps.size.coerceAtMost(4), 3)
         c.leaps.take(4).forEach { w.spot(it, true) }
-        // A leading 1 keeps the leading zeros.
         var n = BigInteger.ONE
         for (b in w.bits) n = n.shiftLeft(1).or(if (b) BigInteger.ONE else BigInteger.ZERO)
         val out = StringBuilder()
@@ -49,7 +37,6 @@ object PracticeCode {
         return out.reverse().toString()
     }
 
-    /** The practice in [code], null: not a code (or a newer version's). */
     fun decode(code: String): Custom? = runCatching {
         var n = BigInteger.ZERO
         for (ch in code.filterNot { it.isWhitespace() }) {
@@ -76,7 +63,6 @@ object PracticeCode {
         val size get() = bits.size
         fun put(v: Int, n: Int) { for (i in n - 1 downTo 0) bits += (v shr i) and 1 == 1 }
         fun append(o: Bits) { bits += o.bits }
-        /** Elias gamma, [v] >= 1: as many zeros as it has bits after the first, then it. */
         fun gamma(v: Int) { val n = 32 - Integer.numberOfLeadingZeros(v); put(0, n - 1); put(v, n) }
         fun pos(v: Double, o: Double) = put(Math.round((v - o) * 32).toInt().coerceIn(0, (1 shl POS_BITS) - 1), POS_BITS)
         fun spot(s: Spots.Spot, facing: Boolean) {
@@ -91,7 +77,6 @@ object PracticeCode {
         var i = 0
         fun get(n: Int): Int { var v = 0; repeat(n) { v = (v shl 1) or (if (bits[i++]) 1 else 0) }; return v }
         fun gamma(): Int { var z = 0; while (!bits[i]) { z++; i++ }; require(z < 31); return get(z + 1) }
-        /** A list's length ([gamma] - 1): each entry takes a bit or more, so a bad code can't ask for a huge list. */
         fun count(): Int = (gamma() - 1).also { require(it <= bits.size - i) }
         fun pos(o: Double) = get(POS_BITS) / 32.0 + o
         fun spot(name: String, facing: Boolean): Spots.Spot {

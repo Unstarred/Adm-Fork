@@ -12,15 +12,6 @@ import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
 import net.minecraft.world.entity.boss.wither.WitherBoss
 
-/**
- * Left Click Mage: a mage's left click fires the Mage Staff beam, but with a boss inside melee reach the click lands
- * as a melee hit on it instead and the beam's damage is lost. A title as soon as you come within melee reach of a
- * wither boss (Maxor, Storm, Goldor, Necron), as Mage only, and again every [repeatTicks] while you stay there.
- *
- * Melee reach is your own entity interaction range (3 blocks) from your eyes to the nearest point of the wither's
- * hitbox, the same test the game makes before a left click hits an entity. Witherborn withers and the Wither Miners
- * round the arena don't count.
- */
 object LcmMeleeWarning : Module(
     name = "LCM Melee Warning",
     category = Category.custom("ADM", 860, 10),
@@ -32,7 +23,6 @@ object LcmMeleeWarning : Module(
 
     private const val TITLE = "§c§lMELEE RANGE!"
 
-    /** Ticks since the last warning. */
     private var sinceAlert = Int.MAX_VALUE
 
     private fun reset() { sinceAlert = Int.MAX_VALUE }

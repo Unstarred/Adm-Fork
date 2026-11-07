@@ -3,13 +3,10 @@ package com.engineerclient.p3sim
 import com.engineerclient.EngineerClient
 import net.minecraft.client.Minecraft
 import java.io.File
+import java.util.Locale
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
-/**
- * One run being recorded, tick by tick, into a [GhostRun] (no Minecraft in here: the tests build
- * runs with it). Frames are kept per n from 0; a tick missed repeats the one before.
- */
 class GhostRecording(val clazz: String, val skill: String) {
     val frames = ArrayList<GhostRun.Frame>()
     val events = ArrayList<GhostRun.Ev>()
@@ -25,13 +22,11 @@ class GhostRecording(val clazz: String, val skill: String) {
 
     fun section(s: Int, n: Int) { if (s in 1..5 && sectionN[s] < 0) sectionN[s] = n }
 
-    /** The run, its time the core's opening; null without one (it never got there, nothing recorded). */
     fun finish(date: Long = System.currentTimeMillis()): GhostRun? {
         val time = sectionN[5]
         if (time < 0 || frames.isEmpty() || time >= frames.size) return null
         val end = frames.size - 1
         val evs = events.filter { it.n in 0..end }.map { e ->
-            // A leap's tick is where you landed: the teleport may show a tick or two after the click.
             if (e.type != "leap") e else {
                 val m = (e.n..minOf(e.n + 2, end)).filter { it > 0 }.maxByOrNull { frames[it].p.dist(frames[it - 1].p) }
                 if (m != null && frames[m].p.dist(frames[m - 1].p) > LEAP_JUMP) e.copy(n = m) else e
@@ -41,12 +36,10 @@ class GhostRecording(val clazz: String, val skill: String) {
     }
 
     companion object {
-        /** A move this far in a tick is a teleport. */
         const val LEAP_JUMP = 4.0
     }
 }
 
-/** Your best run per skill preset and class: `config/adm/p3sim-best/<skill>/<CLASS>.json.gz`. */
 object GhostStore {
     private val cache = HashMap<String, GhostRun?>()
     var root: File? = null
@@ -55,15 +48,11 @@ object GhostStore {
     private fun file(skill: String, clazz: String) = File(File(dir, skill.replace(Regex("[^A-Za-z0-9 _-]"), "_")), "$clazz.json.gz")
 
     @Synchronized fun best(skill: String, clazz: String): GhostRun? = cache.getOrPut("$skill/$clazz") {
-        // The file stream gets its own use: GZIPInputStream's constructor throws on a broken file, and
-        // a stream left open keeps Windows from replacing that file in offer().
         runCatching { file(skill, clazz).takeIf { it.exists() }?.let { f -> f.inputStream().use { raw -> GZIPInputStream(raw).use { GhostRun.fromJson(it.readBytes().decodeToString()) } } } }.getOrNull()
     }
 
-    /** [new] beats [old]: a faster core (a tie: the newer). */
     fun better(new: GhostRun, old: GhostRun?) = old == null || new.time <= old.time
 
-    /** Keeps [run] if it's your best for its skill and class; the best before (null: none). */
     @Synchronized fun offer(run: GhostRun): Pair<Boolean, GhostRun?> {
         val old = best(run.skill, run.clazz)
         if (!better(run, old)) return false to old
@@ -81,11 +70,6 @@ object GhostStore {
     @Synchronized fun clearCache() = cache.clear()
 }
 
-/**
- * Records your P3 runs (from Goldor's first line, S1 starts only) for [GhostStore]: where you are
- * every tick and what you do, and what the party does that you'd wait for (early enterers on their
- * spots, leaps onto you). Kept once the core is open and you've been in it a while (or 20 s after).
- */
 object GhostCapture {
     private var rec: GhostRecording? = null
     private var phase: GoldorPhase? = null
@@ -95,7 +79,6 @@ object GhostCapture {
     fun start(p: GoldorPhase) {
         rec = null
         phase = null
-        // A section practice has the others' jobs done for you: never a best.
         if (p.from != 1 || p.practice) return
         val c = P3Sim.myClass ?: return
         rec = GhostRecording(c.name, P3Plan.skillName())
@@ -103,17 +86,14 @@ object GhostCapture {
         inCoreFor = 0
     }
 
-    /** The run ended before the core (a restart, Stop...): nothing kept. */
     fun drop() { rec = null; phase = null }
 
-    /** Something no real run has ([why]: a menu teleport, creative...): this run can't be a best. */
     fun invalidate(why: String) {
         if (rec == null) return
         drop()
         Sim.note("§7This run won't count as a best ($why).")
     }
 
-    /** P3 ended (P4, Stop, a restart): kept if the core was open, else dropped. */
     fun stopped(p: GoldorPhase) {
         if (p !== phase) return
         if (p.section >= 5) keep() else drop()
@@ -124,7 +104,6 @@ object GhostCapture {
         rec?.event(p.n, type, a, k)
     }
 
-    /** End of each P3 tick: your frame, the section, the end. */
     fun tick(p: GoldorPhase) {
         val r = rec ?: return
         if (p !== phase) return
@@ -154,12 +133,10 @@ object GhostCapture {
         }
     }
 
-    private fun secs(n: Int) = "%.2fs".format(java.util.Locale.ROOT, n / 20.0)
+    private fun secs(n: Int) = "%.2fs".format(Locale.ROOT, n / 20.0)
 
-    /** What you hold: the sim item's id (a bot shows it, [Party.setHeld]), "" for anything else. */
     fun heldKey(id: String?): String = id?.takeIf { it != "SKYBLOCK_MENU" } ?: ""
 
-    /** In the core this long: done (the ghost stands there after). */
     private const val KEEP_IN_CORE = 40
     private const val KEEP_MAX = 400
 }

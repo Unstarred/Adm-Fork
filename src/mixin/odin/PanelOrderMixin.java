@@ -11,12 +11,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-/**
- * Odin lists a ClickGUI panel's modules by how wide their names are, longest first. Our panel is
- * listed in the order of {@link EngineerClient#getMODULES()} instead; every other panel is left
- * as Odin sorts it. The panel is the composable {@code Panel(Category, ...)} in {@code PanelKt}, which
- * sorts once, when the panel is first composed.
- */
 @Pseudo
 @Mixin(targets = "com.odtheking.odin.clickgui.ui.PanelKt", remap = false)
 public class PanelOrderMixin {
@@ -31,7 +25,6 @@ public class PanelOrderMixin {
             List<Module> order = EngineerClient.INSTANCE.getMODULES();
             if (sorted.isEmpty() || !order.contains(sorted.get(0))) return sorted;
             List<Module> ours = new ArrayList<>(sorted);
-            // Anything not in the list (there should be nothing) keeps Odin's place, after ours.
             ours.sort(Comparator.comparingInt(m -> order.contains(m) ? order.indexOf(m) : order.size()));
             return ours;
         } catch (Throwable t) {

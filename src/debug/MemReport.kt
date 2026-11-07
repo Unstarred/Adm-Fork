@@ -4,25 +4,15 @@ import com.engineerclient.EngineerClient
 import org.lwjgl.system.Configuration
 import org.lwjgl.system.MemoryUtil
 import java.nio.file.Files
+import java.nio.file.Path
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
-/**
- * `/adm memreport`: who holds LWJGL's native memory - Minecraft's MemoryUtil, backed here by LWJGL's
- * jemalloc, which rendering, fonts, textures and LWJGL's bundled C libraries (NanoVG, stb) all use.
- * Every allocation still live, grouped by the code that made it, largest total first, written to
- * `logs/adm/memreport-<stamp>.txt`; the top few are said in chat.
- *
- * LWJGL only records allocations when the game was started with
- * `-Dorg.lwjgl.util.DebugAllocator=true` (add `-Dorg.lwjgl.util.DebugAllocator.internal=true` to
- * include LWJGL's own and its C libraries'). That records a stack trace per allocation and costs
- * frame time, so it is for a diagnostic session only.
- */
 object MemReport {
 
     private const val FRAMES = 14
 
-    /** Writes the report off the game thread; [say] gets the result lines. */
     fun write(say: (String) -> Unit) {
         if (!Configuration.DEBUG_MEMORY_ALLOCATOR.get(false)) {
             say("§cnot tracking native memory: start the game with §f-Dorg.lwjgl.util.DebugAllocator=true§c (and §f-Dorg.lwjgl.util.DebugAllocator.internal=true§c)")
@@ -31,7 +21,7 @@ object MemReport {
         say("§7collecting LWJGL's live allocations...")
         Thread({
             EngineerClient.safely("memreport") {
-                val sites = HashMap<String, LongArray>()     // call site -> [bytes, count]
+                val sites = HashMap<String, LongArray>()
                 val threads = HashMap<String, Long>()
                 var total = 0L
                 var count = 0L
@@ -45,7 +35,7 @@ object MemReport {
                 }
                 val ranked = sites.entries.sortedByDescending { it.value[0] }
                 val anon = runCatching {
-                    Files.readAllLines(java.nio.file.Path.of("/proc/self/status")).firstOrNull { it.startsWith("RssAnon") }?.trim()
+                    Files.readAllLines(Path.of("/proc/self/status")).firstOrNull { it.startsWith("RssAnon") }?.trim()
                 }.getOrNull()
                 val rt = Runtime.getRuntime()
                 val out = StringBuilder()
@@ -69,5 +59,5 @@ object MemReport {
         }, "engineerclient-memreport").apply { isDaemon = true }.start()
     }
 
-    private fun mb(bytes: Long) = String.format(java.util.Locale.ROOT, "%.1f MB", bytes / 1048576.0)
+    private fun mb(bytes: Long) = String.format(Locale.ROOT, "%.1f MB", bytes / 1048576.0)
 }

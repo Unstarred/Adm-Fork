@@ -1,8 +1,5 @@
 name: Release
 
-# One rolling release per Minecraft version, named after it ("26.3", "26.2", "26.1.2"): main builds the
-# newest one, marked Latest; each older version lives on an mc/<version> branch. Every push replaces
-# that branch's release.
 on:
   push:
     branches: [main, "mc/**"]
@@ -12,7 +9,6 @@ permissions:
 
 concurrency:
   group: release-${{ github.ref_name }}
-  # A newer push makes the build in progress pointless: it's cancelled and the newest goes out.
   cancel-in-progress: true
 
 jobs:
@@ -38,8 +34,6 @@ jobs:
           MC=$(grep -oP 'com\.mojang:minecraft:\K[^"]+' build.gradle.kts)
           echo "MC=$MC" >> "$GITHUB_ENV"
           echo "CHANNEL=$MC" >> "$GITHUB_ENV"
-      # The last build's compiler state, so a push recompiles only what it touched (Kotlin's incremental compile needs the
-      # earlier outputs and Gradle's record of them; a miss just compiles everything, as without it).
       - uses: actions/cache@v4
         with:
           path: |
@@ -49,7 +43,6 @@ jobs:
             build/tmp
           key: ec-compile-${{ github.ref_name }}-${{ github.sha }}
           restore-keys: ec-compile-${{ github.ref_name }}-
-      # The tests run in their own job alongside (below): the release doesn't wait for them.
       - run: gradle build -x test --console=plain -Dorg.gradle.jvmargs=-Xmx6G -Pkotlin.daemon.jvmargs=-Xmx6G
       - name: Publish
         env:
@@ -57,8 +50,6 @@ jobs:
         run: |
           gh release delete "release-$CHANNEL" --yes --cleanup-tag || true
           if [ "$GITHUB_REF_NAME" = main ]; then latest=--latest; else latest=--latest=false; fi
-          # One jar with a fixed name per Minecraft version, so its download link never changes:
-          # releases/download/release-<channel>/ADM-<mc>.jar
           jar="ADM-$MC.jar"
           cp build/libs/*.jar "$jar"
           url="https://github.com/$GITHUB_REPOSITORY/releases/download/release-$CHANNEL/$jar"
@@ -67,7 +58,6 @@ jobs:
             --title "ADM for Minecraft $MC" \
             --notes "$notes" $latest
 
-  # The headless tests, alongside the release rather than before it: a failure shows on the commit.
   test:
     runs-on: ubuntu-latest
     steps:

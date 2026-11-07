@@ -1,32 +1,31 @@
 package com.engineerclient.p3sim
 
 import com.engineerclient.EngineerClient
+import com.engineerclient.splits.SplitTracker
+import com.odtheking.odin.features.impl.boss.ArrowsDevice
 import net.minecraft.network.protocol.common.ClientboundPingPacket
+import net.minecraft.network.protocol.game.ClientboundClearTitlesPacket
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.world.effect.MobEffectInstance
 import net.minecraft.world.effect.MobEffects
+import net.minecraft.world.entity.EquipmentSlot
 import net.minecraft.world.entity.ai.attributes.Attributes
 import net.minecraft.world.level.GameType
+import net.minecraft.world.phys.Vec3
+import java.util.ArrayDeque
+import java.util.UUID
 import kotlin.random.Random
 
-/**
- * The fight: which phase runs, the server tick, delayed actions, and the player's setup. Server
- * thread only; [SimServer] calls in here only for the sim's own server.
- */
 object Fight {
-    /** One phase of the boss (or a part of one, like a P3 section). */
     abstract class Phase(val name: String) {
-        /** Server ticks since this phase started. */
         var t = 0
         open fun start() {}
         open fun tick() {}
         open fun stop() {}
-        /** Where "Restart" puts you back to. */
         abstract val restart: Start
     }
 
-    /** What the menu can start. */
     enum class Start(val label: String) {
         P1("P1 Maxor"), P2("P2 Storm"), P3("P3 Goldor"), S1("S1"), S2("S2"), S3("S3"), S4("S4"), CORE("Core"), P4("P4 Necron"),
     }
@@ -34,40 +33,31 @@ object Fight {
     var phase: Phase? = null
         private set
 
-    /** The phase before this one, when the fight went on by itself (P1 -> P2 ...); null after a menu start. */
     var previous: Phase? = null
         private set
 
-    /** Every terminal opens as this type (the menu's "Terminals: ..."), or random when null. */
     val forcedTerminal: Terminals.Type? get() = P3Sim.forcedTerminal
 
-    /** The tick (n % 20) stand names are set on this run: 18 (sent on 19, slightly more common) or 17 (sent on 18). */
     var refreshPhase = 18
         private set
 
-    /** Server ticks since the sim started (the ping ids Odin counts as server ticks). */
     var serverTick = 0
         private set
 
-    /** Where the ping ids start counting down from (recorded: about -700, varying per login). */
-    private val PING_BASE = 698 + kotlin.random.Random.nextInt(100)
+    private val PING_BASE = 698 + Random.nextInt(100)
 
-    /** A queued action, and whose it is ([Sim.asPlayer]: a party player's click stays theirs when it lands). */
     private class Later(val at: Int, val what: String, val epoch: Int, val run: () -> Unit) {
         val actor = Sim.acting
         val all = Sim.toAll
         fun go() = Sim.asPlayer(actor, all, run)
     }
-    /** Bumped by every stop: actions queued before it never run after. */
     private var epoch = 0
     private val later = ArrayList<Later>()
 
-    /** Runs [run] [ticks] server ticks from now (0 = later this tick), as whoever queued it. Cleared when a phase starts. */
     fun later(ticks: Int, what: String = "later", run: () -> Unit) {
         later += Later(serverTick + ticks.coerceAtLeast(0), what, epoch, run)
     }
 
-    /** The player's ping, in server ticks: what their clicks and items wait before the server acts. */
     val pingTicks: Int get() = (P3Sim.ping.toInt() + 25) / 50
 
     private class Timed(val dueNs: Long, val what: String, val epoch: Int, val run: () -> Unit) {
@@ -77,17 +67,11 @@ object Fight {
     }
     private val timed = ArrayList<Timed>()
 
-    /**
-     * One simulated delay in real ms, sub-tick: the setting, plus (Ping Jitter) the spread recorded on
-     * Hypixel (round trip p10 30 / median 33 / p90 63 / p99 73 ms, with rare 150 ms+ spikes), as an
-     * offset from the 33 ms median so it doesn't scale with the setting. 0 with no ping.
-     */
     fun pingMs(): Double {
         val base = P3Sim.ping.toDouble()
         if (base <= 0.0) return 0.0
         if (!P3Sim.jitter) return base
         val u = Random.nextDouble()
-        // Quantile table of RTT / median: (cumulative probability, factor).
         val q = JITTER_Q
         var f = q.last()[1]
         for (i in 1 until q.size) if (u <= q[i][0]) { val a = q[i - 1]; val b = q[i]; f = a[1] + (b[1] - a[1]) * (u - a[0]) / (b[0] - a[0]); break }
@@ -98,44 +82,32 @@ object Fight {
         doubleArrayOf(0.99, 2.2), doubleArrayOf(0.998, 3.5), doubleArrayOf(1.0, 8.0),
     )
 
-    /** Runs [run] after the simulated ping, in real time: at the first server tick on or after the delay (at once with none). */
     fun afterPing(what: String, run: () -> Unit) = afterMs(pingMs(), what, run)
 
-    /** Runs [run] [ms] real ms from now, at the first server tick on or after it (at once for 0). */
     fun afterMs(ms: Double, what: String, run: () -> Unit) {
         val p = phase
         if (ms <= 0.0) run()
         else timed += Timed(System.nanoTime() + (ms * 1e6).toLong(), what, epoch) { if (phase === p) run() }
     }
 
-    /**
-     * (xRot, yRot) at the head of the last handleUseItem, before it snaps the player to the packet's rotation: the
-     * last movement packet's rotation, which Hypixel aims a use_item's Jerry-chine with. Set by UseItemRotSimMixin.
-     */
     var lastRot: Pair<Float, Float> by perPlayer { 0f to 0f }
         private set
 
-    /** UseItemRotSimMixin: a use_item reached [p]'s handler (server thread of the sim's server only). */
     @JvmStatic
     fun noteUseItem(p: ServerPlayer) {
         val s = p.level().server
         if (s !== SimServer.server || !s.isSameThread) return
         Sim.asPlayer(p) { lastRot = p.xRot to p.yRot }
     }
-    /** Each player's recent positions (ns, where), for [seenPos]. */
-    private val posHistories = HashMap<java.util.UUID, java.util.ArrayDeque<Pair<Long, net.minecraft.world.phys.Vec3>>>()
+    private val posHistories = HashMap<UUID, ArrayDeque<Pair<Long, Vec3>>>()
 
-    /**
-     * Where the server sees [p]: where they were one one-way latency ago (its checks run on the
-     * position packets that arrived, so about ping/2 late). Live position with no ping.
-     */
-    fun seenPos(p: ServerPlayer): net.minecraft.world.phys.Vec3 = Sim.asPlayer(p, Sim.toAll) {
+    fun seenPos(p: ServerPlayer): Vec3 = Sim.asPlayer(p, Sim.toAll) {
         val live = p.position()
         val ms = P3Sim.ping / 2.0
         val posHistory = posHistories[p.uuid]
         if (ms <= 0.0 || posHistory == null || posHistory.isEmpty()) return@asPlayer live
         val target = System.nanoTime() - (ms * 1e6).toLong()
-        var prev: Pair<Long, net.minecraft.world.phys.Vec3>? = null
+        var prev: Pair<Long, Vec3>? = null
         for (e in posHistory) {
             if (e.first >= target) {
                 val a = prev ?: return@asPlayer e.second
@@ -150,14 +122,12 @@ object Fight {
     }
 
     fun reset(server: MinecraftServer) {
-        // A new sim: nobody's timers from the last one (they'd sit far ahead of this one's ticks).
         PerPlayer.clearAll()
         LagRuntime.reset()
         serverTick = 0
         epoch++
         later.clear()
         timed.clear(); posHistories.clear()
-        // Not a practice left on from the last world (its restart would relaunch it, its bots and plan stay off).
         Practice.exit()
         Terminals.closeAll()
         Sim.forEachPlayer { SimItems.reset() }
@@ -175,33 +145,23 @@ object Fight {
 
     fun stop() {
         phase?.let { EngineerClient.safely("p3sim stop ${it.name}") { it.stop() } }
-        // Whatever title the run left up ("The gate will open in 5 seconds!"...) goes with it.
-        Sim.players().forEach { it.connection.send(net.minecraft.network.protocol.game.ClientboundClearTitlesPacket(true)) }
+        Sim.players().forEach { it.connection.send(ClientboundClearTitlesPacket(true)) }
         phase = null
         epoch++
         later.clear()
         timed.clear()
-        // Their revive went with the queue: a ghost is back to normal now, not left one until the next start.
         Masks.stopped()
-        // The run's file is closed with the fight (a stopping server never ticks again to close it).
         Recorder.finish()
         Terminals.closeAll()
-        // The Dungeonbreaker's broken blocks would grow back into the next start's world (a gate a
-        // later start has open); cooldowns start fresh, as the masks' do.
         Sim.forEachPlayer { SimItems.reset() }
         SimItems.resetShared()
         BossBar.hide()
     }
 
     fun join(player: ServerPlayer) {
-        // Hypixel has no advancements: the blaze rod in the hotbar would pop "Into Fire" up at the first tick. Nothing listens for a criterion any more.
         EngineerClient.safely("ads no advancements") { player.advancements.clearTriggers() }
-        // A party's joiner (P3Party): a class of their own (its bot gone), set up as the host is and put next to them;
-        // the fight goes on as it is (the next start has them in it from the start).
         val host = SimServer.player
         if (host != null && host !== player) {
-            // Their game says hello next, with their class and settings (PartyServer.hello): set up again then.
-            // No class until their game says which it wants (hello): a stand-in one would take a bot, or someone's pick.
             Sim.asPlayer(player) {
                 PartyServer.rosterDirty = true
                 setup(player)
@@ -212,7 +172,6 @@ object Fight {
         lobby(player)
     }
 
-    /** The boss practice's arrival: set up, at the lobby spot, with the welcome line. */
     private fun lobby(player: ServerPlayer) {
         setup(player)
         if (phase == null) {
@@ -224,13 +183,9 @@ object Fight {
         }
     }
 
-    /** A party's player left: their window, their class's place (its bot comes back at the next start). */
     fun leave(player: ServerPlayer) {
-        // How they left their items is saved as their hotbar, for their next arrival (before their ghost state and files go).
         Sim.asPlayer(player) { HotbarLayout.keep(player, save = true); HotbarLayout.forgetGiven() }
-        // A crystal they carried goes back on its stand (else Maxor's side waits for it forever).
         (phase as? P1Maxor)?.playerLeft(player)
-        // Their ghost state goes (a pending revive with it), so a rejoin starts clean.
         Masks.leftOne(player)
         Players.forgetFiles(player)
         val joiner = !Sim.isHost(player)
@@ -238,59 +193,38 @@ object Fight {
         val theirs = Players.jobsOf(player)
         val at = player.position()
         Players.left(player)
-        // Their bot back mid-P3 where they stood, doing what they left (before the roster's own, which would give it the role's).
         if (joiner) (phase as? GoldorPhase)?.let { Party.takeOver(it, c, at, theirs) }
         PartyServer.left(player)
         Party.rosterChanged()
         if (!Sim.isHost(player)) Sim.everyone { Sim.note("§e${player.gameProfile.name}§7 left the party.") }
     }
 
-    /**
-     * Game mode, Hypixel speed, no knockback, no hunger, the boss hotbar. [giveHotbar] false leaves the inventory as it is (a full run
-     * enters the boss with the gear the player cleared with; the hotbar is the run's from its start, ARCHITECTURE 14).
-     */
     fun setup(player: ServerPlayer, giveHotbar: Boolean = true) = Sim.asPlayer(player) {
-        // Hypixel: SURVIVAL. Blocks stay whole through Sim.guardBlocks + DungeonbreakerSimMixin.
         if (player.gameMode() != GameType.CREATIVE) player.setGameMode(GameType.SURVIVAL)
         Sim.guardBlocks()
         applySpeed(player)
         player.getAttribute(Attributes.KNOCKBACK_RESISTANCE)?.baseValue = 1.0
         player.getAttribute(Attributes.STEP_HEIGHT)?.baseValue = 0.6
         player.isPermanentlyInvulnerable = true
-        // Hypixel main: 40 hp with 16 absorption.
         player.getAttribute(Attributes.MAX_HEALTH)?.baseValue = 40.0
         player.health = 40f
-        // 26.1.2 clamps absorption to MAX_ABSORPTION (base 0): raise it first or the 16 comes out as 0.
         player.getAttribute(Attributes.MAX_ABSORPTION)?.let { if (it.baseValue < 16.0) it.baseValue = 16.0 }
         player.absorptionAmount = 16f
         player.removeEffect(MobEffects.SATURATION)
-        // Invulnerable players are never hungry or hurt; the effects are Hypixel's (night vision 1, or with haste 0 + mining fatigue 255).
-        // As sent on main: night vision amplifier 1, ambient and visible but with no icon (all 88 recorded runs); haste and mining fatigue flags 3 (no icon).
         player.addEffect(MobEffectInstance(MobEffects.NIGHT_VISION, -1, 1, true, true, false))
         player.foodData.setFoodLevel(20); player.foodData.setSaturation(20f)
-        // P1/P2's hotbar mid-run there (a joiner arriving), else P3's.
         if (giveHotbar) SimItems.giveHotbar(player, p3 = phase !is P1Maxor && phase !is P2Storm, start = true)
-        // Nothing left of a ghost (a rejoin keeps the saved effects and flight).
         if (player.gameMode() != GameType.CREATIVE) {
             player.removeEffect(MobEffects.INVISIBILITY)
             player.abilities.flying = false; player.abilities.mayfly = false; player.onUpdateAbilities()
         }
-        // Haste 0 + Mining Fatigue 255 unless the Dungeonbreaker is in hand (main toggles them with the held slot).
         SimItems.miningEffects(player, force = true)
     }
 
-    /**
-     * Odin's 4th device solver (Arrows Device) keeps the blocks hit, the target and "complete" until
-     * a world load; a sim restart is a new P3, so it starts clean too.
-     */
-    /**
-     * Odin's i4 solver forgets its marked blocks once the restore's block changes are in the games: the board's lit
-     * (emerald) block going back to blue terracotta reads to it as a hit, so the reset at the start alone isn't enough.
-     */
     private fun resetI4Solver() = later(2, "i4 solver reset") { PartyClient.send("arrowsReset") }
 
     fun resetArrowsDevice() {
-        val c = com.odtheking.odin.features.impl.boss.ArrowsDevice::class.java
+        val c = ArrowsDevice::class.java
         fun field(name: String) = c.getDeclaredField(name).apply { isAccessible = true }
         (field("markedPositions").get(null) as? MutableSet<*>)?.clear()
         field("targetPosition").set(null, null)
@@ -298,28 +232,21 @@ object Fight {
         field("optimalAimPositions").set(null, emptyList<Any>())
     }
 
-    /**
-     * Your speed stat: the setting is without Black Cat; Black Cat adds 100 (and 100 to the cap), Phoenix out
-     * adds nothing; the Racing Helmet adds 100 more.
-     */
     fun speedStat(player: ServerPlayer): Int = Sim.asPlayer(player, Sim.toAll) {
-        val racing = SimItems.idOf(player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.HEAD)) == "RACING_HELMET"
+        val racing = SimItems.idOf(player.getItemBySlot(EquipmentSlot.HEAD)) == "RACING_HELMET"
         P3Sim.speed + (if (P3Sim.phoenix) 0 else 100) + (if (racing) 100 else 0)
     }
 
     fun applySpeed(player: ServerPlayer) {
         val speed = speedStat(player)
         player.getAttribute(Attributes.MOVEMENT_SPEED)?.baseValue = speed.coerceAtLeast(100).toDouble() / 1000.0
-        // The abilities packet's walk speed (FOV scaling) follows it, as Hypixel's does.
         player.abilities.setWalkingSpeed(speed.coerceAtLeast(100) / 1000f)
         player.onUpdateAbilities()
     }
 
-    /** What the menu last started (the Restart keybind starts it again). */
     @Volatile var lastStart = Start.P3
         private set
 
-    /** Starts [what] from its beginning (stopping whatever ran). [practice]: a section practice's start ([Practice]); any other start ends practice mode. */
     fun start(what: Start, practice: Boolean = false) = Sim.asPlayer(null) { startAll(what, practice) }
 
     private fun startAll(what: Start, practice: Boolean) {
@@ -327,51 +254,41 @@ object Fight {
         if (!practice) Practice.exit()
         lastStart = what
         stop()
-        // Every game's Term Info from nothing (a joiner's only reads chat): the phase's own start says where from.
         PartyClient.send("termStart", 0)
         later.clear()
         Sim.clearEntities()
-        // The bots too: a start that spawns none (P2, P4 with Party Bots off) must not see the last run's.
         Party.clear()
         Blocks.restoreAll()
-        // The world as the phases before this one leave it; the 2nd and 3rd devices as before terms (not blank till Goldor's line).
         Blocks.prepare(what)
         if (what != Start.P4) Devices.showIdle()
         resetI4Solver()
         SimItems.rebreak()
         Sim.forEachPlayer { pl ->
             setup(pl)
-            // Black Cat At Start: every start (and restart) with Black Cat out, else the pet you had; the Pet Rod or a Phoenix proc swaps it.
             if (P3Sim.blackCatAtStart && P3Sim.phoenix) { P3Sim.setPhoenix(false); applySpeed(pl) }
             Bows.start()
             Lava.reset()
         }
         Masks.reset()
-        refreshPhase = if (kotlin.random.Random.nextInt(36) < 21) 18 else 17
+        refreshPhase = if (Random.nextInt(36) < 21) 18 else 17
         Stats.runStart = if (what == Start.P1) serverTick else -1
         previous = null
-        // Our splits: a fresh run from this phase, the ones before it at your Pace times. Queued on
-        // the client before any of this fight's lines can reach it (it starts Odin's run too).
         val (split, termsDone) = when (what) {
-            Start.P1 -> com.engineerclient.splits.SplitTracker.MAXOR to 0
-            Start.P2 -> com.engineerclient.splits.SplitTracker.STORM to 0
-            Start.P3, Start.S1 -> com.engineerclient.splits.SplitTracker.TERMS to 0
-            Start.S2 -> com.engineerclient.splits.SplitTracker.TERMS to 1
-            Start.S3 -> com.engineerclient.splits.SplitTracker.TERMS to 2
-            Start.S4 -> com.engineerclient.splits.SplitTracker.TERMS to 3
-            Start.CORE -> com.engineerclient.splits.SplitTracker.GOLDOR to 0
-            Start.P4 -> com.engineerclient.splits.SplitTracker.NECRON to 0
+            Start.P1 -> SplitTracker.MAXOR to 0
+            Start.P2 -> SplitTracker.STORM to 0
+            Start.P3, Start.S1 -> SplitTracker.TERMS to 0
+            Start.S2 -> SplitTracker.TERMS to 1
+            Start.S3 -> SplitTracker.TERMS to 2
+            Start.S4 -> SplitTracker.TERMS to 3
+            Start.CORE -> SplitTracker.GOLDOR to 0
+            Start.P4 -> SplitTracker.NECRON to 0
         }
-        // Practice: no splits (its own timer is the one that counts); the last run's are cleared.
         if (practice) PartyClient.send("splitsStop") else PartyClient.send("splitsStart", termsDone, split)
         Recorder.begin(what.label)
-        // No "Starting in 1 second." line (Hypixel has none in P3): SimOdinSplits starts Odin's run directly.
         val p: Phase = when (what) {
             Start.P1 -> P1Maxor()
             Start.P2 -> P2Storm()
-            // From Storm's death: 3.1 s to Goldor's line, as in the game since the boss update.
             Start.P3 -> StormEnd()
-            // S1's practice starts at Goldor's line, you on your spawn.
             Start.S1 -> if (practice) GoldorPhase(1) else StormEnd()
             Start.S2 -> GoldorPhase(2)
             Start.S3 -> GoldorPhase(3)
@@ -382,7 +299,6 @@ object Fight {
         begin(p)
     }
 
-    /** Hands over to the next phase (the fight going on by itself: P1 -> P2 -> ...). */
     fun begin(p: Phase) {
         phase?.let { if (it !== p) EngineerClient.safely("p3sim stop ${it.name}") { it.stop() } }
         previous = phase
@@ -391,7 +307,6 @@ object Fight {
         p.start()
     }
 
-    /** Ends the fight (the menu's Stop): everything back to how it was built. */
     fun end() {
         Practice.exit()
         stop()
@@ -400,8 +315,6 @@ object Fight {
         Devices.showIdle()
         resetI4Solver()
         Party.clear()
-        // The splits stop with it: ours and Odin's cleared as a world load clears them, rather than
-        // left counting a fight that's gone. Queued on the client like a start's, so they stay in order.
         PartyClient.send("splitsStop")
         PartyClient.send("termStart", 0)
     }
@@ -409,11 +322,7 @@ object Fight {
     fun tick(server: MinecraftServer) {
         Sim.clearActor()
         serverTick++
-        // Hypixel pings every client each server tick; Odin (and this mod) count those as server
-        // ticks: Simon Says, terminal first-click protection, splits all run on them.
-        // Hypixel's ids count down from about -700 (never 0, which Odin ignores).
         server.playerList.players.forEach { it.connection.send(ClientboundPingPacket(-(PING_BASE + serverTick))) }
-        // The party keeps its food full all run (the world is on normal difficulty, and vanilla hunger would end sprinting at food 6; Hypixel's is always 20).
         server.playerList.players.forEach { p -> if (p.foodData.foodLevel != 20) { p.foodData.setFoodLevel(20); p.foodData.setSaturation(5f) } }
         if (later.isNotEmpty()) {
             val due = later.filter { it.at <= serverTick }
@@ -428,25 +337,22 @@ object Fight {
         }
         val now = System.nanoTime()
         for (pl in Sim.players()) {
-            val h = posHistories.getOrPut(pl.uuid) { java.util.ArrayDeque() }
+            val h = posHistories.getOrPut(pl.uuid) { ArrayDeque() }
             h.addLast(now to pl.position())
             while (h.size > 40) h.removeFirst()
         }
         EngineerClient.safely("p3sim party") { PartyServer.tick() }
-        // Each on its own: one throwing must not stop the phase's tick (the fight would freeze).
         EngineerClient.safely("p3sim blocks") { Blocks.tick() }
         EngineerClient.safely("p3sim terminals") { Terminals.tick() }
         EngineerClient.safely("p3sim items") { SimItems.tick() }
         Sim.forEachPlayer { EngineerClient.safely("p3sim bows") { Bows.tick() } }
         Sim.forEachPlayer { pl -> if (P3Sim.lava) EngineerClient.safely("p3sim lava") { Lava.tick(pl) } }
         val p = phase
-        if (p == null) { Recorder.finish(); SimItems.flushMotion(); return }
-        // The run recorder covers P1-P3 and stops at Necron; his phase still has to tick.
+        if (p == null) { Recorder.finish(); MovementItems.flushMotion(); return }
         if (p is P4Necron) Recorder.finish()
         EngineerClient.safely("p3sim ${p.name}") { p.tick() }
         p.t++
         if (p !is P4Necron) EngineerClient.safely("p3sim recorder") { Recorder.tick(serverTick) }
-        // This tick's knockback, straight to the player in the burst's own tick (SimItems.push).
-        SimItems.flushMotion()
+        MovementItems.flushMotion()
     }
 }

@@ -10,10 +10,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/**
- * Hide Own Arrows Nearby in {@link RandomStuff}: an arrow the local player shot is not drawn while
- * it flies within 5 blocks of them. Arrows in item frames are items, so they never reach here.
- */
 @Mixin(EntityRenderDispatcher.class)
 public class OwnArrowsHideMixin {
     @Inject(method = "shouldRender", at = @At("HEAD"), cancellable = true)

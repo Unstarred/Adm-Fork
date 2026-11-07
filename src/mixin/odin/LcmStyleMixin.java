@@ -9,11 +9,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/**
- * Odin's Dungeon Map HUD (the lambda behind its "Dungeon Map" HUD setting, which draws the background, the map
- * and the players and returns its size): with LCM Style on, {@link LcmStyle} draws all of it instead.
- * If it can't draw a frame, Odin's own map is drawn.
- */
 @Pseudo
 @Mixin(targets = "com.odtheking.odin.features.impl.dungeon.map.DungeonMap$mapHud$2", remap = false)
 public class LcmStyleMixin {

@@ -1,4 +1,4 @@
-package com.engineerclient.mixin;
+package com.engineerclient.mixin.odin;
 
 import com.engineerclient.misc.RandomStuff;
 import com.engineerclient.practice.InfNumbersSim;
@@ -14,14 +14,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Odin's numbers solver, with the number text taken off it: for /termsim inf, which has no numbers
- * at all, and for Random Stuff's Hide Terminal Numbers.
- *
- * Odin hands the solver's drawing back as (colour, text) per slot and every render type - its own,
- * the vanilla one and the custom GUI - draws that same pair, so dropping the text here is enough to
- * hide the numbers everywhere Odin draws them.
- */
 @Mixin(value = NumbersHandler.class, remap = false)
 public class NumbersHandlerMixin {
     @Inject(method = "solve", at = @At("HEAD"), cancellable = true)

@@ -7,27 +7,6 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
-/**
- * EC's own log: one file per game session under `logs/adm/`, meant to be attached
- * as-is to a bug report when a run goes wrong. It is self-contained on purpose — every chat line the mod looked at is in it RAW, in
- * order, next to every decision the engine made from it, so a run can be replayed through the
- * engine offline and the first wrong decision found without a clip.
- *
- * One event per line: `HH:mm:ss.SSS <TAG> <payload>`, tab-separated.
- *
- *   SESSION  mod/spec/Odin versions, local player, starting role
- *   SETUP    the setup check, one line per item
- *   CHAT     a raw chat line, exactly as received (only while in a dungeon)
- *   SECTION  phase-3 section transitions
- *   ENGINE   the rotation engine's decision trail
- *   LEAP     leap cue: target chosen, became ready, and by which signal
- *   MASK     invincibility procs, mine and the party's
- *   ROLE     starting-role announcements heard
- *   MARK     a note typed by the player with /adm log mark
- *   WARN     anything the mod could not make sense of
- *
- * Free of Minecraft so the engine can write to it; with no file open every call is a no-op.
- */
 object EcLog {
 
     private const val KEEP = 15
@@ -38,7 +17,6 @@ object EcLog {
     var path: Path? = null
         private set
 
-    /** Open a fresh session file under [gameDir]/logs/adm, keeping only the last [KEEP]. */
     @Synchronized
     fun open(gameDir: Path, header: List<String>) {
         close()
@@ -59,8 +37,6 @@ object EcLog {
     fun log(tag: String, message: String) {
         synchronized(this) {
             out?.println(LocalTime.now().format(stamp) + "\t" + tag + "\t" + message.replace('\n', ' '))
-            // Written through at most once a second (a flush a line cost the game thread a disk write per chat line), and at once
-            // for anything that went wrong.
             val now = System.currentTimeMillis()
             if (now - flushedAt > 1000 || tag == "WARN" || tag == "ERROR" || tag == "MARK") { out?.flush(); flushedAt = now }
         }

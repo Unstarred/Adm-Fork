@@ -1,17 +1,7 @@
 package com.engineerclient.clearbreakdown
 
-/** One player's line, in parts: the module puts a hover on [rooms] and on [secrets]. */
 data class LineParts(val name: String, val rooms: String, val roomsHover: String, val secrets: String, val secretsHover: String)
 
-/**
- * The words of a breakdown line:
- *
- *     Andrew: 3-5 12 secrets
- *
- * solo clears - all clears, then the run's secrets from the API ("?" when it didn't answer). The
- * rooms hover lists the rooms in clear order, the secrets hover what was found where ("~" for an
- * estimate, then what no room explains). Legacy § colours, like the rest of the mod's chat.
- */
 object BreakdownText {
     fun line(name: String, colour: Char, clears: List<Clear>, secrets: PlayerSecrets?): LineParts {
         val rooms = "§f${clears.count { it.solo }}§7-§f${clears.size}"

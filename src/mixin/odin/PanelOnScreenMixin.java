@@ -6,10 +6,6 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.injection.At;
 
-/**
- * Odin's Click GUI panels never off screen (OdinOnScreen): {@code maxY()} is how low a panel's header may sit, for where
- * it is laid out and for dragging it, so raising it keeps part of an open panel's module list on screen too.
- */
 @Pseudo
 @Mixin(targets = "com.odtheking.odin.clickgui.ui.PanelKt", remap = false)
 public class PanelOnScreenMixin {

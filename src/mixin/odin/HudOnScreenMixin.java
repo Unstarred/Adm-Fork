@@ -7,10 +7,6 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
 
-/**
- * Odin's HUDs never off screen in play (OdinOnScreen): {@code render} with {@code example} false draws them in play;
- * true is the HUD editor, which clamps them itself.
- */
 @Pseudo
 @Mixin(targets = "com.odtheking.odin.clickgui.HudLayer", remap = false)
 public class HudOnScreenMixin {

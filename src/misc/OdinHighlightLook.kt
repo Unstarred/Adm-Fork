@@ -27,21 +27,6 @@ import net.minecraft.world.entity.player.Player
 import net.minecraft.world.item.Items
 import net.minecraft.world.phys.AABB
 
-/**
- * A "Look" for Odin's Highlight: Odin's, or one remade from Blade Addons' Mob Highlight.
- *
- * The Blade look tells mobs apart, each kind in its own colour: starred mobs (Odin's Highlight
- * colour), tanks (Zombie Commander / Lord, Skeleton Lord, Withermancer, Super Archer), minibosses
- * (Lost Adventurer, Angry Archaeologist, Frozen Adventurer, King Midas), Fels, Shadow Assassins and
- * Mimics. A mob is found from its name tag by entity id - the mob is spawned just before its tag,
- * so it is the tag's id less one (three for a Withermancer) - rather than by looking under the tag,
- * so a mob in a crowd is never mixed up with its neighbour. Shadow Assassins have no tag: they are
- * the fake players holding "Silent Death" in leather boots. An invisible Fel shows only its head.
- *
- * Like the Splits look (OdinSplitsLook), the settings are registered into Odin's module and saved
- * with it; Odin's Render Style, Hide non-starred names and Teammate Class Glow still apply.
- * `HighlightRenderMixin` skips Odin's own boxes while this look is on.
- */
 object OdinHighlightLook {
 
     private enum class Look { ODIN, BLADE }
@@ -60,7 +45,6 @@ object OdinHighlightLook {
     private val hideInvisible = BooleanSetting("Hide Invisible", true, desc = "Blade: no box on an invisible Shadow Assassin, and only the head of an invisible Fel.").withDependency { blade }
     private val notWhileBlind = BooleanSetting("Not While Blind", true, desc = "Blade: no boxes while you have Blindness.").withDependency { blade }
 
-    /** Read by HighlightRenderMixin: Odin's own boxes are skipped while the Blade look is on. */
     @JvmStatic
     fun replacesOdin(): Boolean = blade
 
@@ -68,7 +52,6 @@ object OdinHighlightLook {
     private val MINIS = listOf("Lost Adventurer", "Angry Archaeologist", "Frozen Adventurer")
 
     private val found = HashMap<Int, Pair<Entity, Kind>>()
-    /** Name tags already looked at (a tag's name never changes once it has one). */
     private val seenTags = HashSet<Int>()
 
     private val mc: Minecraft get() = Minecraft.getInstance()
@@ -127,7 +110,6 @@ object OdinHighlightLook {
         found.values.removeIf { (e, _) -> !e.isAlive || e.isRemoved }
     }
 
-    /** Adds the settings to Odin's Highlight; before OdinSplitsLook.install, which re-reads Odin's config. */
     fun install() {
         for (s in listOf(look, tankColor, miniColor, felColor, assassinColor, mimicColor, hideInvisible, notWhileBlind)) Highlight.registerSetting(s)
 

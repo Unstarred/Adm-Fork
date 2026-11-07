@@ -1,5 +1,6 @@
 package com.engineerclient.misc
 
+import com.mojang.blaze3d.vertex.PoseStack
 import com.odtheking.odin.clickgui.settings.impl.ColorSetting
 import com.odtheking.odin.events.LevelEvent
 import com.odtheking.odin.events.MessageEvent
@@ -11,26 +12,12 @@ import com.odtheking.odin.features.Module
 import com.odtheking.odin.utils.Color
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
 import com.odtheking.odin.utils.skyblock.dungeon.M7Phases
+import net.minecraft.client.renderer.SubmitNodeCollector
 import net.minecraft.client.renderer.rendertype.RenderTypes
 import net.minecraft.world.entity.boss.wither.WitherBoss
 import net.minecraft.world.entity.player.Player
+import net.minecraft.world.phys.Vec3
 
-/**
- * F7 P1/P2: Maxor and Storm aggro onto whoever is closest, so a see-through sphere around the boss
- * through the closest player is the aggro boundary: step inside it and you take aggro. When YOU are
- * the closest, it goes through the 2nd closest instead - the margin you have before someone else
- * takes it - in its own colour.
- *
- * The phase that is actually running comes from the boss dialogue (Odin's phase is just your
- * height), and the sphere only shows while you are in that phase's arena: fall below Maxor's
- * platform during P1, or below Storm's during P2, and it is gone for the rest of that phase instead of
- * switching to the next boss. Before any boss line has been seen (joined mid-fight) it goes by height
- * alone. F7 only. Storm's shows from his lightning line ("ENERGY HEED MY CALL!") on: before it he
- * flies his set route and then hovers, and about 5 s after it he leaves the hover for the pads.
- *
- * The boss is the nearest live WitherBoss to you, preferring one whose name mentions the boss -
- * the other withers sit in their own arenas further down, so nearest is the one you're fighting.
- */
 object AgroSphere : Module(
     name = "Agro Sphere",
     category = Category.custom("ADM", 860, 10),
@@ -44,15 +31,11 @@ object AgroSphere : Module(
     private const val LON_BANDS = 48
 
     private var boss: WitherBoss? = null
-    /** The party members alive near the boss this tick. */
     private var players: List<Player> = emptyList()
 
-    /** The boss phase that is running, from chat; null before the first boss line or after Storm. */
     private var activePhase: M7Phases? = null
     private var sawBossLine = false
-    /** You went below the running phase's arena: no sphere until the next phase starts. */
     private var leftPhase = false
-    /** Storm's lightning line has come: from then on his aggro matters. */
     private var stormLightning = false
     private val stormLightningRegex = Regex("^\\[BOSS] Storm: (?:ENERGY HEED MY CALL!|THUNDER LET ME BE YOUR CATALYST!)$")
     private val maxorRegex = Regex("^\\[BOSS] Maxor: ")
@@ -63,10 +46,6 @@ object AgroSphere : Module(
     data class Member(val isMe: Boolean, val distance: Double)
     data class Result(val radius: Double, val youHaveAggro: Boolean)
 
-    /**
-     * The sphere's radius from every live party member's distance to the boss (order doesn't
-     * matter): the closest's, or the 2nd closest's when you are the closest. Null: no one to measure.
-     */
     fun radius(distances: List<Member>): Result? {
         val sorted = distances.sortedBy { it.distance }
         val closest = sorted.firstOrNull() ?: return null
@@ -90,7 +69,6 @@ object AgroSphere : Module(
         on<TickEvent.End> {
             if (DungeonUtils.floor?.name != "F7") { boss = null; players = emptyList(); return@on }
             val here = DungeonUtils.getF7Phase()
-            // Below the running phase's arena (you fell): off for the rest of the phase.
             if (sawBossLine && activePhase != null && here != activePhase) leftPhase = true
             val phase = (if (leftPhase) null else if (sawBossLine) activePhase else here)
                 ?.takeUnless { it == M7Phases.P2 && sawBossLine && !stormLightning }
@@ -118,8 +96,6 @@ object AgroSphere : Module(
             val me = mc.player ?: return@on
             val pt = mc.deltaTracker.getGameTimeDeltaPartialTick(false)
             val center = boss.getPosition(pt)
-            // Measured per frame from interpolated positions, so the sphere moves smoothly
-            // instead of stepping each tick; feet-to-feet distance.
             val members = players.filter { it.isAlive }.map { Member(it === me, it.getPosition(pt).distanceTo(center)) }
             val result = radius(members) ?: return@on
             val color = if (result.youHaveAggro) aggroColor else sphereColor
@@ -127,11 +103,10 @@ object AgroSphere : Module(
         }
     }
 
-    /** Translucent, depth-tested, not culled: reads from inside the sphere as well as outside. */
     private fun drawSphere(
-        pose: com.mojang.blaze3d.vertex.PoseStack,
-        collector: net.minecraft.client.renderer.SubmitNodeCollector,
-        center: net.minecraft.world.phys.Vec3,
+        pose: PoseStack,
+        collector: SubmitNodeCollector,
+        center: Vec3,
         radius: Double,
         color: Color,
     ) {
@@ -151,7 +126,6 @@ object AgroSphere : Module(
         pose.popPose()
     }
 
-    /** The sphere's points at radius 1, worked out once (theta 0 at the top, PI at the bottom). */
     private val unitSphere = FloatArray((LAT_BANDS + 1) * (LON_BANDS + 1) * 3).also { a ->
         for (lat in 0..LAT_BANDS) for (lon in 0..LON_BANDS) {
             val theta = Math.PI * lat / LAT_BANDS

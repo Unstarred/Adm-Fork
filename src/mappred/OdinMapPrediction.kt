@@ -29,36 +29,6 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToInt
 
-/**
- * Map Prediction on Odin's Dungeon Map (F1-F7, M1-M7): what the unknown tiles probably are, from what the
- * map has shown so far and the rules every recorded map of the floor follows ([MapPredictor], [FloorRules]).
- * On F4-F6 that includes the puzzle column east of the main grid, where a tile is a puzzle or nothing.
- *
- * Each "?" tile behind a door is coloured by its chances (purple puzzle, orange trap, yellow
- * miniboss, red blood, pink fairy, each from Min Chance up; the grey rest is a normal room; the tile behind
- * a blood door is the blood room, drawn as itself), and with Split Contents on it
- * says what that door's side of the map holds: its puzzles, trap, yellow and blood, about how
- * many rooms, and with Split Secrets about how many secrets (its rooms' averages, fitted to the tab's
- * secret total once it shows one: [MapPredictor.splitSecrets]; a guess beside the rooms, never steering them). Each kind of guess
- * has its own slider: a tile Dead End Chance sure to be a puzzle, trap, yellow or rare 1x1 (always
- * from 95%) gets Odin's own guess tile (the types it can be, side by side, with a "?"); one Blood &
- * Fairy Chance sure to be blood or the fairy room gets a guess tile in that room's colour; a big
- * room Big Room Chance sure and a normal 1x1 1x1 Room Chance sure are greyed out at their size; doors
- * between unknown rooms Door Chance sure are drawn where Odin draws doors (black on the way to blood,
- * red the blood door, pink the fairy room's). Near the end, once the secrets the tab list counts
- * leave only one way for the last rooms to be, they're drawn in full with their names. Everything
- * is worked out again on a background thread whenever the map shows more, so a wrong guess changes
- * as rooms open. Only what the map shows is used (never the world scan of rooms nobody has seen).
- * Every floor is predicted by the game's own steps ([GameSampler]: the big rooms one random spot each, the door tree
- * grown from the entrance, the puzzle column after it); the older classic sampler only takes a map those can't fit.
- * The prediction doesn't start over when a room opens: the whole maps it guessed before are kept, and the ones that
- * agree with the new room are the new guess at once ([PredictionSession]); more guesses top them up, and Predict Ahead
- * keeps guessing while the map stays, on Prediction Threads threads, for the next room.
- *
- * Like the other Odin additions, the settings are registered into Odin's module and saved with it.
- * `MapPathHintsMixin` draws this instead of Odin's "?" tiles while it is on. With LCM Style on, LcmStyle
- * draws it in that look instead: its colours, its guess tiles and doors, and the chances where the "?"s were.
- */
 object OdinMapPrediction {
 
     private enum class Mode { ADM, ODIN }
@@ -105,7 +75,6 @@ object OdinMapPrediction {
         desc = "The colours predicted rooms are drawn in. Off, they follow the map's own room colours (Odin's, or LCM Colors in LCM Style), darkened.").withDependency { on }
     private val customColors = BooleanSetting("Custom Prediction Colors", false,
         desc = "Draws predicted rooms in the colours below instead of the map's room colours, in Odin's look and LCM Style alike.").withDependency { on && colorsDropdown.value }
-    // dtMap's room colours darkened as it darkens a guess, and the grey of a sure big or 1x1 room, to begin with
     private val predPuzzle = predColor("Puzzle", LcmStyle.darker(0xFF750085.toInt()), "a predicted puzzle room")
     private val predTrap = predColor("Trap", LcmStyle.darker(0xFFD87F33.toInt()), "a predicted trap room")
     private val predYellow = predColor("Yellow", LcmStyle.darker(0xFFFEDF00.toInt()), "a predicted yellow (miniboss) room")
@@ -118,7 +87,6 @@ object OdinMapPrediction {
         ColorSetting("Predicted $type", Color(default), true, desc = "Custom Prediction Colors' colour for $what.")
             .withDependency { on && colorsDropdown.value && customColors.value }
 
-    /** A predicted type's colour from Prediction Colors, or null to use the map's room colours. */
     private fun custom(c: Int): Int? {
         if (!customColors.value) return null
         return when (c) {
@@ -134,28 +102,20 @@ object OdinMapPrediction {
 
     private val question = Identifier.fromNamespaceAndPath("odin", "map/question.png")
 
-    @Volatile private var shown: Prediction? = null
-    @Volatile private var shownView: MapView? = null
-    /** Every unnamed room's names once the map is known for sure ([MapPredictor.certainNames]); null until then. */
-    @Volatile private var shownNames: List<NamedRoom>? = null
+    private class Shown(val prediction: Prediction?, val view: MapView?, val names: List<NamedRoom>?)
+
+    @Volatile private var shown: Shown? = null
     private var lastKey = ""
     private val generation = AtomicInteger()
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "engineerclient-map-prediction").apply { isDaemon = true; priority = Thread.MIN_PRIORITY } }
-    /** The guesses, kept from one map to the next of a dungeon (only the worker thread uses it, but for [PredictionSession.cancel]). */
     private val session = PredictionSession()
 
-    /** Doors the map has shown as wither or blood doors this run (the map stops showing that once they're open). */
     private val pathDoors = HashMap<Int, Byte>()
 
     private const val W = 6
     private const val TILE = 20
     private const val ROOM = 16
-    /** From this sure (percent) a dead end always gets Odin's guess tile, whatever Dead End Chance is. */
     private const val ALWAYS_DEAD_END = 95
-    /**
-     * Shown as 100% (the chances are drawn rounded): from here anything predicted is drawn as an exact room, and a name
-     * as the room's name.
-     */
     private const val SURE = 0.995f
     private val BIG_GREY = Color(85, 85, 85, 1f)
 
@@ -171,29 +131,25 @@ object OdinMapPrediction {
         generation.incrementAndGet()
         session.cancel()
         worker.execute { session.clear() }
-        shown = null; shownView = null; shownNames = null; lastKey = ""
+        shown = null; lastKey = ""
+        lastDerived = null
         pathDoors.clear()
     }
 
-    /** The floor's rules; null on the entrance floor (no recorded maps). */
     private fun rules(): FloorRules? = FloorRules.of(DungeonUtils.floor?.floorNumber ?: 0)
 
     private fun supported(): Boolean = DungeonUtils.inClear && rules() != null
 
-    /** The map as Odin has read it, discovered rooms only; null when it can't be read cleanly yet. */
     private fun view(): MapView? {
         val rules = rules() ?: return null
         val puzzles = DungeonUtils.puzzleCount
         if (puzzles <= 0) return null
-        // Odin's tiles count from the dungeon's north-west corner on every floor, the floor's grid within its 6x6
         val v = MapView(W, W, puzzles, rules)
         for (room in DungeonScan.rooms) {
             if (!room.isViewable || room.tiles.isEmpty()) continue
             val kind = when (room.type) {
                 RoomType.ENTRANCE -> Kind.ENTRANCE
                 RoomType.NORMAL -> Kind.NORMAL
-                // a brown room Odin has seen only on the map is RARE (its map colour is both's) until it scans the room's
-                // core, often tens of seconds for a room far off: a normal one to the predictor until then
                 RoomType.RARE -> if (room.data == null) Kind.NORMAL else Kind.RARE
                 RoomType.PUZZLE -> Kind.PUZZLE
                 RoomType.TRAP -> Kind.TRAP
@@ -203,7 +159,6 @@ object OdinMapPrediction {
                 else -> continue
             }
             val tiles = room.tiles.map { it.z * W + it.x }.distinct().toIntArray()
-            // the name once the room is open, as dtMap has it (Odin knows it then, but shows it only once someone's been in)
             v.addRoom(kind, tiles, LcmStyle.knownName(room)) ?: return null
         }
         if (v.kinds.none { it == Kind.ENTRANCE }) return null
@@ -224,10 +179,6 @@ object OdinMapPrediction {
 
     private fun pair(a: Int, b: Int) = minOf(a, b) * 64 + maxOf(a, b)
 
-    /**
-     * The tab list's puzzle lines in the order it draws them (each a name, null for "???"). Odin's own list
-     * keeps only the named ones, in the order it learned them, but where a line is says where its puzzle is.
-     */
     private fun puzzleSlots(): List<String?> {
         val infos = mc.connection?.listedOnlinePlayers ?: return emptyList()
         return infos.sortedWith(TAB_ORDER).mapNotNull { info ->
@@ -236,23 +187,18 @@ object OdinMapPrediction {
         }.map { if (it == "???") null else it }
     }
 
-    /** The tab list's own order (PlayerTabOverlay's): list order, spectators last, then team, then profile name. */
     private val TAB_ORDER = compareByDescending<PlayerInfo> { it.tabListOrder }
         .thenBy { it.gameMode == GameType.SPECTATOR }
         .thenBy { it.team?.name ?: "" }
         .thenBy(String.CASE_INSENSITIVE_ORDER) { it.profile.name() }
 
-    /** " Ice Fill: [✦]" or " ???: [✦]", as Odin reads them. */
     private val PUZZLE_LINE = Regex("^ (\\w+(?: \\w+)*|\\?\\?\\?): \\[([✖✔✦])] ?(?:\\((\\w+)\\))?$")
 
     private fun update() {
         if (!on || !DungeonMap.enabled || !supported()) {
-            // off, or out of the clear (the boss): no more guessing ahead for a map nobody opens; it starts again (from
-            // its pool) if the map comes back
             if (lastKey.isNotEmpty()) { lastKey = ""; generation.incrementAndGet(); session.cancel() }
             return
         }
-        // Odin fills rooms in from the map packets as they come; a read mid-change just waits for the next tick
         val v = try { view() } catch (_: ConcurrentModificationException) { null } ?: return
         val key = v.key()
         if (key == lastKey) return
@@ -264,28 +210,21 @@ object OdinMapPrediction {
         worker.execute {
             EngineerClient.safely("map prediction worker") {
                 if (generation.get() != gen) return@safely
-                // the guesses made for the maps before carry over to this one (what fits it is up at once), batches
-                // then top them up, publishing as it goes, and go on for the next room while the map stays;
-                // stops when the map changes again, when nothing fits even the loosest rules, or when no more fit
                 session.threads = threads; session.ahead = ahead
                 session.begin(v)
-                // the names from the secret total once the map is known for sure, however many rooms are unnamed: a map
-                // all discovered at once, else once the prediction is sure of every room left
                 val namer = try { MapPredictor(v, gameProcess = false) } catch (_: Exception) { null }
-                shownNames = namer?.certainNames(null)
+                shown = Shown(shown?.prediction, shown?.view, namer?.certainNames(null))
                 do {
                     if (generation.get() != gen) return@safely
-                    session.prediction()?.let { shown = it; shownView = v; shownNames = namer?.certainNames(it) }
+                    session.prediction()?.let { shown = Shown(it, v, namer?.certainNames(it)) }
                 } while (session.step())
             }
         }
     }
 
-    /** True while ADM's prediction replaces Odin's "?" tiles (MapPathHintsMixin). */
     @JvmStatic
-    fun replacesOdin(): Boolean = on && DungeonMap.enabled && supported() && shown != null
+    fun replacesOdin(): Boolean = on && DungeonMap.enabled && supported() && shown?.prediction != null
 
-    /** Unknown tiles behind a blood door the map shows: certain to be the blood room, nothing to predict. */
     private fun bloodTiles(known: BooleanArray): Set<Int> {
         val out = HashSet<Int>()
         for (door in DungeonScan.doors.values) {
@@ -307,17 +246,11 @@ object OdinMapPrediction {
         return known
     }
 
-    /** The blood room behind its door: Odin's blood colour, or in LCM Style dtMap's dark red for an unopened blood room. */
     private fun bloodRoom(g: GuiGraphicsExtractor, t: Int) {
         val x = (t % W) * TILE; val y = (t / W) * TILE
         g.fill(x, y, x + ROOM, y + ROOM, if (lcm) LcmStyle.darker(LcmStyle.BLOOD) else DungeonMap.bloodRoomColor.rgba)
     }
 
-    /**
-     * Before there's a prediction (or when nothing fits the map): Odin's plain "?" tiles, with the blood room
-     * behind a blood door drawn as itself. Only when there is such a door; otherwise Odin draws its own. LCM
-     * Style's plain unopened tiles have no "?".
-     */
     private fun drawWithoutPrediction(g: GuiGraphicsExtractor): Boolean {
         if (!on || !DungeonMap.enabled || !supported()) return false
         val known = knownTiles()
@@ -328,7 +261,6 @@ object OdinMapPrediction {
         return true
     }
 
-    /** Unknown tiles behind a door the map shows (Odin's "?" tiles), the instant the door is on the map. */
     private fun hintTiles(known: BooleanArray): Set<Int> {
         val out = HashSet<Int>()
         for (tile in DungeonScan.pathHints) {
@@ -338,7 +270,6 @@ object OdinMapPrediction {
         return out
     }
 
-    /** Odin's plain "?" tile (LCM Style's plain unopened tile, no "?"). */
     private fun plainTile(g: GuiGraphicsExtractor, t: Int) {
         val x = (t % W) * TILE; val y = (t / W) * TILE
         g.fill(x, y, x + ROOM, y + ROOM, if (lcm) LcmStyle.UNOPENED else DungeonMap.unknownRoomColor.rgba)
@@ -355,7 +286,6 @@ object OdinMapPrediction {
         else -> DungeonMap.unknownRoomColor
     }
 
-    /** LCM Style's colour for a type. */
     private fun lcmColor(c: Int): Int = when (c) {
         Cls.PUZZLE -> LcmStyle.PUZZLE
         Cls.TRAP -> LcmStyle.TRAP
@@ -366,15 +296,12 @@ object OdinMapPrediction {
         else -> LcmStyle.UNOPENED
     }
 
-    /** A type's colour on a guess: Odin's darkened by half, or LCM Style's darkened as dtMap does. */
     private fun dim(c: Int): Int = custom(c) ?: if (lcm) LcmStyle.darker(lcmColor(c)) else colorOf(c).darker(0.5f).rgba
 
     private val SPECIALS = intArrayOf(Cls.PUZZLE, Cls.TRAP, Cls.YELLOW, Cls.BLOOD, Cls.FAIRY, Cls.RARE)
 
-    /** Drawing in LCM Style's look (LcmStyle draws the map): its colours and guess tiles, chances where Odin puts a "?". */
     private var lcm = false
 
-    /** Draws the prediction in Odin's map space (20 per tile), in Odin's look or LCM Style's; false when there is none to draw. */
     @JvmStatic
     @JvmOverloads
     fun render(g: GuiGraphicsExtractor, lcm: Boolean = false): Boolean {
@@ -384,46 +311,23 @@ object OdinMapPrediction {
 
     private fun draw(g: GuiGraphicsExtractor): Boolean {
         if (!replacesOdin()) return drawWithoutPrediction(g)
-        val p = shown ?: return drawWithoutPrediction(g)
-        val v = shownView ?: return drawWithoutPrediction(g)
+        val now = shown
+        val p = now?.prediction ?: return drawWithoutPrediction(g)
+        val v = now.view ?: return drawWithoutPrediction(g)
         val known = knownTiles()
-        // behind a blood door is the blood room: drawn as itself, never as a guess
         val blood = bloodTiles(known)
         for (t in blood) bloodRoom(g, t)
         val min = minChance.value
         val deadEndAt = minOf(deadEndChance.value, ALWAYS_DEAD_END) / 100f
         val oneAt = oneChance.value / 100f
         val bloodFairyAt = bloodFairyChance.value / 100f
-        // while a new prediction is still being worked out, the one shown is for the map before the last door:
-        // every tile behind a door the map shows is drawn anyway, never left blank
         val hints = hintTiles(known)
         val splits = p.splits.associateBy { it.tile }
-        secretsAt = if (splitSecrets.value) MapPredictor.splitSecrets(v, p.splits).let { s -> p.splits.indices.associate { p.splits[it].tile to s[it] } } else emptyMap()
-        // the last rooms the secret total leaves only one size and place for: in full, named when only one name fits
+        val d = derived(p, v, now.names, splitSecrets.value)
+        secretsAt = d.secretsAt
         val exact = BooleanArray(W * W)
-        // (every room, discovered ones nobody has opened too, once the map is known for sure)
-        if (exactRooms.value) for ((_, names) in (shownNames ?: p.namedRooms).groupBy { it.tiles.joinToString(",") }) {
-            val tiles = names[0].tiles
-            if (names.sumOf { it.chance.toDouble() } < SURE) continue
-            if (tiles.all { known[it] }) { if (!namedOnMap(tiles[0])) roomText(g, tiles, names); continue }
-            if (tiles.any { known[it] || exact[it] || it in blood }) continue
-            for (t in tiles) exact[t] = true
-            exactRoom(g, tiles, names)
-        }
-        // anything shown at 100% (a room's size and place), named or not: drawn in full in its type's colour (or the
-        // kinds a dead end can still be), keeping the split's label on its door's tile
-        if (exactRooms.value) for (tiles in MapPredictor.certainShapes(p, SURE)) {
-            if (tiles.any { known[it] || exact[it] || it in blood }) continue
-            for (t in tiles) exact[t] = true
-            val q = p.probs[tiles[0]] ?: p.raw[tiles[0]]
-            val types = if (tiles.size > 1 || q == null) listOf(-1) else {
-                val room = q.sum()
-                (0 until Cls.COUNT).filter { q[it] >= 0.05f * room }.sortedByDescending { q[it] }.take(3).map { if (it == Cls.NORMAL || it == Cls.BIG) -1 else it }.distinct()
-            }
-            exactFill(g, tiles, types)
-            for (t in tiles) splits[t]?.let { overlay(g, (t % W) * TILE, (t / W) * TILE, it, null, false) }
-        }
-        // the big rooms it's sure of, greyed out at their whole size (likeliest first, never two on one tile)
+        drawNamedRooms(g, d, known, exact, blood)
+        drawCertainRooms(g, p, d, known, exact, blood, splits)
         val inBig = arrayOfNulls<BigRoom>(W * W)
         val bigAt = bigChance.value / 100f
         for (room in p.bigRooms) {
@@ -440,47 +344,12 @@ object OdinMapPrediction {
             }
             val x = (t % W) * TILE; val y = (t / W) * TILE
             inBig[t]?.let { room ->
-                // its door's tile keeps the split's label (or the "?") on the grey
                 val split = splits[t]
                 if (split != null || t in hints) overlay(g, x, y, split, room.chance, true)
                 continue
             }
-            val shownCls = SPECIALS.filter { probs[it] >= min }.sortedByDescending { probs[it] }.take(3)
-            val split = splits[t]
-            // dead end (puzzle, trap, yellow, rare), blood or fairy, or a normal 1x1: each on its own slider, the likeliest that passes
-            val deadEnd = probs[Cls.PUZZLE] + probs[Cls.TRAP] + probs[Cls.YELLOW] + probs[Cls.RARE]
-            val one = probs[Cls.NORMAL]
-            val bfCls = if (probs[Cls.BLOOD] >= probs[Cls.FAIRY]) Cls.BLOOD else Cls.FAIRY
-            val bf = probs[bfCls]
-            val isDeadEnd = deadEnd > 0f && deadEnd >= deadEndAt
-            val isOne = one > 0f && one >= oneAt
-            val isBloodFairy = bf > 0f && bf >= bloodFairyAt
-            val best = maxOf(if (isDeadEnd) deadEnd else 0f, if (isOne) one else 0f, if (isBloodFairy) bf else 0f)
-            if (isBloodFairy && bf >= best) {
-                // Odin's guess look in the room's colour, as Odin draws a "?" behind the blood door
-                g.fill(x, y, x + ROOM, y + ROOM, dim(bfCls))
-                overlay(g, x, y, null, bf, true)
-            } else if (isDeadEnd && deadEnd >= best) {
-                deadEndGuess(g, x, y, probs, deadEnd)
-                overlay(g, x, y, null, deadEnd, true)
-            } else if (isOne) {
-                // a normal 1x1, greyed out like the big rooms; a door's tile keeps the split label
-                greyRoom(g, intArrayOf(t))
-                overlay(g, x, y, split, one, split != null)
-            } else if (split != null || t in hints) {
-                // the "?" tile: its chances as bands across it, the rest grey (a door the prediction doesn't know
-                // yet: the chances it gave the tile so far, no split label)
-                g.fill(x, y, x + ROOM, y + ROOM, if (lcm) LcmStyle.UNOPENED else DungeonMap.unknownRoomColor.rgba)
-                var at = x.toFloat()
-                for (c in shownCls) {
-                    val wdt = probs[c] * ROOM
-                    g.fill(at.roundToInt(), y, (at + wdt).roundToInt().coerceAtMost(x + ROOM), y + ROOM, dim(c))
-                    at += wdt
-                }
-                overlay(g, x, y, split, shownCls.firstOrNull()?.let { probs[it] }, true)
-            }
+            drawPredictedTile(g, t, x, y, probs, splits, hints, min, deadEndAt, oneAt, bloodFairyAt)
         }
-        // the doors it's sure of between unknown tiles, over everything else
         val doorAt = doorChance.value / 100f
         for (d in p.doors) {
             if (d.chance < doorAt || d.chance <= 0f || known[d.a] || known[d.b]) continue
@@ -489,10 +358,65 @@ object OdinMapPrediction {
         return true
     }
 
-    /** A predicted door where Odin draws doors (renderDoors): in the gap between its tiles, in the colour of its kind. */
+    private fun drawNamedRooms(g: GuiGraphicsExtractor, d: Derived, known: BooleanArray, exact: BooleanArray, blood: Set<Int>) {
+        if (exactRooms.value) for (names in d.namedGroups) {
+            val tiles = names[0].tiles
+            if (names.sumOf { it.chance.toDouble() } < SURE) continue
+            if (tiles.all { known[it] }) { if (!namedOnMap(tiles[0])) roomText(g, tiles, names); continue }
+            if (tiles.any { known[it] || exact[it] || it in blood }) continue
+            for (t in tiles) exact[t] = true
+            exactRoom(g, tiles, names)
+        }
+    }
+
+    private fun drawCertainRooms(g: GuiGraphicsExtractor, p: Prediction, d: Derived, known: BooleanArray, exact: BooleanArray, blood: Set<Int>, splits: Map<Int, Split>) {
+        if (exactRooms.value) for (tiles in d.certain) {
+            if (tiles.any { known[it] || exact[it] || it in blood }) continue
+            for (t in tiles) exact[t] = true
+            val q = p.probs[tiles[0]] ?: p.raw[tiles[0]]
+            val types = if (tiles.size > 1 || q == null) listOf(-1) else {
+                val room = q.sum()
+                (0 until Cls.COUNT).filter { q[it] >= 0.05f * room }.sortedByDescending { q[it] }.take(3).map { if (it == Cls.NORMAL || it == Cls.BIG) -1 else it }.distinct()
+            }
+            exactFill(g, tiles, types)
+            for (t in tiles) splits[t]?.let { overlay(g, (t % W) * TILE, (t / W) * TILE, it, null, false) }
+        }
+    }
+
+    private fun drawPredictedTile(g: GuiGraphicsExtractor, t: Int, x: Int, y: Int, probs: FloatArray, splits: Map<Int, Split>, hints: Set<Int>, min: Float, deadEndAt: Float, oneAt: Float, bloodFairyAt: Float) {
+        val shownCls = SPECIALS.filter { probs[it] >= min }.sortedByDescending { probs[it] }.take(3)
+        val split = splits[t]
+        val deadEnd = probs[Cls.PUZZLE] + probs[Cls.TRAP] + probs[Cls.YELLOW] + probs[Cls.RARE]
+        val one = probs[Cls.NORMAL]
+        val bfCls = if (probs[Cls.BLOOD] >= probs[Cls.FAIRY]) Cls.BLOOD else Cls.FAIRY
+        val bf = probs[bfCls]
+        val isDeadEnd = deadEnd > 0f && deadEnd >= deadEndAt
+        val isOne = one > 0f && one >= oneAt
+        val isBloodFairy = bf > 0f && bf >= bloodFairyAt
+        val best = maxOf(if (isDeadEnd) deadEnd else 0f, if (isOne) one else 0f, if (isBloodFairy) bf else 0f)
+        if (isBloodFairy && bf >= best) {
+            g.fill(x, y, x + ROOM, y + ROOM, dim(bfCls))
+            overlay(g, x, y, null, bf, true)
+        } else if (isDeadEnd && deadEnd >= best) {
+            deadEndGuess(g, x, y, probs, deadEnd)
+            overlay(g, x, y, null, deadEnd, true)
+        } else if (isOne) {
+            greyRoom(g, intArrayOf(t))
+            overlay(g, x, y, split, one, split != null)
+        } else if (split != null || t in hints) {
+            g.fill(x, y, x + ROOM, y + ROOM, if (lcm) LcmStyle.UNOPENED else DungeonMap.unknownRoomColor.rgba)
+            var at = x.toFloat()
+            for (c in shownCls) {
+                val wdt = probs[c] * ROOM
+                g.fill(at.roundToInt(), y, (at + wdt).roundToInt().coerceAtMost(x + ROOM), y + ROOM, dim(c))
+                at += wdt
+            }
+            overlay(g, x, y, split, shownCls.firstOrNull()?.let { probs[it] }, true)
+        }
+    }
+
     private fun door(g: GuiGraphicsExtractor, d: PredictedDoor) {
         if (lcm) {
-            // as LCM Style draws a door to rooms nobody has opened: blood and fairy darkened, wither black, else dark grey
             val color = when {
                 d.blood >= 0.5f * d.chance -> LcmStyle.darker(LcmStyle.BLOOD)
                 d.fairy >= 0.5f * d.chance -> LcmStyle.darker(LcmStyle.FAIRY)
@@ -514,13 +438,7 @@ object OdinMapPrediction {
         else g.fill(x + half, y + ROOM, x + half + 8, y + TILE, color.rgba)
     }
 
-    /**
-     * An exact last room: its shape in its type's colour (a little see-through, as nobody has opened it) and
-     * Odin's name text - its name when only one fits, else "?" (nothing in LCM Style, which draws no "?") with
-     * the secrets if every name that fits has the same count.
-     */
     private fun exactRoom(g: GuiGraphicsExtractor, tiles: IntArray, names: List<NamedRoom>) {
-        // a dead end that can still be more than one kind (its names from more than one pool) shows each kind it can be
         val byType = names.groupBy { typeOfPool(it.name.pool) }.mapValues { (_, n) -> n.sumOf { it.chance.toDouble() } }
         val types = byType.filter { it.value >= 0.05 }.entries.sortedByDescending { it.value }.take(3).map { it.key }
         exactFill(g, tiles, types.ifEmpty { listOf(typeOfPool(names.maxBy { it.chance }.name.pool)) })
@@ -537,20 +455,14 @@ object OdinMapPrediction {
         else -> -1
     }
 
-    /** An exact room's colour for a type (-1: a normal room), a little see-through as nobody has opened it. */
     private fun exactColor(type: Int): Int =
         if (lcm) (if (type < 0) LcmStyle.NORMAL else lcmColor(type)) and 0xFFFFFF or (0xBF shl 24)
         else Color((if (type < 0) DungeonMap.normalRoomColor else colorOf(type)).rgba, 0.75f).rgba
 
-    /**
-     * An exact room's shape in its type's colour; a 1x1 that can still be more than one kind (likeliest first) as a
-     * guess tile in their colours: dtMap's in LCM Style, else side by side as Odin's.
-     */
     private fun exactFill(g: GuiGraphicsExtractor, tiles: IntArray, types: List<Int>) {
         if (types.size <= 1 || tiles.size > 1) { fillTiles(g, tiles, exactColor(types.firstOrNull() ?: -1)); return }
         val x = (tiles[0] % W) * TILE; val y = (tiles[0] / W) * TILE
         if (lcm) {
-            // dtMap's order: puzzle on the outside, trap, yellow in the middle
             val order = listOf(Cls.PUZZLE, Cls.TRAP, Cls.YELLOW, Cls.RARE, Cls.BLOOD, Cls.FAIRY, -1)
             LcmStyle.guessTile(g, x, y, types.sortedBy { order.indexOf(it) }.map { exactColor(it) }.toIntArray())
             return
@@ -559,11 +471,9 @@ object OdinMapPrediction {
         types.forEachIndexed { i, c -> g.fill(x + i * part, y, if (i == types.lastIndex) x + ROOM else x + (i + 1) * part, y + ROOM, exactColor(c)) }
     }
 
-    /** The map names the room on tile [t] itself (it's open: [LcmStyle.knownName]). */
     private fun namedOnMap(t: Int): Boolean =
         DungeonScan.rooms.any { r -> r.tiles.any { it.z * W + it.x == t } && LcmStyle.knownName(r) != null }
 
-    /** Odin's name text over a room: its name when only one fits, else "?" (nothing in LCM Style), with the secrets when every name that fits has the same count. */
     private fun roomText(g: GuiGraphicsExtractor, tiles: IntArray, names: List<NamedRoom>) {
         val best = names.maxBy { it.chance }
         val cx = tiles.map { (it % W) * TILE + ROOM / 2f }.average().toFloat()
@@ -584,7 +494,6 @@ object OdinMapPrediction {
         }
     }
 
-    /** A room's tiles and the gaps between them, as Odin draws a room (fillRoom), in grey (or Predicted Room). */
     private fun greyRoom(g: GuiGraphicsExtractor, tiles: IntArray) =
         fillTiles(g, tiles, if (customColors.value) predRoom.value.rgba else BIG_GREY.rgba)
 
@@ -600,22 +509,14 @@ object OdinMapPrediction {
         }
     }
 
-    /**
-     * A dead end's guess tile: Odin's (its renderGuess: one type in its colour, or two or three side by side
-     * darkened) or, in LCM Style, dtMap's ([LcmStyle.guessTile], darkened as dtMap does). The types are the ones
-     * a dead end here can be: yellow, trap, puzzle in Odin's order, a rare room on 5-puzzle maps; any at least 5%
-     * of the dead end's chance, the likeliest three.
-     */
     private fun deadEndGuess(g: GuiGraphicsExtractor, x: Int, y: Int, probs: FloatArray, deadEnd: Float) {
         val types = intArrayOf(Cls.YELLOW, Cls.TRAP, Cls.PUZZLE, Cls.RARE).filter { probs[it] >= 0.05f * deadEnd }
         val keep = types.sortedByDescending { probs[it] }.take(3).toSet()
         if (lcm) {
-            // dtMap's order: puzzle on the outside, trap, yellow in the middle
             LcmStyle.guessTile(g, x, y, intArrayOf(Cls.PUZZLE, Cls.TRAP, Cls.YELLOW, Cls.RARE).filter { it in keep }.map { dim(it) }.toIntArray())
             return
         }
         if (customColors.value) {
-            // Odin's layout in the chosen colours, as chosen (not darkened again)
             val custom = types.filter { it in keep }.map { dim(it) }
             val part = ROOM / custom.size.coerceAtLeast(1)
             custom.forEachIndexed { i, c -> g.fill(x + i * part, y, if (i == custom.lastIndex) x + ROOM else x + (i + 1) * part, y + ROOM, c) }
@@ -638,11 +539,6 @@ object OdinMapPrediction {
         }
     }
 
-    /**
-     * What goes on a predicted tile: the split's label (with Split Contents), else Odin's "?" where [question] says
-     * Odin draws one, and the [chance] under them with Show Chances. LCM Style never draws the "?" and always
-     * shows the chance, in the tile's middle when no label is over it.
-     */
     private fun overlay(g: GuiGraphicsExtractor, x: Int, y: Int, split: Split?, chance: Float?, question: Boolean) {
         val label = split != null && splitText.value
         if (label) splitLabel(g, x, y, split!!) else if (question && !lcm) icon(g, x, y)
@@ -654,10 +550,24 @@ object OdinMapPrediction {
         g.blit(RenderPipelines.GUI_TEXTURED, question, x + 2, y + 2, size.toFloat(), size.toFloat(), size, size, size, size)
     }
 
-    /** Each split's secrets, by its door's tile, for the prediction being drawn (Split Secrets). */
     private var secretsAt: Map<Int, Float> = emptyMap()
 
-    /** "2P T Y B" (what's more likely there than not, puzzles by their expected count) over "~6" rooms (and "23s" secrets). */
+    private class Derived(val p: Prediction, val v: MapView, val names: List<NamedRoom>?, val split: Boolean) {
+        val secretsAt: Map<Int, Float> by lazy(LazyThreadSafetyMode.NONE) {
+            if (split) MapPredictor.splitSecrets(v, p.splits).let { s -> p.splits.indices.associate { p.splits[it].tile to s[it] } } else emptyMap()
+        }
+        val certain: List<IntArray> by lazy(LazyThreadSafetyMode.NONE) { MapPredictor.certainShapes(p, SURE) }
+        val namedGroups: Collection<List<NamedRoom>> by lazy(LazyThreadSafetyMode.NONE) {
+            (names ?: p.namedRooms).groupBy { it.tiles.joinToString(",") }.values
+        }
+    }
+
+    private var lastDerived: Derived? = null
+
+    private fun derived(p: Prediction, v: MapView, names: List<NamedRoom>?, split: Boolean): Derived =
+        lastDerived?.takeIf { it.p === p && it.v === v && it.names === names && it.split == split }
+            ?: Derived(p, v, names, split).also { lastDerived = it }
+
     private fun splitLabel(g: GuiGraphicsExtractor, x: Int, y: Int, s: Split) {
         val parts = ArrayList<String>()
         val pz = s.expect[Cls.PUZZLE].roundToInt()

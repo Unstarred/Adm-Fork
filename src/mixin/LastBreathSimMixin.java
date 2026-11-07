@@ -10,10 +10,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/**
- * P3 Sim: Last Breath released on the sim's server fires Hypixel's arrows (Duplex, Terror's Hydra Strike) through
- * Bows instead of vanilla's single arrow. Every other bow, and anywhere else, stays vanilla.
- */
 @Mixin(BowItem.class)
 public class LastBreathSimMixin {
     @Inject(method = "releaseUsing", at = @At("HEAD"), cancellable = true)

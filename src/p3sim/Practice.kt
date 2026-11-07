@@ -1,87 +1,57 @@
 package com.engineerclient.p3sim
 
 import com.engineerclient.EngineerClient
+import com.engineerclient.practice.TermInfo
 import com.google.gson.GsonBuilder
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass
 import net.minecraft.client.Minecraft
+import net.minecraft.core.BlockPos
+import net.minecraft.network.protocol.game.ClientboundSetHeldSlotPacket
+import net.minecraft.server.level.ServerPlayer
+import net.minecraft.world.item.BowItem
+import net.minecraft.world.item.ItemStack
+import net.minecraft.world.phys.Vec3
 import java.io.File
 import java.util.Locale
 
-/**
- * Practice mode (the menu's Practice tab): a short drill, timed, restarted as often as you like (the
- * Restart or Practice Restart keybind, a left click with the Infinileap, or once it's
- * done, a left click with anything).
- *
- * Section practice (s1-s4): P3 at that section with everything but your role's part of it done (its
- * stations and gate; no bots), you on your early enter for it (S1: your spawn; S4: its start). Your
- * jobs there (as the plan times them, so an i4 done in S1 is S1's) and, if it's yours, the early enter
- * into the next section are the tasks, each timed from the start; the last one's time is the
- * practice's, large on screen (the Practice Time HUD) and in chat with your best.
- *
- * Custom practice (leap waypoints: where the leap menu's slots 1-4 land in it): your own start position, the jobs you pick (any sections', so it can run across
- * several; it starts in the earliest of them and the start's) and checkpoints to reach in order
- * (within 1 block across, the same height), all timed the same way. Saved in config/adm/p3sim-practice.json.
- *
- * Server thread, except what the HUDs and the menu read ([mode], [tasks], [ticks], [endTicks], the custom setup).
- */
 object Practice {
-    /** One thing to do: a station id, "gate N", an early enter ("ee" + its key) or a checkpoint ("cp" + its index). [at]: ticks from the start, -1 till done. */
     class Task(val id: String, val label: String) { @Volatile var at = -1 }
 
-    /** The practice you're in ("S2", "Custom"), null: not in practice mode. */
     @Volatile var mode: String? = null
         private set
-    /** The section practised (1-4). */
     @Volatile var section = 0
         private set
     @Volatile var tasks: List<Task> = emptyList()
         private set
-    /** Ticks since the start, and the final time (-1 until every task is done). */
     @Volatile var ticks = 0
         private set
     @Volatile var endTicks = -1
         private set
-    /** When it was done (System ms): a left click with anything restarts it 0.25 s after. */
     @Volatile var endMs = 0L
         private set
 
     val active get() = mode != null
 
-    /**
-     * A set practice: [name], its [section], where you start, the jobs left to you (the rest of the section done; a
-     * later section's device done early counts too), checkpoints to reach in order, and its start timer (null: the slider's).
-     * [item]: what you hold at the start ([holdStartItem]: an item key, or [FIRST_BOW]); [mines]: blocks already mined away
-     * at the start; [restartMs]: once it's done, how long before a left click with anything starts it again (the
-     * Infinileap's always does).
-     */
     class Setup(val name: String, val section: Int, val start: Spots.Spot, val jobs: List<String>, val checkpoints: List<Spots.Spot> = emptyList(), val delay: Double? = null,
-                val item: String? = null, val mines: List<net.minecraft.core.BlockPos> = emptyList(), val restartMs: Long = 250)
+                val item: String? = null, val mines: List<BlockPos> = emptyList(), val restartMs: Long = 250)
 
-    /** [Setup.item]: the first bow on your hotbar. */
     const val FIRST_BOW = "first bow"
     private const val BREAKER = "DUNGEONBREAKER"
     private const val BONZO = "STARRED_BONZO_STAFF"
 
-    /** The high EE3's 2x2 quartz platform (x 15-16, y 122, z 93-94), as Theoretical's bers mines it there. */
-    private val HEE3_MINES get() = listOf(15, 16).flatMap { x -> listOf(93, 94).map { net.minecraft.core.BlockPos(x, 122, it) } }
+    private val HEE3_MINES get() = listOf(15, 16).flatMap { x -> listOf(93, 94).map { BlockPos(x, 122, it) } }
 
-    /**
-     * Preset [name] in section [section] from a custom practice's [code] ([PracticeCode]: its start, jobs (unless [jobs]),
-     * checkpoints and start timer), holding [item]; [start] in place of the code's.
-     */
     private fun coded(section: Int, name: String, code: String, item: String?, jobs: List<String>? = null, restartMs: Long = 250, start: Spots.Spot? = null): Setup? {
         val c = PracticeCode.decode(code) ?: return null.also { EngineerClient.logger.warn("[p3sim] practice preset {}: bad code {}", name, code) }
         val picked = jobs ?: P3Plan.allJobs().filter { it in c.jobs }
         return Setup(name, section, start ?: c.start ?: return null, picked, c.checkpoints, c.delay, item, restartMs = restartMs)
     }
 
-    /** The presets made from codes, decoded once. */
     private var codedPresets: List<Setup>? = null
     private fun codedPresets(): List<Setup> = codedPresets ?: listOfNotNull(
         coded(1, "123", "\$b4RW/r\$6-sy!h8", BREAKER),
         coded(1, "43 bl", "Pu0y8Q2!sz]64YV!", BREAKER),
         coded(1, "i3 21", "yq&oxU6Wr3h49kw", BREAKER),
-        // i4: a left click right after it (the bow still drawn) doesn't start it again for 0.7 s; the Infinileap's does.
         coded(1, "i4", "1F?x8!EwzD)T=q", FIRST_BOW, restartMs = 700, start = p(63.07, 127.00, 35.08, -12.25f, -0.99f)),
         coded(2, "ee3", "4VT^EC9D6Qi+=DN9E5yAi", BONZO),
         coded(2, "cee3", "6tNQ?NDFPO??+/!(m8Y", BONZO, start = p(36.03, 131.00, 139.01, 92.64f, 3.45f)),
@@ -92,7 +62,6 @@ object Practice {
         coded(2, "ee2 -> 53", "cVx+bCagN)P7c-", BONZO),
         coded(2, "ee2 -> 23", "cVx+bCagN)P7V}", BREAKER),
         coded(2, "ee2 -> 53 core", "4VV3(]4y?}3?tk}Z1vXtL", BONZO),
-        // Its code has terminals 2 and 5: 2 and 3, as its name and "ee2 -> 23".
         coded(2, "ee2 -> 23 core", "4VV3(]4y?}3?s)SzW9E7R", BREAKER, jobs = listOf("S2 T2", "S2 T3")),
         coded(2, "3 -> core", "6qVDsKr0.Ni]JM)q5m4", BREAKER),
         coded(2, "2 -> core", "6t431)u?S&6POjy(s7/", BREAKER),
@@ -107,20 +76,17 @@ object Practice {
         coded(4, "4 bl", "!4&OC5EOpIxz8YZ", BREAKER),
         coded(4, "1 -> 2", "1F30?WCBnGmO}}", BREAKER),
         coded(4, "3 -> 3 bl", "!V8vZu}h7d{Y0r.", BREAKER),
-        // Its code is 3 -> 3 bl's: just the levers, as "4 -> bl".
         coded(4, "3 -> bl", "!V8vZu}h7d{Y0r.", BONZO, jobs = listOf("S4 low lever", "S4 high lever")),
         coded(4, "4 -> 4 bl", "!gOrno7IArJ3^&j", BREAKER),
         coded(4, "4 -> bl", "cl7&FG8D3dpRat", BONZO),
     ).also { codedPresets = it }
 
-    /** The preset or custom practice running (null: a role's section practice). */
     @Volatile private var setup: Setup? = null
     private val custom get() = setup != null
     private val checkpointsNow get() = setup?.checkpoints.orEmpty()
 
     private fun p(x: Double, y: Double, z: Double, yaw: Float, pitch: Float) = Spots.Spot("Start", x, y, z, yaw, pitch)
 
-    /** The presets, by section (the menu's columns). */
     fun presets(): List<Setup> = codedPresets().filter { it.section == 1 } + listOf(
         Setup("4 3", 1, p(108.20, 120.00, 94.00, -90.41f, 2.79f), listOf("S1 T4", "S1 T3"), delay = 3.0),
         Setup("2 1", 1, p(108.20, 120.00, 94.00, -90.41f, 2.79f), listOf("S1 T2", "S1 T1"), delay = 3.0),
@@ -130,8 +96,6 @@ object Practice {
         Setup("2 -> 1", 2, p(59.47, 120.00, 125.98, -179.50f, 23.01f), listOf("S2 T1"), listOf(Spots.Spot("Checkpoint", 69.70, 109.00, 122.43, 0f)), delay = 0.0),
         Setup("2 -> 3", 2, p(59.47, 120.00, 125.98, -179.50f, 23.01f), listOf("S2 T3"), delay = 0.0),
     ) + listOf(
-        // S3 (BL: both levers; no start timer). c ->: from the high EE3 (CEE3), its 2x2 platform
-        // already mined as Theoretical's bers does.
         Setup("1 bl", 3, p(2.00, 109.00, 102.00, -175.24f, 5.83f), listOf("S3 T1", "S3 west lever", "S3 east lever"), delay = 0.0, item = BREAKER),
         Setup("4 bl", 3, p(2.00, 109.00, 102.00, -175.24f, 5.83f), listOf("S3 T4", "S3 west lever", "S3 east lever", "gate 3"), delay = 0.0, item = BREAKER),
         Setup("2 dev", 3, p(2.00, 109.00, 102.00, -175.24f, 5.83f), listOf("S3 T2", "S3 Arrows"), delay = 0.0, item = BREAKER),
@@ -145,7 +109,6 @@ object Practice {
         Setup("4 -> BL", 3, p(0.97, 109.00, 77.89, 96.99f, 19.23f), listOf("S3 west lever", "S3 east lever"), delay = 0.0, item = BONZO),
     ) + codedPresets().filter { it.section > 3 }
 
-    /** The menu's columns per section: each a heading and its presets by name, in order (any not listed last, under Other). */
     private val GROUPS get() = mapOf(
         1 to listOf("Terms" to listOf("123", "2 1", "4 3", "43 bl"), "Devs / EE" to listOf("i4", "i3 21", "ee2")),
         2 to listOf(
@@ -166,7 +129,6 @@ object Practice {
         ),
     )
 
-    /** Section [s]'s presets as the menu's groups: (heading, presets). */
     fun presetGroups(s: Int): List<Pair<String, List<Setup>>> {
         val all = presets().filter { it.section == s }
         val byName = all.associateBy { it.name }
@@ -176,19 +138,15 @@ object Practice {
         return if (rest.isEmpty()) groups else groups + ("Other" to rest)
     }
 
-    /** Starts preset [name] (again). */
     fun startPreset(name: String) { presets().firstOrNull { it.name == name }?.let { launch(it) } }
 
     private var ee: P3Plan.EarlyEnter? = null
 
-    /** Starts section [s]'s practice (again): your role's part of it. */
     fun start(s: Int) { setup = null; launch("S$s", s) }
 
-    /** Starts the custom practice (again). */
     fun startCustom() {
         val at = customStart
         if (at == null || customSection !in 1..4) { Sim.note("Set the custom practice's §fStart Position§7 first (Practice tab)."); return }
-        // The jobs in plan order, section by section; the fight starts at the earliest section (the start's or a job's).
         val jobs = (1..4).flatMap { s -> P3Plan.jobsIn(s).filter { it in customJobs } }
         val s = (jobs.map { sectionOf(it) }.filter { it in 1..4 } + customSection).min()
         launch(Setup("Custom", s, at, jobs, checkpoints.toList()))
@@ -199,25 +157,19 @@ object Practice {
     private fun launch(m: String, s: Int) {
         mode = m; section = s
         tasks = emptyList(); ticks = 0; endTicks = -1
-        // The last try's times come down at once (the Section Time too, not only once the start timer ends).
-        com.engineerclient.practice.TermInfo.simClearTime()
+        TermInfo.simClearTime()
         startedMs = System.currentTimeMillis()
         Fight.start(listOf(Fight.Start.S1, Fight.Start.S2, Fight.Start.S3, Fight.Start.S4)[s - 1], practice = true)
-        // The preset's blocks already mined away (back with the next start's restore).
         setup?.mines?.forEach { Blocks.set(it, net.minecraft.world.level.block.Blocks.AIR.defaultBlockState()) }
-        // Its first 0.15 s breaks nothing ([noBreaking]); whatever the Dungeonbreaker took around the (re)start comes back after.
         Fight.later(NO_BREAK_TICKS + 1, "practice blocks back") { SimItems.unbreakAll() }
     }
 
-    /** When the practice last (re)started (System ms). */
     @Volatile private var startedMs = 0L
     private const val NO_BREAK_MS = 150L
     private const val NO_BREAK_TICKS = 3
 
-    /** A practice's first 0.15 s: the Dungeonbreaker breaks nothing (a held left click from the restart). Either thread. */
     fun noBreaking() = active && System.currentTimeMillis() - startedMs < NO_BREAK_MS
 
-    /** The same practice again (the Restart keybinds, the Infinileap, a left click once done). */
     fun restart() {
         val set = setup
         when {
@@ -227,47 +179,37 @@ object Practice {
         }
     }
 
-    /** A left click with anything, 0.25 s after it's done (the preset's own wait: i4's 0.7 s), starts it again. Client thread. */
     fun clickRestarts() = active && endTicks >= 0 && System.currentTimeMillis() - endMs >= (setup?.restartMs ?: 250)
 
-    /** Out of practice mode (any other start, Stop). */
     fun exit() { mode = null; section = 0; setup = null; tasks = emptyList(); endTicks = -1 }
 
-    /** Your jobs that are section [s]'s in practice: done in it, as the plan times them, in that order. */
     fun jobs(s: Int): List<String> {
         val times = P3Plan.plan().times
         return P3Plan.allJobs().filter { P3Plan.isMine(it) && (times[it]?.first ?: sectionOf(it)) == s }
             .sortedBy { times[it]?.second ?: 99.0 }
     }
 
-    /** What's left to do in this practice's section (the rest is done at the start). */
     fun practiceJobs(): List<String> = setup?.jobs ?: jobs(section)
 
-    /** The last section with a job of this practice (a custom one can run across several): the ones before it end as usual. */
     fun lastSection(): Int = (practiceJobs().map { sectionOf(it) }.filter { it in 1..4 } + section).max()
 
     fun sectionOf(job: String) = job.removePrefix("gate ").toIntOrNull() ?: job.removePrefix("S").substringBefore(' ').toIntOrNull() ?: 0
 
-    /** Where the practice puts you: the custom start; your spawn (S1), the early enter into it, else its start. */
     fun startSpot(): Spots.Spot = setup?.start ?: when (val s = section) {
         1 -> P3Plan.customSpot("spawn") ?: Spots.p3Start(1)
         else -> P3Plan.earlyEnters.firstOrNull { it.into == s && (s != 4 || it.on) }?.let { P3Plan.eeSpot(it) } ?: Spots.p3Start(s)
     }
 
-    /** The start timer (the menu's slider): seconds you stand placed before anything is up and the clock runs. */
     @Volatile var startDelay = 0.0
         private set
     val holdTicks get() = Math.round((setup?.delay ?: startDelay) * 20).toInt()
     fun setStartDelay(v: Double) { startDelay = v.coerceIn(0.0, 5.0); save() }
 
-    /** The phase's tick its practice really started (after the start timer). */
     private var startT = 0
 
-    /** A start timer of [n] ticks begins. */
     fun hold(n: Int) { tasks = emptyList(); ticks = -n; endTicks = -1 }
     fun holdTick(t: Int, n: Int) { ticks = t - n }
 
-    /** GoldorPhase's start, in practice (at phase tick [t]): the tasks. */
     fun begin(s: Int, t: Int) {
         startT = t
         val list = practiceJobs().map { Task(it, label(it)) }.toMutableList()
@@ -296,10 +238,8 @@ object Practice {
             if (task.at >= 0) continue
             val done = when {
                 task.id.startsWith("gate ") -> phase.gateIsDown(task.id.removePrefix("gate ").toInt())
-                // The early enter: once everything else is done.
                 task.id.startsWith("ee ") -> p != null && tasks.all { it === task || it.at >= 0 } &&
                     ee?.let { onSpot(P3Plan.eeSpot(it), 1.5, p.x, p.y, p.z) } == true
-                // Checkpoints: in order.
                 task.id.startsWith("cp ") -> p != null && tasks.subList(0, i).none { it.id.startsWith("cp ") && it.at < 0 } &&
                     checkpointsNow.getOrNull(task.id.removePrefix("cp ").toInt())?.let { onSpot(it, 1.0, p.x, p.y, p.z) } == true
                 else -> phase.stations.firstOrNull { it.id == task.id }?.done == true
@@ -309,10 +249,6 @@ object Practice {
         if (tasks.all { it.at >= 0 }) finish()
     }
 
-    /**
-     * On [s]: within [r] blocks of it across, and on its exact height (to the hundredth). Both heights cut down the
-     * same way: an imported spot is to 1/32 block ([PracticeCode]), so rounding its 109.9375 would want 109.94.
-     */
     private fun onSpot(s: Spots.Spot, r: Double, x: Double, y: Double, z: Double): Boolean {
         val dx = x - s.x; val dz = z - s.z
         return dx * dx + dz * dz <= r * r && Math.floor(y * 100 + 1e-6).toLong() == Math.floor(s.y * 100 + 1e-6).toLong()
@@ -327,15 +263,12 @@ object Practice {
 
     fun secs(ticks: Int) = String.format(Locale.ROOT, "%.2f", ticks / 20.0)
 
-    /** Where a leap onto [c] lands in practice: where that class normally is in the section in progress (no bots there). */
     fun leapSpot(c: DungeonClass): Spots.Spot? {
         val s = ((Fight.phase as? GoldorPhase)?.section ?: section).coerceIn(1, 4)
         return leapSpots()[s - 1][c]
     }
 
-    /** Each class's usual spot in each section (S1-S4), set in game with /pos (2026-10-09). */
     private fun leapSpots(): List<Map<DungeonClass, Spots.Spot>> = listOf(
-        // S1
         mapOf(
             DungeonClass.ARCHER to Spots.Spot("Archer", 94.04, 112.00, 99.26, 60.01f, -3.13f),
             DungeonClass.BERSERK to Spots.Spot("Berserk", 93.56, 112.00, 93.29, 103.97f, 15.53f),
@@ -343,7 +276,6 @@ object Practice {
             DungeonClass.TANK to Spots.Spot("Tank", 110.70, 113.00, 75.34, -178.85f, 22.77f),
             DungeonClass.HEALER to Spots.Spot("Healer", 108.30, 120.00, 94.01, -90.08f, -0.99f),
         ),
-        // S2
         mapOf(
             DungeonClass.ARCHER to Spots.Spot("Archer", 39.12, 109.00, 139.87, -6.83f, 33.13f),
             DungeonClass.BERSERK to Spots.Spot("Berserk", 40.78, 109.00, 123.30, -176.88f, 26.63f),
@@ -351,7 +283,6 @@ object Practice {
             DungeonClass.TANK to Spots.Spot("Tank", 68.46, 109.00, 125.21, -179.43f, 18.33f),
             DungeonClass.HEALER to Spots.Spot("Healer", 24.95, 131.06, 138.57, 90.40f, 18.91f),
         ),
-        // S3
         mapOf(
             DungeonClass.ARCHER to Spots.Spot("Archer", 1.01, 109.00, 77.81, 95.00f, 19.81f),
             DungeonClass.BERSERK to Spots.Spot("Berserk", 15.67, 123.00, 93.65, -90.00f, 19.40f),
@@ -359,7 +290,6 @@ object Practice {
             DungeonClass.TANK to Spots.Spot("Tank", 1.35, 109.00, 112.32, 87.20f, 18.41f),
             DungeonClass.HEALER to Spots.Spot("Healer", 0.87, 119.00, 93.41, 89.42f, 19.15f),
         ),
-        // S4
         mapOf(
             DungeonClass.ARCHER to Spots.Spot("Archer", 44.45, 121.00, 31.81, -177.77f, 30.98f),
             DungeonClass.BERSERK to Spots.Spot("Berserk", 67.23, 109.00, 33.09, -178.02f, 18.65f),
@@ -369,11 +299,7 @@ object Practice {
         ),
     )
 
-    // ------------------------------------------------------------------ the custom practice
-
-    /** Where it starts (null: not set), its section, the jobs left to you there, and the checkpoints. */
     @Volatile var customStart: Spots.Spot? = null
-    /** What you held when you set the start ([itemKey]): held again whenever the custom practice places you. */
     @Volatile var customItem: String? = null
         private set
     @Volatile var customSection = 0
@@ -381,54 +307,44 @@ object Practice {
     val customJobs = LinkedHashSet<String>()
     val checkpoints = ArrayList<Spots.Spot>()
 
-    /** The section (1-4) [x], [y], [z] is in, else the nearest one (the middle, the core, a gap between two). */
     fun sectionAt(x: Double, y: Double, z: Double): Int {
-        val v = net.minecraft.world.phys.Vec3(x, y, z)
+        val v = Vec3(x, y, z)
         return GoldorPhase.dtZone(v).takeIf { it in 1..4 }
             ?: GoldorPhase.DT_ZONES.minBy { (_, box) -> box.distanceToSqr(v) }.first
     }
 
-    /** The custom practice's jobs picked in section [s]. */
     fun customJobsIn(s: Int): Set<String> = P3Plan.jobsIn(s).filter { it in customJobs }.toSet()
 
-    /** The start where you stand, holding [item] ([itemKey]); its section is where it is (or the nearest). Nothing picked yet: your role's jobs there. Returns the section. */
     fun setStart(spot: Spots.Spot, item: String? = null): Int {
         val s = sectionAt(spot.x, spot.y, spot.z)
         customSection = s
-        // Never filled in from your role: the jobs are only the ones you pick.
         customStart = spot
         customItem = item
         save()
         return s
     }
 
-    /** Picks or drops [job] (any section's; the others' picks stay). */
     fun toggleJob(job: String) {
         if (!customJobs.remove(job)) customJobs += job
         save()
     }
 
-    /** No custom practice: start, jobs, checkpoints and leap waypoints gone, the start timer back to 0. */
     fun clearCustom() { customStart = null; customItem = null; customSection = 0; customJobs.clear(); checkpoints.clear(); leapWaypoints.clear(); startDelay = 0.0; save() }
 
-    /** An item as the start remembers it: its SkyBlock id, else its name. */
-    fun itemKey(s: net.minecraft.world.item.ItemStack): String? =
+    fun itemKey(s: ItemStack): String? =
         if (s.isEmpty) null else SimItems.idOf(s) ?: "name:" + s.hoverName.string
 
-    /** In a custom practice or a preset with one: you hold its start item again (the hotbar slot it's in now, if any). */
-    fun holdStartItem(player: net.minecraft.server.level.ServerPlayer) {
+    fun holdStartItem(player: ServerPlayer) {
         val set = setup ?: return
         val key = (if (set.name == "Custom") customItem else set.item) ?: return
         val inv = player.inventory
-        val slot = (0..8).firstOrNull { val s = inv.getItem(it); if (key == FIRST_BOW) s.item is net.minecraft.world.item.BowItem else itemKey(s) == key } ?: return
+        val slot = (0..8).firstOrNull { val s = inv.getItem(it); if (key == FIRST_BOW) s.item is BowItem else itemKey(s) == key } ?: return
         inv.selectedSlot = slot
-        player.connection.send(net.minecraft.network.protocol.game.ClientboundSetHeldSlotPacket(slot))
+        player.connection.send(ClientboundSetHeldSlotPacket(slot))
     }
 
-    /** The custom practice as a code to share ([PracticeCode]). */
     fun exportCode(): String = PracticeCode.encode(PracticeCode.Custom(customStart, customJobs.toSet(), checkpoints.toList(), leapWaypoints.toList(), startDelay))
 
-    /** Replaces the custom practice with the one in [code]; false: not a code. */
     fun importCode(code: String): Boolean {
         val c = PracticeCode.decode(code) ?: return false
         customStart = c.start
@@ -442,10 +358,8 @@ object Practice {
         return true
     }
 
-    /** Leap waypoints: the leap menu's slots 1-4 (top left, top right, bottom left, bottom right) land here in a custom practice. */
     val leapWaypoints = ArrayList<Spots.Spot>()
 
-    /** The next leap slot (1-4) gets [spot]; 0: all four are set already. */
     fun addLeapWaypoint(spot: Spots.Spot): Int {
         if (leapWaypoints.size >= 4) return 0
         leapWaypoints += spot; save()
@@ -454,7 +368,6 @@ object Practice {
 
     fun removeLeapWaypoint() { if (leapWaypoints.isNotEmpty()) leapWaypoints.removeAt(leapWaypoints.size - 1); save() }
 
-    /** Where leap menu slot [i] (0-3) lands in the custom practice running, null: as usual. */
     fun leapWaypoint(i: Int): Spots.Spot? = if (setup?.name == "Custom") leapWaypoints.getOrNull(i) else null
 
     fun addCheckpoint(spot: Spots.Spot) { checkpoints += spot; save() }
@@ -463,7 +376,6 @@ object Practice {
     private class Saved(val start: List<Double>? = null, val section: Int? = null, val jobs: List<String>? = null, val checkpoints: List<List<Double>>? = null, val startDelay: Double? = null, val leaps: List<List<Double>>? = null, val item: String? = null,
                         val menuTab: String? = null, val menuSection: Int? = null)
 
-    /** The sim menu's tab and Practice section when it last closed (SimRestartScreen opens on them). */
     @Volatile var menuTab: String? = null
         private set
     @Volatile var menuSection = 1

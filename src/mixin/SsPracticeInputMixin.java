@@ -8,14 +8,9 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/**
- * {@link SimonSaysPractice}'s clicks: right and left clicks on the practice device are handled
- * there and cancelled here, before the game sends anything (use, swing, mining).
- */
 @Mixin(Minecraft.class)
 public class SsPracticeInputMixin {
 
-    /** The device is only drawn, never in the world: after the game picks what you look at, it's raycast too. */
     @Inject(method = "pick(F)V", at = @At("RETURN"))
     private void ec$ssPick(float partialTicks, CallbackInfo ci) {
         SimonSaysPractice.afterPick(partialTicks);

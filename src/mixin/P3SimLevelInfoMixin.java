@@ -7,11 +7,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/**
- * P3 Sim: the sim world reports itself as main's does in the login/respawn info: not flat, sea level 63
- * (the void generator would say flat and -63). Only the sim's own level; every other world is untouched.
- * The client's horizon (63 instead of the world's floor) follows from it, as on Hypixel.
- */
 @Mixin(ServerLevel.class)
 public class P3SimLevelInfoMixin {
     @Inject(method = "isFlat", at = @At("HEAD"), cancellable = true)

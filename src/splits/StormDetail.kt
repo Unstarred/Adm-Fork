@@ -5,33 +5,12 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.hypot
 
-/**
- * The Storm sub split's moments beyond its steps ([SubSplitTracker]'s Opening, Crush, Pin, Flight,
- * Crush, Kill, Animation), all in server ticks from his phase's start (his wither appears a tick
- * before "Pathetic Maxor, just like expected."), as Timers counts them:
- *
- *  - Giga Lightning striking: 33 ticks after "I'd be happy to show you what that's like!" (519-521
- *    into the phase in 662 F7 and 371 M7 recordings; 520 when the line wasn't seen), and his
- *    ENERGY / THUNDER line 29 ticks after it;
- *  - him leaving his spot after it, and reaching Yellow after he breaks free;
- *  - every pad read: a pillar stepping down (its layers going through moving pistons), whichever
- *    pillar it was;
- *  - each crush, by the pillar nearest him, and how many 20-tick checks after the first one he
- *    could have been crushed on it came: Purple's first is the first check from 109 ticks after his
- *    lightning line, Yellow's the first from 87 ticks after he breaks free (84 on M7);
- *  - with Show Crush Info, every crush check with him near a pillar: in or out of its zone, and by
- *    how much ([StormCrush]).
- *
- * Nothing here touches Minecraft; the Sub Splits module feeds it.
- */
 class StormDetail {
 
-    /** A moment, [tick] server ticks into the phase. */
     class Moment(val tick: Int, val text: String)
 
     private val moments = mutableListOf<Moment>()
 
-    /** The server tick the phase started on, or null outside it. */
     var start: Int? = null; private set
     private var happy: Int? = null
     private var strikeShown = false
@@ -44,10 +23,8 @@ class StormDetail {
     private var ended = false
     private var dead = false
 
-    /** Where the server last put Storm. */
     private var last: Triple<Double, Double, Double>? = null
 
-    /** The server tick each pillar's latest step down started on. */
     private val stepStart = HashMap<StormCrush.Pillar, Int>()
     private val reads = HashMap<StormCrush.Pillar, Int>()
 
@@ -59,13 +36,10 @@ class StormDetail {
 
     val active get() = start != null && !ended
 
-    /** Crush checks matter: from his lightning line until he dies. */
     val checking get() = active && lightning != null && !dead
 
-    /** Phase ticks at server tick [tick]. */
     fun phase(tick: Int): Int? = start?.let { tick - it }
 
-    /** The moments so far, in the order they happened. */
     fun moments(): List<Moment> = moments.sortedBy { it.tick }
 
     fun onChat(msg: String, tick: Int, isM7: Boolean) {
@@ -91,7 +65,6 @@ class StormDetail {
         crushes++
         crushAt = t
         val pillar = last?.let { (x, _, z) -> StormCrush.nearest(x, z) }
-        // The check it came on: crush lines arrive on the check tick or a few after.
         val check = Math.floorDiv(t + CHECK_SLACK, StormCrush.CHECK_PERIOD) * StormCrush.CHECK_PERIOD
         val earliest = when (crushes) {
             1 -> lightning?.let { firstCheck(it + PURPLE_AFTER_LIGHTNING) }
@@ -110,7 +83,6 @@ class StormDetail {
         add(t, "§6Crushed$by §8t$check$timing")
     }
 
-    /** Server tick [tick]: Giga Lightning once its tick is reached. */
     fun onServerTick(tick: Int) {
         val t = phase(tick) ?: return
         if (ended || strikeShown) return
@@ -122,7 +94,6 @@ class StormDetail {
         }
     }
 
-    /** Storm where the server last put him, on server tick [tick]. */
     fun onPosition(tick: Int, x: Double, y: Double, z: Double) {
         val t = phase(tick) ?: return
         last = Triple(x, y, z)
@@ -137,11 +108,6 @@ class StormDetail {
         }
     }
 
-    /**
-     * A moving piston in [pillar]'s column on server tick [tick]: a step down. One read moves its
-     * layers over ~17 ticks, and reads are 20 apart, so updates within [STEP_SPAN] of a step's first
-     * are that step.
-     */
     fun onPillarStep(pillar: StormCrush.Pillar, tick: Int) {
         val t = phase(tick) ?: return
         if (ended) return
@@ -153,7 +119,6 @@ class StormDetail {
         add(t, pillar.colour + pillar.name + " pad §7read " + n)
     }
 
-    /** One crush check's verdict near a pillar (Show Crush Info), on server tick [tick]. */
     fun onCheck(tick: Int, v: StormCrush.Verdict, armed: Boolean) {
         val t = phase(tick) ?: return
         if (ended) return
@@ -175,20 +140,14 @@ class StormDetail {
         val LIGHTNING = setOf("[BOSS] Storm: ENERGY HEED MY CALL!", "[BOSS] Storm: THUNDER LET ME BE YOUR CATALYST!")
         val CRUSHED = setOf("[BOSS] Storm: Oof", "[BOSS] Storm: Ouch, that hurt!")
 
-        /** Giga Lightning: 520 ticks into the phase, 33 after "I'd be happy to show you...". */
         const val LIGHTNING_STRIKE = 520
         const val STRIKE_AFTER_HAPPY = 33
-        /** He is in Purple's zone for the first check from this long after his lightning line. */
         const val PURPLE_AFTER_LIGHTNING = 109
-        /** ...and in Yellow's for the first check from this long after he breaks free. */
         const val YELLOW_AFTER_ENRAGE = 87
         const val YELLOW_AFTER_ENRAGE_M7 = 84
-        /** Ticks a crush line can trail its check by. */
         const val CHECK_SLACK = 5
-        /** A pillar's step down: its updates span ~17 ticks. */
         const val STEP_SPAN = 18
 
-        /** His parking spot after the lightning, and Yellow's point he flies to. */
         const val SPOT_X = 102.375
         const val SPOT_Z = 52.375
         const val YELLOW_X = 46.0

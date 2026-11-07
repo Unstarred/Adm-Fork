@@ -1,6 +1,7 @@
 package com.engineerclient.waypoints
 
 import com.engineerclient.EngineerClient
+import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.odtheking.odin.OdinMod.mc
 import com.odtheking.odin.utils.sendCommand
@@ -9,88 +10,49 @@ import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
 import net.minecraft.network.chat.ClickEvent
 import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.HoverEvent
+import net.minecraft.network.chat.MutableComponent
 import kotlin.math.abs
 
-/**
- * Blood rush roles: who kills which of a room's BR Roles boxes, set on the site
- * (undonecoffee.com/brroles) for each room, each door the rush can come in through, and each number
- * of players killing (2-4), with a separate set for M7. Each role has its boxes, in the order
- * they are killed, and its stack: boxes it helps with once its own are done. There is always a door runner besides, who only rushes
- * the doors and kills nothing - or, with Door Kills, kills too: the site keeps those plans apart
- * (a set for M7 and one for the other floors), each for an entry door and the room's wither door,
- * with the door runner the last role. Door Kills After Fairy has the door runner kill only in rooms
- * the rush reaches after fairy ("late" rooms below), and with Drop Bottom After Fairy the highest
- * numbered killer leaves the rush there to clear: quad with the door not killing up to fairy, then
- * trio with the door killing.
- *
- * Each player sets how many kill (duo 2, trio 3, quad 4) and their own role in BR Roles's
- * settings, for a team that runs together. Party chat overrides that for a run, for pickup groups:
- * "!3br 2" is "3 of us are killing, I am role 2", "!br 2" the same at the team size already set,
- * "!br d" (or "!3br d") is "I am on the door". A claim lasts until the dungeon ends. Everyone
- * with the mod keeps track of who has what, and anyone without a role yet is offered the free ones as clickable buttons (they run /brrole).
- */
 object BrRoles {
 
-    /** One plan: each role's boxes (by box number) in kill order, and each role's stack. */
     class Plan(val roles: List<List<Int>>, val stacks: List<List<Int>>)
 
-    /** What a box is to you, in the plan for its room. */
     sealed interface Look {
-        /** Yours: the [order]th you kill. */
         data class Mine(val order: Int) : Look
-        /** In your stack: help with it once yours are done. */
         data object Stack : Look
-        /** Someone else's, role [role] (1...), or only in other roles' stacks (0). */
         data class Theirs(val role: Int) : Look
     }
 
     const val MAX_KILLING = 4
 
-    /** room -> entry door (room x, z) -> players killing -> plan; and the same for M7. */
     @Volatile private var plans: Map<String, Map<Pair<Int, Int>, Map<Int, Plan>>> = emptyMap()
     @Volatile private var m7Plans: Map<String, Map<Pair<Int, Int>, Map<Int, Plan>>> = emptyMap()
-    /** With Doorer Kills: room -> (entry door, wither door) -> everyone killing, door runner included -> plan; and M7's. */
     @Volatile private var doorerPlans: Map<String, Map<Pair<Pair<Int, Int>, Pair<Int, Int>>, Map<Int, Plan>>> = emptyMap()
     @Volatile private var doorerM7Plans: Map<String, Map<Pair<Pair<Int, Int>, Pair<Int, Int>>, Map<Int, Plan>>> = emptyMap()
-    /** Miniboss rooms (one mob): every role kills every box there, from any door. */
     @Volatile private var mini: Set<String> = emptySet()
 
     fun isMini(room: String) = room in mini
 
-    /** From the settings: how many kill, and your role — null for All Boxes (roles off), 0 the door. */
     @Volatile var settingKilling = 2
     @Volatile var settingRole: Int? = null
     enum class DoorKills { NEVER, ALWAYS, AFTER_FAIRY }
 
-    /** From the settings: when the door runner kills too, with the doorer plans. */
     @Volatile var doorKills = DoorKills.NEVER
-    /** From the settings: with [DoorKills.AFTER_FAIRY], the highest numbered killer leaves the rush at fairy. */
     @Volatile var dropBottom = false
 
-    /** Whether the door runner kills in a room: always, or with After Fairy in rooms past fairy ([late]). */
     fun doorerKills(late: Boolean) = doorKills == DoorKills.ALWAYS || (doorKills == DoorKills.AFTER_FAIRY && late)
 
-    /** Whether the highest numbered killer has dropped off the rush, in a room past fairy ([late]). */
     fun dropped(late: Boolean) = late && doorKills == DoorKills.AFTER_FAIRY && dropBottom && count > 0
 
-    /** Whether that is you: you are not on the rush there. */
     fun youDropped(late: Boolean) = dropped(late) && mine == count
 
-    /** How many the plans are for: those killing, and the door runner too when [doorerKills]. */
     fun planCount(late: Boolean): Int = if (count == 0) 0 else count - (if (dropped(late)) 1 else 0) + if (doorerKills(late)) 1 else 0
 
-    /** The role whose boxes are yours: [mine], or on the door when [doorerKills] the last one. None once you dropped. */
     fun playing(late: Boolean): Int? =
         if (youDropped(late)) null else mine ?: planCount(late).takeIf { doorerKills(late) && youOnDoor && it > 0 }
 
-    /** In master mode: the site's M7 roles, where each is a class. */
     val master: Boolean get() = DungeonUtils.floor?.isMM == true
 
-    /**
-     * Your role before party chat: in master mode your class's (the site's M7 roles: 1 Archer,
-     * 2 Mage, 3 Berserk, 4 Tank, the Healer on the door) once the tab list has it, else the
-     * setting. All Boxes keeps roles off either way.
-     */
     private val baseRole: Int?
         get() {
             val s = settingRole ?: return null
@@ -106,54 +68,40 @@ object BrRoles {
             }
         }
 
-    /** What party chat said this run, over the settings. */
     private var chatCount: Int? = null
     private var chatMine: Int? = null
 
-    /**
-     * How many kill: party chat's if it has said, else the setting — 0 (roles off) when your
-     * setting is All Boxes, or a role the team size doesn't have.
-     */
     val count: Int
         get() = chatCount ?: baseRole.let { if (it == null || it > settingKilling) 0 else settingKilling }
 
-    /** Whether you are on the door: you said so in chat, or it is your setting and chat hasn't given you a role. */
     val youOnDoor: Boolean
         get() = doorClaim?.equals(me, ignoreCase = true) ?: (baseRole == 0 && chatMine == null)
 
-    /** Whether roles decide what you see: there is a team size and you have a role or the door. */
     val active: Boolean
         get() = count > 0 && (youOnDoor || mine != null)
 
-    /** Your role (1...), if you have one: claimed in chat this run, else your setting. None on the door. */
     val mine: Int?
         get() {
             if (youOnDoor) return null
             chatMine?.let { return it }
             return baseRole?.takeIf { it in 1..count }
         }
-    /** Who has which role, in the order they said so. */
     private val taken = LinkedHashMap<String, Int>()
-    /** Who said they are on the door. */
     private var doorClaim: String? = null
 
-    // "Party > [MVP+] name: !3br 2", "!br d", "!3br d" — the rank bracket is absent for players without one.
     private val CLAIM = Regex("""^Party > (?:\[[^]]*] )?(\w{1,16}): !([2-4])?br ([1-4]|d)$""")
 
     private val me get() = mc.player?.gameProfile?.name()
 
-    /** The door runner: who said so in chat, or you by your setting. */
     val doorRunner: String?
         get() = doorClaim ?: me.takeIf { youOnDoor }
 
-    /** A chat line: a role claim is taken note of. True if it was one. */
     fun onChat(line: String): Boolean {
         val m = CLAIM.matchEntire(line) ?: return false
         val name = m.groupValues[1]
         val n = m.groupValues[2].toIntOrNull()
         val what = m.groupValues[3]
         val you = name.equals(me, ignoreCase = true)
-        // A different count is a new sync: everyone picks again.
         if (n != null && n != count) { taken.clear(); chatMine = null }
         if (n != null) chatCount = n
         if (what == "d") {
@@ -163,7 +111,6 @@ object BrRoles {
             EngineerClient.msg(Component.literal(if (you) "§dBR §7you are on the §6door" else "§dBR §f$name §7is on the §6door").also { offer(it, you) })
             return true
         }
-        // "!br 2": at the team size already set, in chat or in the settings.
         val killing = n ?: chatCount ?: settingKilling
         val role = what.toInt()
         if (role > killing) return true
@@ -180,10 +127,9 @@ object BrRoles {
         return true
     }
 
-    /** The free roles (and the door) as buttons, for anyone who hasn't taken one. */
     private fun offer(line: Component, you: Boolean) {
         if (you || mine != null || youOnDoor || count == 0) return
-        val parts = line as? net.minecraft.network.chat.MutableComponent ?: return
+        val parts = line as? MutableComponent ?: return
         parts.append(Component.literal(" §7— yours:"))
         for (r in 1..count) {
             val holder = taken.entries.firstOrNull { it.value == r }?.key
@@ -197,7 +143,6 @@ object BrRoles {
         it.withClickEvent(ClickEvent.RunCommand(command)).withHoverEvent(HoverEvent.ShowText(Component.literal(hover)))
     }
 
-    /** Takes role [role] of [n] for the party: says so in party chat, which everyone (you too) reads back. */
     fun claim(n: Int, role: Int) {
         if (n !in 2..MAX_KILLING || role !in 1..n) return EngineerClient.msg("§c2 to $MAX_KILLING kill (the door runner is extra): /brrole 3 2")
         sendCommand("pc !${n}br $role")
@@ -205,7 +150,6 @@ object BrRoles {
 
     fun claimDoor() = sendCommand(if (count > 0) "pc !${count}br d" else "pc !br d")
 
-    /** The roles as they stand, for /brrole with nothing after it. */
     fun status() {
         if (count == 0 && doorRunner == null) return EngineerClient.msg("§dBR §7no roles yet. §f/brrole <killing> <role>§7 or §f/brrole door§7, or §f!3br 2§7 / §f!br d§7 in party chat.")
         val who = (1..count).joinToString("§7, ") { r -> "§f$r §7${taken.entries.firstOrNull { it.value == r }?.key ?: "§8free"}" }
@@ -214,7 +158,6 @@ object BrRoles {
         EngineerClient.msg("§dBR §7$count killing $from§7: $who§7, $door" + (mine?.let { " §7· you §f$it" } ?: ""))
     }
 
-    /** Your role as it stands and where it came from, for debug: "role 2 of 3 (settings)". [late]: past fairy. */
     fun describe(late: Boolean = false): String {
         val from = (if (chatCount != null || doorClaim != null) "party chat" else if (master) "class" else "settings") + if (master) ", M7 roles" else ""
         return when {
@@ -226,33 +169,18 @@ object BrRoles {
         }
     }
 
-    /**
-     * A new world. Roles claimed in party chat last until the dungeon they were for is over
-     * ([dungeonOver]), then everyone is back on their settings — a claim made before warping in
-     * still counts once you are in.
-     */
     fun newRun(dungeonOver: Boolean) {
         if (dungeonOver) { taken.clear(); chatCount = null; chatMine = null; doorClaim = null }
     }
 
-    // --- the plans (the site's brroles.json) -----------------------------------------------------
-
-    /** The roles have been fetched this launch. */
     @Volatile private var fetched = false
 
-    /**
-     * Fetches the site's roles - once a launch: they change rarely, so a new set is picked up the
-     * next time the game starts. Until a fetch works (offline, the site down) each world load tries
-     * again.
-     */
     fun pull() {
         if (fetched) return
         BoxSync.pullRoles { body -> mc.execute { adopt(body) } }
     }
 
     private fun adopt(body: String) {
-        // All read before any of it is taken (and the fetch counted as done): a malformed document
-        // leaves the roles as they were, and the next world load tries again.
         val got = runCatching {
             val doc = JsonParser.parseString(body).asJsonObject
             val rooms = read(doc["rooms"]?.takeIf { it.isJsonObject }?.asJsonObject ?: return)
@@ -273,16 +201,15 @@ object BrRoles {
         fetched = true
     }
 
-    private fun read(rooms: com.google.gson.JsonObject): Map<String, Map<Pair<Int, Int>, Map<Int, Plan>>> =
+    private fun read(rooms: JsonObject): Map<String, Map<Pair<Int, Int>, Map<Int, Plan>>> =
         readBy(rooms) { door -> xz(door) }
 
-    /** The doorer sets: each plan keyed "entry x,z>wither x,z". */
-    private fun readDoorer(rooms: com.google.gson.JsonObject): Map<String, Map<Pair<Pair<Int, Int>, Pair<Int, Int>>, Map<Int, Plan>>> =
+    private fun readDoorer(rooms: JsonObject): Map<String, Map<Pair<Pair<Int, Int>, Pair<Int, Int>>, Map<Int, Plan>>> =
         readBy(rooms) { key -> key.split('>').takeIf { it.size == 2 }?.let { (e, w) -> xz(e)?.let { a -> xz(w)?.let { b -> a to b } } } }
 
     private fun xz(s: String): Pair<Int, Int>? = s.split(',').mapNotNull { it.toIntOrNull() }.takeIf { it.size == 2 }?.let { it[0] to it[1] }
 
-    private fun <K> readBy(rooms: com.google.gson.JsonObject, key: (String) -> K?): Map<String, Map<K, Map<Int, Plan>>> {
+    private fun <K> readBy(rooms: JsonObject, key: (String) -> K?): Map<String, Map<K, Map<Int, Plan>>> {
         val out = HashMap<String, Map<K, Map<Int, Plan>>>()
         for ((room, doors) in rooms.entrySet()) {
             val byDoor = HashMap<K, Map<Int, Plan>>()
@@ -302,13 +229,6 @@ object BrRoles {
         return out
     }
 
-    /**
-     * The plan for a room entered through a door (in the room's own coordinates), for the number
-     * killing now — the door the site has nearest, if it is within a few blocks. When the door
-     * runner kills there ([late]: the room is past fairy), the doorer plan for that door and the
-     * room's wither door ([wither], null if not known: no plan). Null without one, or before the
-     * party has synced.
-     */
     fun planFor(room: String, door: Pair<Int, Int>, wither: Pair<Int, Int>?, late: Boolean): Plan? {
         if (count == 0) return null
         val n = planCount(late)
@@ -317,7 +237,6 @@ object BrRoles {
             if (master) doorerIn(doorerM7Plans, room, door, wither, n)?.let { return it }
             return doorerIn(doorerPlans, room, door, wither, n)
         }
-        // In master mode the M7 roles, else (none set for this room yet) the other floors'.
         if (master) planIn(m7Plans, room, door, n)?.let { return it }
         return planIn(plans, room, door, n)
     }
@@ -337,7 +256,6 @@ object BrRoles {
         return doors[near]?.get(n)
     }
 
-    /** What box [number] is to you in [plan], in a room past fairy or not ([late]); null if the plan leaves it out. */
     fun look(plan: Plan, number: Int, late: Boolean): Look? {
         val role = playing(late)
         if (role != null) {

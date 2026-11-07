@@ -1,13 +1,5 @@
 package com.engineerclient.mappred
 
-/**
- * What [GameSampler] draws an F7 map's big rooms with (tools/mappred gen-game.mjs writes this file; change that,
- * not this). [MIXES]: each big-room mix of the 2486 complete F7/M7 maps (25 of them with 6 big rooms),
- * as counts of 1x2, 1x3, 1x4, 2x2 and L (the [Shape] order), then how many maps had it. [MIX_RATE]: the chance one
- * try with that mix gets through (one random spot per big room with none clashing, the door tree and its dead
- * ends), per try (tools/mappred placelik.mjs MIXRATE, big/try1). The game makes the map again, mix and all, when a
- * try fails, so a mix is drawn by maps / rate.
- */
 object GameStats {
     val MIXES = arrayOf(
         intArrayOf(1, 2, 1, 1, 2, 496),

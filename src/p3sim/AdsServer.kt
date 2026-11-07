@@ -10,9 +10,12 @@ import com.mojang.authlib.GameProfile
 import com.mojang.authlib.properties.Property
 import com.mojang.authlib.properties.PropertyMap
 import io.netty.buffer.Unpooled
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents
 import net.fabricmc.fabric.api.networking.v1.ServerLoginConnectionEvents
 import net.fabricmc.fabric.api.networking.v1.ServerLoginNetworking
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents
 import net.fabricmc.loader.api.FabricLoader
+import net.minecraft.client.Minecraft
 import net.minecraft.network.FriendlyByteBuf
 import net.minecraft.network.chat.Component
 import net.minecraft.resources.Identifier
@@ -32,29 +35,16 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
-/**
- * ADS on the server: your sim, listed in the ADS lobby (a Minecraft server anyone can join, mod or not) with
- * your head in its Dungeons menu. Someone who clicks it is sent by the ADS proxy into your game.
- *
- * Hosting opens your sim on this computer only (like P3 parties: [com.engineerclient.mixin.SimPartyLanMixin])
- * and connects out to the proxy's host tunnel, so nothing is opened to the internet here. The proxy proves to
- * Mojang that we are this account (the same check as joining a server), then every connection it makes to our
- * server comes as a stream over the tunnel (frames as in ads-server's PROTOCOL.md). The proxy has checked each
- * player's account already and forwards who they are (Velocity's modern forwarding, signed with a secret the
- * proxy hands us), so their login here takes that instead of a second Mojang check ([forwards]).
- */
 object AdsServer {
-    /** The proxy's host tunnel, unless config/adm/ads-server.txt names another (host:port). */
     private const val DEFAULT_PROXY = "127.0.0.1:25570"
     private val PLAYER_INFO = Identifier.fromNamespaceAndPath("velocity", "player_info")
-    /** Velocity's forwarding versions we take: 1 (default) and 4 (lazy session, the same fields). */
     private const val FORWARDING_ASK = 4
     private const val MAX_FRAME = 1 shl 20
     private const val HELLO = 1; private const val CHALLENGE = 2; private const val JOINED = 3; private const val WELCOME = 4
     private const val OPEN = 5; private const val DATA = 6; private const val CLOSE = 7; private const val INFO = 8
     private const val PING = 9; private const val ERROR = 10
 
-    private val mc get() = net.minecraft.client.Minecraft.getInstance()
+    private val mc get() = Minecraft.getInstance()
 
     private class Host(val port: Int) {
         @Volatile var socket: Socket? = null
@@ -66,15 +56,9 @@ object AdsServer {
 
     @Volatile private var host: Host? = null
 
-    /** Hosting on the ADS server (connecting or listed). */
     @JvmStatic val active: Boolean get() = host != null
-    /** Listed in the lobby: the proxy took us. */
     val listed: Boolean get() = host?.secret != null
 
-    /**
-     * This game is in someone else's sim through the ADS server (client side): its server said so on join
-     * ("adsHello"). Each new world through the proxy starts without it.
-     */
     @Volatile var inHostsSim = false
         private set
 
@@ -87,7 +71,6 @@ object AdsServer {
         FabricLoader.getInstance().getModContainer("adm").map { it.metadata.version.friendlyString }.orElse("?")
     }
 
-    /** Lists your sim on the ADS server (the menu's Host on Server). */
     fun start() {
         if (host != null) return
         if (P3Party.hosting) { EngineerClient.msg("§cClose your party first."); return }
@@ -95,7 +78,6 @@ object AdsServer {
         if (!SimServer.isSim(server)) return
         val port = if (server.isPublished) server.port else HttpUtil.getAvailablePort()
         val h = Host(port)
-        // (Before publishing: the LAN mixin reads [active] to keep the listener on 127.0.0.1.)
         host = h
         if (!server.isPublished && !server.publishServer(MinecraftServer.MultiplayerScope.LAN, false, port)) {
             host = null
@@ -107,7 +89,6 @@ object AdsServer {
         Thread({ heartbeat(h) }, "ads-server-info").apply { isDaemon = true }.start()
     }
 
-    /** Takes your sim off the ADS server: everyone who came through it is dropped ([unpublish] false: the server is stopping anyway). */
     fun stop(unpublish: Boolean = true) {
         val h = host ?: return
         host = null
@@ -117,8 +98,6 @@ object AdsServer {
         runCatching { h.socket?.close() }
         if (unpublish) mc.singleplayerServer?.let { s -> if (SimServer.isSim(s) && s.isPublished) runCatching { s.unpublishServer() } }
     }
-
-    // ------------------------------------------------------------------ the tunnel
 
     private fun send(h: Host, type: Int, body: ByteArray = ByteArray(0), off: Int = 0, len: Int = body.size) {
         val out = h.out ?: return
@@ -154,7 +133,6 @@ object AdsServer {
                 inp.readFully(body)
                 when (type) {
                     CHALLENGE -> {
-                        // The proxy asks Mojang whether this account joined "server" serverId: only this game can have.
                         val id = JsonParser.parseString(String(body)).asJsonObject["serverId"].asString
                         mc.services().sessionService().joinServer(user.profileId, user.accessToken, id)
                         send(h, JOINED)
@@ -183,7 +161,6 @@ object AdsServer {
 
     private fun id(body: ByteArray) = ((body[0].toInt() and 0xff) shl 8) or (body[1].toInt() and 0xff)
 
-    /** A stream the proxy opened: a connection into our own server for it. */
     private fun open(h: Host, id: Int) {
         val s = runCatching { Socket(InetAddress.getLoopbackAddress(), h.port).also { it.tcpNoDelay = true } }.getOrElse { sendId(h, CLOSE, id); return }
         h.streams[id] = s
@@ -202,7 +179,6 @@ object AdsServer {
         if (h.streams.remove(id, s)) runCatching { sendId(h, CLOSE, id) }
     }
 
-    /** Who's in your sim, for your head's lore in the lobby (when it changes), and a ping now and then. */
     private fun heartbeat(h: Host) {
         var last = ""
         var tick = 0
@@ -222,9 +198,6 @@ object AdsServer {
         }
     }
 
-    // ------------------------------------------------------------------ logins through the proxy
-
-    /** Whether a network login into [server] comes through the ADS proxy (and so takes the player it forwards). */
     @JvmStatic
     fun forwards(server: MinecraftServer): Boolean = host != null && SimServer.isSim(server)
 
@@ -233,9 +206,9 @@ object AdsServer {
 
     fun register() {
         SimNet.onClient("adsHello") { inHostsSim = true }
-        net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN.register { _, _, _ -> inHostsSim = false }
-        net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.DISCONNECT.register { _, _ -> inHostsSim = false }
-        net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.JOIN.register { handler, _, server ->
+        ClientPlayConnectionEvents.JOIN.register { _, _, _ -> inHostsSim = false }
+        ClientPlayConnectionEvents.DISCONNECT.register { _, _ -> inHostsSim = false }
+        ServerPlayConnectionEvents.JOIN.register { handler, _, server ->
             if (forwards(server) && handler.player.uuid != server.singleplayerProfile?.id()) SimNet.send(handler.player, "adsHello")
         }
         ServerLoginConnectionEvents.QUERY_START.register { handler, server, sender, _ ->
@@ -249,13 +222,11 @@ object AdsServer {
                 handler.disconnect(Component.literal("Couldn't check your login with the ADS server."))
                 return@registerGlobalReceiver
             }
-            // The same account as the host: letting it in would throw the host out of their own sim.
             if (profile.id() == server.singleplayerProfile?.id()) { handler.disconnect(Component.literal("That's the host's own account.")); return@registerGlobalReceiver }
             sync.waitFor(server.submit { (handler as AdsServerLoginAccessor).`ec$setAuthenticatedProfile`(profile) })
         }
     }
 
-    /** The player the proxy forwards: [signature 32][version][address][uuid][name][properties], signed with the secret it gave us. */
     private fun forwarded(buf: FriendlyByteBuf): GameProfile {
         val secret = host?.secret ?: error("not listed yet")
         val sig = ByteArray(32).also { buf.readBytes(it) }
@@ -264,7 +235,7 @@ object AdsServer {
         if (!MessageDigest.isEqual(sig, mac)) error("bad signature")
         val v = buf.readVarInt()
         if (v != 1 && v != FORWARDING_ASK) error("forwarding version $v")
-        buf.readUtf(Short.MAX_VALUE.toInt()) // their address
+        buf.readUtf(Short.MAX_VALUE.toInt())
         val uuid = buf.readUUID()
         val name = buf.readUtf(16)
         val props = ImmutableMultimap.builder<String, Property>()

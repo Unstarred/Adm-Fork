@@ -7,10 +7,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/**
- * The ADS world is never saved: it is deleted and built again on every open (SimWorld), so writing its chunks (the whole dungeon, at the
- * pause menu's autosave and again on leaving) is time spent for nothing. Every other world saves as usual.
- */
 @Mixin(MinecraftServer.class)
 public class AdsEngineNoSaveMixin {
     @Inject(method = "saveAllChunks(ZZZ)Z", at = @At("HEAD"), cancellable = true)

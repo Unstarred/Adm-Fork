@@ -8,16 +8,11 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 
-/**
- * BR Roles's boxes on the site (undonecoffee.com/brroles), where they are edited (by the site's
- * owner). One shared document, { rooms, lastId, updatedAt }, read whole; the mod only reads it.
- */
 object BoxSync {
 
     private const val URL = "https://${ADR.SITE}/adr/api/brboxes"
     private val http: HttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
 
-    /** Fetches the site's copy; [done] gets its JSON, off the game thread, or nothing if it failed. */
     fun pull(done: (String) -> Unit) {
         Thread.ofPlatform().daemon().name("brboxes-pull").start {
             runCatching {
@@ -30,7 +25,6 @@ object BoxSync {
 
     private const val ROLES_URL = "https://${ADR.SITE}/adr/api/brroles"
 
-    /** Fetches the site's roles (who kills which boxes; see [BrRoles]); [done] gets its JSON, off the game thread. */
     fun pullRoles(done: (String) -> Unit) {
         Thread.ofVirtual().name("brroles-pull").start {
             runCatching {

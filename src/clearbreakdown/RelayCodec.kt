@@ -5,24 +5,12 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 
-/** What one client tells its party during a clear. */
 sealed interface Relayed {
-    /** A secret it saw happen: [candidates] who could have got it, [exact] when that is the known finder. */
     data class Secret(val key: String, val roomKey: String, val roomName: String, val candidates: List<String>, val exact: Boolean) : Relayed
 
-    /** Where it sees [player]: a room key, "" in no room, null when it no longer sees them. */
     data class Presence(val player: String, val roomKey: String?) : Relayed
 }
 
-/**
- * Clear Breakdown's frames on the ADR Online socket. Sent: {"t":"cb","d":[...]}; the site hands
- * them to the sender's party with "from" added. Items:
- *
- *     {"s":key,"r":roomKey,"n":roomName,"c":[names],"x":exact}   a secret
- *     {"p":name,"r":roomKey}                                     where someone is ("r" left out: not seen)
- *
- * The site closes a socket for frames over 4096 chars, so a batch is split under [frames]' limit.
- */
 object RelayCodec {
     fun frames(items: List<Relayed>, maxChars: Int = 3500): List<String> {
         val out = ArrayList<String>()

@@ -6,15 +6,6 @@ import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
 
-/**
- * Odin's leap menu drawing its four boxes (the render handler, compiled into LeapMenu$2), shrunk
- * and faded for POV Previews: each box's scale times {@link PovPreviews#getOverlayScale}, and its
- * background colour's alpha times {@link PovPreviews#getOverlayAlpha} - the head and name are drawn
- * with other calls and stay solid. Both are 1 unless the previews are up.
- *
- * Found by the handler's exact signature, so an Odin that numbers its handlers differently simply
- * leaves the boxes as they are (injectors here are optional) rather than patching the wrong one.
- */
 @Pseudo
 @Mixin(targets = "com.odtheking.odin.features.impl.dungeon.LeapMenu$2", remap = false)
 public class LeapMenuRenderMixin {

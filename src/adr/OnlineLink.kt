@@ -15,22 +15,12 @@ import java.util.Base64
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionStage
 
-/**
- * ADR Online (undonecoffee.com/adr/online): while ADR is on, a WebSocket to the
- * site says who you are, your party ([PartyTracker]), and where you are, so the page can
- * list everyone online by party. It signs in with this install's owner token (the one uploads
- * carry); nothing comes back but pongs.
- *
- * [openPage] signs the browser in too: a fresh key, registered with the site under the owner token,
- * goes to the page in the link's #fragment (never sent anywhere else). A new key replaces the last.
- */
 object OnlineLink {
     private const val SITE = "undonecoffee.com"
     private val http: HttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build()
 
     @Volatile private var socket: WebSocket? = null
     @Volatile private var connecting = false
-    /** Replaced by this install's own game elsewhere: off until a restart. */
     @Volatile private var stopped = false
     @Volatile private var retryAt = 0L
     private var backoff = 5_000L
@@ -38,10 +28,8 @@ object OnlineLink {
     private var partyChangedAt = 0L
     private var sentWhere = ""
     private var lastPing = 0L
-    /** The last frame handed to the socket; the next one waits for it (see [sendText]). */
     private var sending: CompletableFuture<WebSocket> = CompletableFuture.completedFuture(null)
 
-    /** Every client tick while ADR is on. */
     fun tick() {
         if (stopped) return
         val now = System.currentTimeMillis()
@@ -50,7 +38,6 @@ object OnlineLink {
             if (!connecting && now >= retryAt && EngineerClient.mc.player != null) connect()
             return
         }
-        // The party: once it has held still a moment (a /p list or a Party Finder join comes in bursts).
         val v = PartyTracker.state.version
         if (v != sentParty) {
             if (partyChangedAt == 0L) partyChangedAt = now
@@ -97,8 +84,6 @@ object OnlineLink {
                 connecting = false
                 if (err != null) { retryLater(); return@whenComplete }
                 backoff = 5_000L
-                // Everything set up and hello on its way before tick() can see the socket, so hello is
-                // always the first frame and the resets don't land after tick() has sent.
                 sentParty = -1; sentWhere = ""; lastPing = 0L
                 sending = ws.sendText(hello().toString(), true)
                 socket = ws
@@ -113,30 +98,19 @@ object OnlineLink {
 
     private fun send(o: JsonObject) = sendText(o.toString())
 
-    /**
-     * The JDK socket takes one text frame at a time: a second sendText while the first is still out
-     * fails ("Send pending") without throwing, and the frame is lost. One tick can send party, where,
-     * and ping together, so each frame waits for the one before it, whether that one went or not.
-     */
     private fun sendText(text: String) {
         val ws = socket ?: return
         sending = sending.handle { _, _ -> Unit }.thenCompose { ws.sendText(text, true) }
     }
 
-    /**
-     * Clear Breakdown's frames ({"t":"cb",...}) as the site relays them from party members who name
-     * each other in their party reports; everything else the site sends is ignored.
-     */
     @Volatile var onRelay: ((String) -> Unit)? = null
 
-    /** Clear Breakdown's frames for the party, in line with the rest. False (nothing sent) without a socket. */
     fun sendRelay(frames: List<String>): Boolean {
         if (socket == null) return false
         for (f in frames) sendText(f)
         return true
     }
 
-    /** ADR turned off: offline. */
     fun close() {
         val ws = socket
         socket = null
@@ -144,7 +118,6 @@ object OnlineLink {
     }
 
     private class Listener : WebSocket.Listener {
-        // A frame can come in parts: whole ones only.
         private val text = StringBuilder()
 
         override fun onText(ws: WebSocket, data: CharSequence, last: Boolean): CompletionStage<*>? {
@@ -164,9 +137,6 @@ object OnlineLink {
         override fun onError(ws: WebSocket, error: Throwable) { if (socket === ws) retryLater() }
     }
 
-    // ------------------------------------------------------------------ signing the page in
-
-    /** ADR's "Open Online Page" and /adr online: the page, signed in, in your browser. */
     fun openPage() {
         Thread.ofPlatform().name("engineerclient-adr-online").daemon(true).start {
             try {
@@ -189,7 +159,6 @@ object OnlineLink {
         }
     }
 
-    /** Opens [url] in the default browser, without it ever being shown in game. */
     private fun browse(url: String) {
         val os = System.getProperty("os.name").lowercase()
         val cmd = when {

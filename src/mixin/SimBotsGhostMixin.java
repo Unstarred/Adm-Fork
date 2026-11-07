@@ -9,10 +9,6 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/**
- * The P3 Sim's party (mannequins) touch nothing: they don't push you or get pushed, and your
- * crosshair, clicks and arrows go through them. Client and integrated server alike; only in the sim.
- */
 @Mixin(LivingEntity.class)
 public class SimBotsGhostMixin {
     private boolean ec$simBot() {

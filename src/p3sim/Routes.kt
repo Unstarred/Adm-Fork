@@ -6,31 +6,15 @@ import java.io.DataInputStream
 import java.util.PriorityQueue
 import java.util.zip.GZIPInputStream
 
-/**
- * How real players get about in P3, for the bots: a graph of every trail recorded in ADR runs
- * (all five players) and p3wr's leg tracks (routes.bin, built offline). Its nodes are trail points
- * (merged on a 0.2-block grid), its edges the recorded tick-to-tick moves (sprints, jumps, lava
- * bounces, Bonzo and Jerry boosts, stonks through walls with the Dungeonbreaker) plus short walk joins
- * between trails on the same floor; it's pruned to the fastest paths between the places bots go
- * (stands, early-enter spots, the core) for every state of the gates and doors.
- *
- * [find] gives the fastest path from one place to another through the openings that are open, as
- * frames with their real timing; the bot plays it back ([Party]), faster when it has to be.
- */
 object Routes {
-    /** The openings a node can be in (closed: not usable): section k's gate [gate], its door [door], the core door. */
     fun gate(s: Int) = s
     fun door(s: Int) = s + 4
     const val CORE_DOOR = 4
 
-    /** Blocks a tick getting on and off the graph (and along a walk join). */
     private const val JOIN_SPEED = 0.9
-    /** Extra ticks each tick in a wall costs (a stonk): only taken where there's no way round. */
     private const val CLIP_COST = 2.0
-    /** Getting on the graph: the nearest grounded nodes within this, else within [ATTACH_FAR]. */
     private const val ATTACH = 2.0
     private const val ATTACH_FAR = 5.0
-    /** The node lookup's cells, blocks (x, z). */
     private const val CELL = 4
 
     private class Graph(
@@ -86,23 +70,16 @@ object Routes {
     private fun key(cx: Int, cz: Int) = (cx.toLong() shl 32) or (cz.toLong() and 0xffffffffL)
     private fun cell(x: Double, z: Double) = key(Math.floorDiv(Math.floor(x).toInt(), CELL), Math.floorDiv(Math.floor(z).toInt(), CELL))
 
-    /** Loads the graph now (off the first bot's tick). */
     fun preload() { graph }
 
-    /**
-     * A route's frames: positions with their time from the start (ticks at a player's pace), the look
-     * recorded there (NaN: none, getting on or off the graph) and what was held.
-     */
     class Route(val x: DoubleArray, val y: DoubleArray, val z: DoubleArray, val t: DoubleArray, val yaw: FloatArray, val pitch: FloatArray, val held: Array<String?>) {
         val ticks get() = t[t.size - 1]
         val size get() = t.size
-        /** The frame at or before [time]. */
         fun frameAt(time: Double): Int {
             var lo = 0; var hi = t.size - 1
             while (lo < hi) { val mid = (lo + hi + 1) / 2; if (t[mid] <= time) lo = mid else hi = mid - 1 }
             return lo
         }
-        /** Where it is [time] ticks in. */
         fun pos(time: Double): Vec3 {
             val i = frameAt(time)
             if (i >= t.size - 1) return Vec3(x[i], y[i], z[i])
@@ -114,7 +91,6 @@ object Routes {
 
     private class Near(val node: Int, val d: Double)
 
-    /** The usable grounded nodes nearest [p] (within [ATTACH], else [ATTACH_FAR]), up to 12. */
     private fun near(g: Graph, p: Vec3, closed: (Int) -> Boolean): List<Near> {
         for (r in doubleArrayOf(ATTACH, ATTACH_FAR)) {
             val found = ArrayList<Near>()
@@ -136,10 +112,6 @@ object Routes {
         return emptyList()
     }
 
-    /**
-     * The fastest real way from [from] to [to] through the openings that aren't [closed] (by id:
-     * [gate], [door], [CORE_DOOR]); null when either end is off the graph or there's no way.
-     */
     fun find(from: Vec3, to: Vec3, closed: (Int) -> Boolean): Route? {
         val g = graph ?: return null
         val starts = near(g, from, closed)
@@ -177,7 +149,6 @@ object Routes {
         var i = bestNode
         while (i >= 0) { path += i; i = prev[i] }
         path.reverse()
-        // Frames: on at the first node, along the recorded moves, off to the spot itself.
         val k = path.size + 2
         val x = DoubleArray(k); val y = DoubleArray(k); val z = DoubleArray(k); val t = DoubleArray(k)
         val yaw = FloatArray(k) { Float.NaN }; val pitch = FloatArray(k) { Float.NaN }; val held = arrayOfNulls<String>(k)

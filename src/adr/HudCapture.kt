@@ -7,30 +7,15 @@ import net.minecraft.world.level.GameType
 import net.minecraft.world.scores.DisplaySlot
 import net.minecraft.world.scores.PlayerScoreEntry
 import net.minecraft.world.scores.PlayerTeam
+import java.util.UUID
 
-/**
- * What Hypixel shows on the HUD: the tab list, the sidebar, boss bars, titles and the action bar. Text is
- * kept with its § colour codes, as the game draws it. Only changes are written:
- *
- *  - {"k":"tab","t":t,"n":rows?,"d":[[row, text], ...]}: the tab list's rows (top to bottom, then the
- *    next column, as the game orders them), only the rows that changed that tick; "n" when the row
- *    count changes. Hypixel rewrites it about once a second.
- *  - {"k":"sb","t":t,"title":text?,"n":lines?,"d":[[line, text], ...]}: the sidebar, line 0 at the top,
- *    the same way; "title" and "n" only when they change.
- *  - {"k":"bar","t":t,"i":bar,"m":name?,"p":progress?} a boss bar (numbered in the order they came)
- *    added or changed, progress to 3 decimals; {"k":"bar","t":t,"i":bar,"x":1} gone.
- *  - {"k":"title","t":t,"m":text} / {"k":"sub","t":t,"m":text}: a title or subtitle sent; an empty
- *    title when they're cleared.
- *  - {"k":"ab","t":t,"m":text}: the action bar, when its text changes (Hypixel resends it every few
- *    ticks).
- */
 class HudCapture(private val emit: (String) -> Unit) {
 
     private val tabRows = ArrayList<String>()
     private val tabComps = ArrayList<Component?>()
     private val sideRows = ArrayList<String>()
     private var sideTitle = ""
-    private val bars = HashMap<java.util.UUID, Int>()
+    private val bars = HashMap<UUID, Int>()
     private val barProgress = HashMap<Int, Int>()
     private var actionBar = ""
 
@@ -45,7 +30,6 @@ class HudCapture(private val emit: (String) -> Unit) {
         val sb = StringBuilder()
         for ((i, info) in rows.withIndex()) {
             val comp = info.tabListDisplayName
-            // The same Component as last tick (the game keeps it until the server sends a new one): nothing to read.
             if (i < tabComps.size && comp != null && comp === tabComps[i]) continue
             val text = if (comp != null) ADR.legacyText(comp) else ADR.legacyText(PlayerTeam.formatNameForTeam(info.team, Component.literal(info.profile.name())))
             if (i < tabComps.size) tabComps[i] = comp else tabComps.add(comp)
@@ -82,7 +66,7 @@ class HudCapture(private val emit: (String) -> Unit) {
         emit("""{"k":"sb","t":$t${if (retitled) ",\"title\":${GeometryCapture.jsonString(title)}" else ""}${if (resized) ",\"n\":${lines.size}" else ""},"d":[$sb]}""")
     }
 
-    fun bossBar(t: Int, id: java.util.UUID, name: Component?, progress: Float?, removed: Boolean) {
+    fun bossBar(t: Int, id: UUID, name: Component?, progress: Float?, removed: Boolean) {
         val i = bars.getOrPut(id) { bars.size }
         if (removed) { barProgress.remove(i); emit("""{"k":"bar","t":$t,"i":$i,"x":1}"""); return }
         val p = progress?.let { Math.round(it * 1000) }
@@ -105,12 +89,10 @@ class HudCapture(private val emit: (String) -> Unit) {
     }
 
     private companion object {
-        /** The tab list's own order (PlayerTabOverlay's comparator). */
         val ORDER: Comparator<PlayerInfo> = compareBy<PlayerInfo> { -it.tabListOrder }
             .thenBy { if (it.gameMode == GameType.SPECTATOR) 1 else 0 }
             .thenBy { it.team?.name ?: "" }
             .thenBy(String.CASE_INSENSITIVE_ORDER) { it.profile.name() }
-        /** The sidebar's own order (Gui's): highest score first, then by name. */
         val SIDEBAR_ORDER: Comparator<PlayerScoreEntry> = compareByDescending<PlayerScoreEntry> { it.value() }
             .thenBy(String.CASE_INSENSITIVE_ORDER) { it.owner() }
     }

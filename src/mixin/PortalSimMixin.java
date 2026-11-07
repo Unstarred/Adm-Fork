@@ -9,11 +9,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/**
- * The F7 arena has nether portal blocks as decoration, and the P3 Sim world has no Nether: an arrow
- * (or the player) going into one would crash the integrated server looking for the other side. In the sim
- * world nothing enters a portal; everywhere else this does nothing.
- */
 @Mixin(Entity.class)
 public class PortalSimMixin {
     @Inject(method = "setAsInsidePortal", at = @At("HEAD"), cancellable = true)

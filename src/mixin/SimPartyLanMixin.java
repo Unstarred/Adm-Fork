@@ -11,10 +11,6 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 import java.net.InetAddress;
 
-/**
- * P3 Sim parties: hosting opens the sim with the game's Open to LAN, but only to this computer (127.0.0.1) and
- * without announcing it on the LAN; the relay brings the joiners in (P3Party). Open to LAN itself is unchanged.
- */
 @Mixin(IntegratedServer.class)
 public class SimPartyLanMixin {
     @ModifyArg(method = "publishServer(Lnet/minecraft/server/MinecraftServer$MultiplayerScope;I)Z",

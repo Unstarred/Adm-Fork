@@ -10,7 +10,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** The ADS world's chunks are not written when its level closes either (see AdsEngineNoSaveMixin). */
 @Mixin(ServerChunkCache.class)
 public class AdsEngineNoChunkFlushMixin {
     @Shadow @Final private ServerLevel level;

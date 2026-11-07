@@ -4,14 +4,6 @@ import com.google.gson.GsonBuilder
 import java.util.regex.Pattern
 import java.util.regex.PatternSyntaxException
 
-/**
- * The chat-hider rule set, plain Kotlin so it loads and tests headlessly.
- *
- * Shape of `chat/hidden.json`: `custom` rules first — a hand-written regex with `show` or
- * `block`, matched anywhere in the line, first match wins — then `block`, message templates to
- * hide, each an anchored regex over the whole message. Colour codes are stripped before
- * matching; a multi-line message is matched as one string with `\n` in it.
- */
 class ChatRules(val custom: List<Custom>, val block: List<Block>) {
 
     data class Custom(val regex: String = "", val action: String = "block")
@@ -39,7 +31,6 @@ class ChatRules(val custom: List<Custom>, val block: List<Block>) {
 
     val size: Int get() = compiled.size
 
-    /** The label of the rule that hides [text], or null when nothing does. [text] has no § codes. */
     fun hides(text: String): String? {
         for (r in compiled) {
             val m = r.pattern.matcher(text)
@@ -52,14 +43,8 @@ class ChatRules(val custom: List<Custom>, val block: List<Block>) {
     companion object {
         private val gson = GsonBuilder().create()
         private val formatting = Regex("§.")
-        /** Compact-chat repeat counters, e.g. Devonian's " (3)" sibling on a stacked line. */
         private val repeatCounter = Regex("""\s\(\d+\)$""")
 
-        /**
-         * What rules match against: colour codes removed and the whole message trimmed. Hypixel
-         * centres many lines with leading spaces, and the rules were built from trimmed log lines
-         * with compact-chat counters removed, so the counter comes off here too.
-         */
         fun strip(text: String): String = repeatCounter.replace(formatting.replace(text, "").trim(), "")
 
         fun parse(json: String): ChatRules {
@@ -67,7 +52,6 @@ class ChatRules(val custom: List<Custom>, val block: List<Block>) {
             return ChatRules(file.custom, file.block)
         }
 
-        /** The rules shipped in the jar. */
         fun bundled(): ChatRules {
             val text = ChatRules::class.java.getResourceAsStream("/chat/hidden.json")?.bufferedReader()?.use { it.readText() }
                 ?: return ChatRules(emptyList(), emptyList())

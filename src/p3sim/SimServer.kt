@@ -1,57 +1,46 @@
 package com.engineerclient.p3sim
 
 import com.engineerclient.EngineerClient
+import com.mojang.brigadier.arguments.StringArgumentType
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents
-import com.mojang.brigadier.arguments.StringArgumentType
+import net.minecraft.client.Minecraft
 import net.minecraft.client.server.IntegratedServer
 import net.minecraft.commands.Commands
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.server.level.ServerPlayer
+import net.minecraft.world.level.Level
 import net.minecraft.world.level.gamerules.GameRules
 import net.minecraft.world.level.storage.LevelResource
 
-/**
- * The sim's server side: the integrated server of the "p3sim" world, and only that one. Every
- * handler here returns at once for any other server (a dedicated one, another singleplayer world),
- * so nothing of the sim exists outside its own world.
- */
 object SimServer {
-    /** The running sim server, or null. Read from the client thread too. */
     @Volatile var server: MinecraftServer? = null
         private set
 
-    /** A test driver's per-tick hook (end of every server tick), so it acts on exact ticks even while the server sprints. Null in play. */
     @Volatile var devTick: ((MinecraftServer) -> Unit)? = null
 
-    /** The sim's world: named p3sim and opened by the mod (or built by it before), never just any world of that name. */
     fun isSim(server: MinecraftServer?): Boolean =
         server is IntegratedServer && server.worldData.levelName == SimWorld.NAME &&
             (SimWorld.opening || SimWorld.isBuilt(server.getWorldPath(LevelResource.ROOT)))
 
-    /** Is [level] the sim's (server side). */
     @JvmStatic
-    fun isSimLevel(level: net.minecraft.world.level.Level): Boolean {
+    fun isSimLevel(level: Level): Boolean {
         val s = server ?: return false
         return level is ServerLevel && level.server === s
     }
 
     val level: ServerLevel? get() = server?.overworld()
 
-    /** The sim's player: the one whose game it is (a party's joiners come after). */
     val player: ServerPlayer? get() {
         val l = server?.playerList?.players ?: return null
-        // By this game's own account: a respawn puts the host's new player at the end of the list.
-        val me = net.minecraft.client.Minecraft.getInstance().user.profileId
+        val me = Minecraft.getInstance().user.profileId
         return l.firstOrNull { it.uuid == me } ?: l.firstOrNull()
     }
 
-    /** Runs [block] on the sim server's thread (from the client's menu, say), if it is running. */
     fun run(what: String, block: (MinecraftServer) -> Unit) {
         val s = server ?: return
-        // The host's (a packet handler that threw may have left someone else's actor set).
         s.execute { if (server === s) EngineerClient.safely("p3sim $what") { Sim.asPlayer(null) { block(s) } } }
     }
 
@@ -72,9 +61,7 @@ object SimServer {
         }
         ServerLifecycleEvents.SERVER_STOPPING.register { s ->
             if (s !== server) return@register
-            // How everyone left their items is saved as their hotbar: their next arrival lays it out (the world is made fresh, so nothing else keeps it).
             EngineerClient.safely("p3sim keep hotbars") { Sim.forEachPlayer { HotbarLayout.keep(it, save = true); HotbarLayout.forgetGiven() } }
-            // Saved as built: no fight entities, every changed block back.
             EngineerClient.safely("p3sim stopping") { P3Party.stopHosting(unpublish = false); AdsServer.stop(unpublish = false); Fight.stop(); Party.clear(); Sim.clearEntities(); Blocks.restoreAll() }
         }
         ServerLifecycleEvents.SERVER_STOPPED.register { s ->
@@ -87,7 +74,6 @@ object SimServer {
             if (s === server) {
                 EngineerClient.safely("p3sim tick") { Fight.tick(s) }
                 devTick?.let { t -> EngineerClient.safely("ads dev tick") { t(s) } }
-                // The lag layer last: it stalls this thread (a freeze) once the tick's work is done.
                 EngineerClient.safely("ads lag") { LagRuntime.settingPreset = P3Sim.lagPresetS.value; LagRuntime.burstRate = P3Sim.lagBurstS.value.toDouble(); LagRuntime.afterTick(s) }
             }
         }
@@ -100,22 +86,15 @@ object SimServer {
         SimItems.register()
     }
 
-    /**
-     * `/pc <message>`, only on the sim's server: party chat as Hypixel shows it (Odin sends its
-     * party messages, "Leaped to X!" and the like, this way).
-     */
     private fun commands(s: MinecraftServer) {
         s.commands.dispatcher.register(
             Commands.literal("pc").then(Commands.argument("message", StringArgumentType.greedyString()).executes { c ->
                 val msg = StringArgumentType.getString(c, "message")
-                // A chat command runs later, outside the packet: as whoever typed it.
                 val name = c.source.player?.gameProfile?.name ?: "You"
-                // The whole party sees it (sent by whoever typed it).
                 Sim.everyone { Sim.chat("§9Party §8> §b[MVP§4+§b] $name§f: $msg") }
                 1
             })
         )
-        // `/gfs <item> <amount>` (get from sacks): Ender Pearls and Superboom TNT, the two the clear takes from sacks.
         s.commands.dispatcher.register(
             Commands.literal("gfs").then(Commands.argument("what", StringArgumentType.greedyString()).executes { c ->
                 val p = c.source.player ?: return@executes 0
@@ -125,18 +104,13 @@ object SimServer {
         )
     }
 
-    /** The sack items `/gfs` hands out: the name it is asked by (lower case, words joined by _, a plural s dropped), its stack and its stack size. */
     private val SACK_ITEMS = mapOf(
         "ender_pearl" to Triple("Ender Pearl", { SimItems.PEARLS }, 16),
         "superboom_tnt" to Triple("Superboom TNT", { SimItems.SUPERBOOM }, 64),
         "superboom" to Triple("Superboom TNT", { SimItems.SUPERBOOM }, 64),
     )
 
-    /**
-     * `/gfs ender_pearl 16`: tops up the stacks you have and fills empty slots with up to [what]'s amount (64 when none is given), as Hypixel's
-     * "Moved N Ender Pearl from your Sacks to your inventory." says (recorded). The sacks never run out.
-     */
-    private fun getFromSacks(p: net.minecraft.server.level.ServerPlayer, what: String) {
+    private fun getFromSacks(p: ServerPlayer, what: String) {
         val words = what.trim().split(Regex("\\s+"))
         val amount = words.last().toIntOrNull()
         val key = (if (amount != null) words.dropLast(1) else words).joinToString("_").lowercase().removeSuffix("s")
@@ -160,7 +134,6 @@ object SimServer {
         Sim.chat("§aMoved §f$moved $name§a from your Sacks to your inventory.")
     }
 
-    /** The world's rules: no time, weather, mobs, decay, fire, fall damage; things stay as built. */
     private fun rules(s: MinecraftServer) {
         val r: GameRules = s.gameRules
         r.set(GameRules.ADVANCE_TIME, false, s)

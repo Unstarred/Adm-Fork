@@ -12,21 +12,9 @@ import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.time.Duration
 
-/**
- * Signing in to ADR as this Minecraft account, so the site marks uploads as really this player's
- * (verified). The same proof a server gets: the site hands out a challenge, the game tells Mojang it
- * is joining "server" SHA-1(challenge) (as it does joining any online-mode server), and the site asks
- * Mojang whether this player did. It answers with a token good for 30 days, kept in
- * config/adm/adr/auth.json and sent with uploads (X-ADR-Auth).
- *
- * Never in the way of an upload: no token (an offline account, Mojang or the site down) just means
- * the upload goes without one.
- */
 object ADRAuth {
     private const val AUTH_URL = "https://${ADR.SITE}/adr/api/auth"
-    /** A token this close to running out is replaced. */
     private const val RENEW_MS = 2 * 86_400_000L
-    /** After a failed sign-in, uploads go without one for this long before it is tried again. */
     private const val RETRY_MS = 10 * 60_000L
     private val http: HttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build()
     private val file get() = EngineerClient.mc.gameDirectory.toPath().resolve("config").resolve("adm").resolve("adr").resolve("auth.json")
@@ -36,11 +24,6 @@ object ADRAuth {
     private var loaded = false
     private var failedAt = 0L
 
-    /**
-     * The token to send with an upload recorded by [self], or null: only when the game is signed in
-     * as [self] (Upload Missing Runs can send runs another account recorded). Off the game thread only:
-     * it can sign in, which talks to Mojang and the site.
-     */
     @Synchronized
     fun headerFor(self: String): String? = try {
         val name = EngineerClient.mc.user.name
@@ -64,7 +47,6 @@ object ADRAuth {
 
     private fun signIn(name: String): Token? {
         val user = EngineerClient.mc.user
-        // (Offline and dev accounts have no real access token: Mojang turns them away below anyway.)
         val access = user.accessToken
         if (access.isNullOrBlank() || access.length < 20) return null
         val c = get("$AUTH_URL/challenge")?.get("c")?.asString ?: return null

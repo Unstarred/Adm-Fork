@@ -8,11 +8,6 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/**
- * {@link BrWaypoints2}'s wand clicks: while a box face is selected, left click pushes it out and
- * right click pulls it in, and the swing, the mining and the item use they would otherwise be are
- * cancelled here so nothing reaches the server.
- */
 @Mixin(Minecraft.class)
 public class WandInputMixin {
 

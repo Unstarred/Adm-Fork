@@ -1,30 +1,18 @@
 package com.engineerclient.mappred
 
-/**
- * Names for the rooms nobody has named yet, from the dungeon's secret total: every name comes up at most
- * once a map ([MapStats.NAMES]), so the unnamed rooms take different names from their pools, and their
- * secrets have to add up to what the named rooms leave of the total ([targets]: each total the tab list
- * allows, less the named rooms' secrets). [missing]: names the floor never has ([FloorRules.missingNames]).
- */
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.ceil
+import kotlin.math.floor
+
 class SecretNames(used: Set<String>, private val targets: IntArray, missing: Set<String> = emptySet()) {
-    /** Names still free in each pool. */
     val avail: Array<List<RoomName>> = Array(MapStats.POOLS) { p -> MapStats.NAMES.filter { it.pool == p && it.name !in used && it.name !in missing } }
     private val poolWeight = DoubleArray(MapStats.POOLS) { p -> avail[p].sumOf { it.seen.toDouble() } }
-    /** [solve]'s answers by pools; several threads of one session ([PredictionSession]) share them. */
     private class Box(val result: Result?)
-    private val cache = java.util.concurrent.ConcurrentHashMap<String, Box>()
+    private val cache = ConcurrentHashMap<String, Box>()
     private val maxT = targets.maxOrNull() ?: -1
 
-    /**
-     * [likelihood]: the chance names drawn from the pools hit a target (0: this set of rooms can't be the
-     * map). [byPool]: for a room of each pool, each free name's chance (in [avail] order).
-     */
     class Result(val likelihood: Double, val byPool: Map<Int, DoubleArray>)
 
-    /**
-     * For unnamed rooms of these [pools], any number of them: worked out exactly, pool by pool, by the secrets each
-     * set of free names adds up to (rooms of one pool take different names), then the pools together.
-     */
     fun solve(pools: IntArray): Result? {
         if (targets.isEmpty()) return null
         val sorted = pools.sortedArray()
@@ -34,11 +22,6 @@ class SecretNames(used: Set<String>, private val targets: IntArray, missing: Set
         return cache.getOrPut(key) { Box(res) }.result
     }
 
-    /**
-     * Each name drawn as often as it comes up in its pool, the rooms in turn, never one name twice: a pool's [k] rooms
-     * take an ordered set of k names, weighed by their product; its weight by secrets is k! times the sum, over the
-     * sets of k names adding up to those secrets, of their products ([sets]).
-     */
     private fun count(pools: IntArray): Result {
         if (pools.isEmpty()) return Result(if (0 in targets) 1.0 else 0.0, emptyMap())
         val byPool = pools.toList().groupingBy { it }.eachCount()
@@ -47,7 +30,6 @@ class SecretNames(used: Set<String>, private val targets: IntArray, missing: Set
         val w = Array(ps.size) { j -> DoubleArray(avail[ps[j]].size) { avail[ps[j]][it].seen / poolWeight[ps[j]] } }
         val sec = Array(ps.size) { j -> IntArray(avail[ps[j]].size) { avail[ps[j]][it].secrets } }
         val fact = DoubleArray(ps.size) { j -> (1..byPool.getValue(ps[j])).fold(1.0) { a, b -> a * b } }
-        // each pool by its secrets, and every pool but one together (past the highest target nothing counts)
         val f = Array(ps.size) { j -> sets(w[j], sec[j], byPool.getValue(ps[j]), -1, top).also { a -> for (s in a.indices) a[s] *= fact[j] } }
         val rest = Array(ps.size) { j -> var a = DoubleArray(top).also { it[0] = 1.0 }; for (o in ps.indices) if (o != j) a = conv(a, f[o], top); a }
         val all = conv(rest[0], f[0], top)
@@ -57,7 +39,6 @@ class SecretNames(used: Set<String>, private val targets: IntArray, missing: Set
             val k = byPool.getValue(ps[j])
             out[ps[j]] = DoubleArray(w[j].size) { i ->
                 if (total <= 0) return@DoubleArray 0.0
-                // the sets with this name in: it, and k - 1 others; a room of the pool has it a k-th of those
                 val with = sets(w[j], sec[j], k - 1, i, top)
                 var sum = 0.0
                 for (t in targets) for (s in 0 until top) {
@@ -70,7 +51,6 @@ class SecretNames(used: Set<String>, private val targets: IntArray, missing: Set
         return Result(total, out)
     }
 
-    /** For each secret count below [top], the sum over sets of [k] names (but name [skip]) adding up to it of their weights' product. */
     private fun sets(w: DoubleArray, sec: IntArray, k: Int, skip: Int, top: Int): DoubleArray {
         val e = Array(k + 1) { DoubleArray(top) }
         e[0][0] = 1.0
@@ -91,21 +71,13 @@ class SecretNames(used: Set<String>, private val targets: IntArray, missing: Set
     }
 
     companion object {
-        /**
-         * Unnamed rooms the samplers weigh each sample by at most (the last few rooms, where it matters; every arrangement
-         * of a sample's specials is solved, so more costs a lot of time). [MapPredictor.certainNames] has no such limit.
-         */
         const val MAX_ROOMS = 4
 
-        /**
-         * Totals the tab list allows: [found] secrets shown as [percent]% (rounded, to 1 or 2 places).
-         * Empty when nothing is found yet.
-         */
         fun totals(found: Int, percent: Float): IntArray {
             if (found <= 0 || percent <= 0f) return IntArray(0)
             if (percent >= 100f) return intArrayOf(found)
-            val lo = kotlin.math.ceil(100.0 * found / (percent + 0.05)).toInt()
-            val hi = kotlin.math.floor(100.0 * found / maxOf(percent - 0.05, 0.001)).toInt()
+            val lo = ceil(100.0 * found / (percent + 0.05)).toInt()
+            val hi = floor(100.0 * found / maxOf(percent - 0.05, 0.001)).toInt()
             if (hi < lo || hi - lo > 40) return IntArray(0)
             return (maxOf(lo, found)..hi).toList().toIntArray()
         }

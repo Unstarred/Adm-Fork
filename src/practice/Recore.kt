@@ -1,5 +1,11 @@
 package com.engineerclient.practice
 
+import com.engineerclient.DeadPlayers
+import com.engineerclient.EngineerClient
+import com.engineerclient.misc.OdinLeapScale
+import com.engineerclient.p3sim.Fight
+import com.engineerclient.p3sim.GoldorPhase
+import com.engineerclient.p3sim.P3Sim
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.ColorSetting
@@ -17,23 +23,21 @@ import com.odtheking.odin.utils.render.roundedRect
 import com.odtheking.odin.utils.render.roundedRectOutlined
 import com.odtheking.odin.utils.render.text
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.PlayerFaceExtractor
+import net.minecraft.client.gui.screens.Screen
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
+import net.minecraft.client.multiplayer.ClientLevel
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket
 import net.minecraft.resources.Identifier
 import net.minecraft.util.ARGB
 import net.minecraft.world.entity.Entity
+import net.minecraft.world.entity.decoration.Mannequin
+import net.minecraft.world.entity.player.PlayerSkin
 
-/**
- * F7/M7 core leap (was Term Info's Core Leap, then Sub Splits'). Paste Last In Core is set here and sent by
- * DungeonSplits, whose Goldor tracking times everyone into the core (it runs for this with Sub Splits off). Core Leap Highlight: once S3 is done, the side of the screen where the first teammate
- * inside the core will be in Odin's Leap Menu, in gold, so you're already flicking there when you open the menu.
- * Highlight All Players In Core: every teammate who got to the core before you, each in their own part of the
- * screen. Behind terminals too: only ever drawn as part of the HUD, which every screen draws over, so it never
- * covers or recolours a slot.
- */
 object Recore : Module(
     name = "Recore",
     category = Category.custom("ADM", 860, 10),
@@ -44,7 +48,6 @@ object Recore : Module(
     private val coreLeap by BooleanSetting("Core Leap Highlight", true, desc = "Once S3 is done, the side of the screen where the first teammate inside the core will be in Odin's Leap Menu, in gold, so you flick there as the menu opens. Shown behind terminals too, never over them.")
     private val allInCore by BooleanSetting("Highlight All Players In Core", true, desc = "Highlights every teammate who made it to the core before you, each where they'll be in the leap menu, not just the first one. All of them go once you're in the core yourself (with Hide When In Core).").withDependency { coreLeap }
     private val lookDropdown by DropdownSetting("Core Leap Look", desc = "").withDependency { coreLeap }
-    /** The look settings show: Core Leap Highlight on and its dropdown open. */
     private val look get() = coreLeap && lookDropdown
     private val preview by BooleanSetting("Preview", false, desc = "Shows the highlight now, top right, as if someone were in the core (also over this menu), to try the looks below; with Highlight All Players In Core, bottom left too. Turn it off after.").withDependency { look }
     private val style by SelectorSetting("Style", Style.EDGE_GLOW, desc = "Quadrant: the quarter of the screen with their box. Side: the whole left or right half. Top / Bottom: the whole top or bottom half. Edge Glow: a glow along that quarter's two outer edges. Corner Bracket: an L near the crosshair pointing at it. Leap Box: their leap menu box, as Odin draws it.").withDependency { look }
@@ -84,17 +87,9 @@ object Recore : Module(
     private const val GATE = "The gate has been destroyed!"
     private val TASK_COUNT = Regex("^\\w+ (?:activated|completed) a (?:terminal|lever|device)! \\((\\d+)/(\\d+)\\)$")
 
-    /** Terminals going (Goldor's first line or the first task message, to the core opening). */
     private var terms = false
-    /** S3 done: watching for teammates in the core, until Necron or a new world. */
     @Volatile private var coreWatch = false
-    /**
-     * Sections over, counted as Sub Splits does: a section is over once its last completion (n/n) and its gate
-     * are both in, in either order. Doesn't lean on every single term/lever/device message being read the way
-     * Term Info's section count does, so a missed one doesn't keep this from showing in S4.
-     */
     private var sectionsOver = 0
-    /** You've been in the core since watching started: it stays off until the next run. */
     private var selfBeenInCore = false
     private var lastIn = false
     private var gateIn = false
@@ -112,49 +107,34 @@ object Recore : Module(
         if (sectionsOver == 3) coreWatch = true
     }
 
-    /** Term Info's own count got S3 done (it reads every task message): the core's watched from now. */
     fun s3Done() { if (enabled) coreWatch = true }
 
-    /**
-     * The P3 sim starting at section [section] (2-4: the earlier ones done, no Goldor line; 5 the core):
-     * counts from that section, as if this had seen the run so far.
-     */
     @JvmStatic
     fun simStart(section: Int) {
         reset()
         if (section !in 1..4) return
         terms = true
         sectionsOver = section - 1
-        // S1-S3 done: the core's watched from S4's start (as simS4() has it on the host's game).
         coreWatch = section == 4
     }
 
-    /** Teammates inside the core box, by name, with when they were first seen there (ms). */
     private val inCoreSince = LinkedHashMap<String, Long>()
 
-    /** DungeonSplits' core box (and P3 Sim's CORE_BOX): reaches down to the core's floor. */
     private fun inCore(p: Entity) = p.x >= 39 && p.x < 71 && p.y < 155.5 && p.z >= 54 && p.z < 118
 
-    /**
-     * A Spirit Leap drags you to its target over several ticks, and a leap from S2 into S4 goes straight
-     * through the core box: anyone moving faster than this per tick is in flight, not in the core. Running
-     * is 0.3 a tick, a leap drag many blocks; an etherwarp into the core is one big jump, then still.
-     */
     private const val FLIGHT_PER_TICK = 2.0
     private fun inFlight(p: Entity): Boolean {
         val dx = p.x - p.xOld; val dy = p.y - p.yOld; val dz = p.z - p.zOld
         return dx * dx + dy * dy + dz * dz > FLIGHT_PER_TICK * FLIGHT_PER_TICK
     }
 
-    /** Your own P3 sim in S4 (straight off the sim, as Term Info has it: a restart or later start has no chat). */
     private fun simS4(): Boolean {
-        if (!com.engineerclient.p3sim.P3Sim.localSim) return false
-        return (com.engineerclient.p3sim.Fight.phase as? com.engineerclient.p3sim.GoldorPhase)?.section == 4
+        if (!P3Sim.localSim) return false
+        return (Fight.phase as? GoldorPhase)?.section == 4
     }
 
     private fun watchingCore() = coreWatch || simS4()
 
-    /** Keeps [inCoreSince] up to date: teammates in the core box, by when they were first seen there. */
     private fun trackCore() {
         if (!enabled || !coreLeap || !watchingCore()) { inCoreSince.clear(); return }
         val level = mc.level ?: return
@@ -163,33 +143,22 @@ object Recore : Module(
         for (m in DungeonUtils.leapTeammates) {
             if (m.name == "Empty") continue
             val p = m.entity?.takeIf { !it.isRemoved } ?: level.players().firstOrNull { it.name.string == m.name } ?: simBot(level, m.name)
-            // Unseen (out of render distance) keeps its place; dead or out of the box loses it. Passing
-            // through on a leap's drag is neither: not in, and whatever was known stays.
             if (p == null) continue
-            if (com.engineerclient.DeadPlayers.isDead(m) || !inCore(p)) inCoreSince.remove(m.name)
+            if (DeadPlayers.isDead(m) || !inCore(p)) inCoreSince.remove(m.name)
             else if (!inFlight(p)) inCoreSince.putIfAbsent(m.name, now)
         }
     }
 
-    /** In the P3 sim, a bot teammate: its Mannequin, by the name over it. */
-    private fun simBot(level: net.minecraft.client.multiplayer.ClientLevel, name: String): Entity? {
-        if (!com.engineerclient.p3sim.P3Sim.inSim) return null
-        return level.entitiesForRendering().firstOrNull { it is net.minecraft.world.entity.decoration.Mannequin && !it.isRemoved && it.customName?.string?.replace(CONTROL_CODES, "") == name }
+    private fun simBot(level: ClientLevel, name: String): Entity? {
+        if (!P3Sim.inSim) return null
+        return level.entitiesForRendering().firstOrNull { it is Mannequin && !it.isRemoved && it.customName?.string?.replace(CONTROL_CODES, "") == name }
     }
 
-    private fun isLeapScreen(screen: net.minecraft.client.gui.screens.Screen) =
-        (screen as? net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<*>)?.title?.string.let { it == "Spirit Leap" || it == "Teleport to Player" }
+    private fun isLeapScreen(screen: Screen) =
+        (screen as? AbstractContainerScreen<*>)?.title?.string.let { it == "Spirit Leap" || it == "Teleport to Player" }
 
-    /** Someone to highlight: [i] is their place in Odin's Leap Menu, [since] when they were first seen in the core. */
-    private class Target(val i: Int, val name: String, val clazz: String, val skin: net.minecraft.world.entity.player.PlayerSkin, val since: Long)
+    private class Target(val i: Int, val name: String, val clazz: String, val skin: PlayerSkin, val since: Long)
 
-    /**
-     * The part of the screen where the first teammate seen in the core (or each one, with Highlight All Players
-     * In Core) sits in Odin's Leap Menu (0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right), so the flick is
-     * already on its way when the menu opens. Only ever drawn by the HUD, which renders before any open screen,
-     * so a terminal (vanilla or Odin's) always draws over it: it can flash behind one but never covers or
-     * recolours a slot.
-     */
     private fun drawRecore(gfx: GuiGraphicsExtractor) {
         if (!enabled || !coreLeap || mc.gui.hud.isHidden) return
         val self = mc.player ?: return
@@ -208,7 +177,6 @@ object Recore : Module(
             if (!watchingCore()) return
             if (hideInCore && selfBeenInCore) return
             val mates = DungeonUtils.leapTeammates
-            // Earliest first: a Side or Top / Bottom half two of them share is drawn once, as the first one's.
             val inOrder = inCoreSince.entries.sortedBy { it.value }
             (if (allInCore) inOrder else inOrder.take(1)).mapNotNull { (n, since) ->
                 val i = mates.indexOfFirst { it.name == n }.takeIf { it in 0..3 } ?: return@mapNotNull null
@@ -219,13 +187,15 @@ object Recore : Module(
         for (t in targets) drawTarget(gfx, t, drawnAreas, targets.size > 1)
     }
 
-    /**
-     * One [Target]'s highlight. [drawnAreas] holds the Side / Top / Bottom halves already filled, so a half two
-     * targets share isn't filled twice (twice as strong); with [several], a name goes in its own quarter there.
-     */
+    private var fade = 1f
+    private var midX = 0
+    private var midY = 0
+
+    private fun Color.faded() = Color(rgba, alphaFloat * fade)
+
     private fun drawTarget(gfx: GuiGraphicsExtractor, t: Target, drawnAreas: MutableSet<Int>, several: Boolean) {
         val now = System.currentTimeMillis()
-        var fade = 1f
+        fade = 1f
         if (fadeIn > 0) fade *= ((now - t.since) / fadeIn.toFloat()).coerceIn(0f, 1f)
         if (pulse) {
             val p = ((Math.sin(now / 1000.0 * pulseSpeed * 2 * Math.PI) + 1) / 2).toFloat()
@@ -233,7 +203,6 @@ object Recore : Module(
             fade *= low + (1 - low) * p
         }
         if (fade <= 0f) return
-        fun Color.faded() = Color(rgba, alphaFloat * fade)
         val c = color.faded()
 
         val i = t.i
@@ -250,72 +219,81 @@ object Recore : Module(
         val qx1 = if (right) w else cx - g
         val qy0 = if (bottom) cy + g else 0
         val qy1 = if (bottom) h else cy - g
-        // Where a name in the middle of the area goes.
-        var midX = (qx0 + qx1) / 2
-        var midY = (qy0 + qy1) / 2
+        midX = (qx0 + qx1) / 2
+        midY = (qy0 + qy1) / 2
 
         when (style) {
-            Style.QUADRANT, Style.SIDE, Style.VERTICAL -> {
-                val x0 = if (style == Style.VERTICAL) 0 else qx0
-                val x1 = if (style == Style.VERTICAL) w else qx1
-                val y0 = if (style == Style.SIDE) 0 else qy0
-                val y1 = if (style == Style.SIDE) h else qy1
-                // Sharing a half with another target: the name stays in this one's quarter, so the two don't overlap.
-                if (!several || style == Style.QUADRANT) { midX = (x0 + x1) / 2; midY = (y0 + y1) / 2 }
-                val area = when (style) { Style.SIDE -> if (right) 1 else 0; Style.VERTICAL -> if (bottom) 2 else 0; else -> i }
-                if (drawnAreas.add(area)) {
-                    val ax = if (style == Style.VERTICAL) 0 else sx
-                    val ay = if (style == Style.SIDE) 0 else sy
-                    when (fill) {
-                        Fill.SOLID -> gfx.fill(x0, y0, x1, y1, c.rgba)
-                        Fill.TO_CENTRE -> fadeRect(gfx, x0, y0, x1, y1, c, ax, ay)
-                        Fill.TO_EDGE -> fadeRect(gfx, x0, y0, x1, y1, c, -ax, -ay)
-                    }
-                    if (outline) frame(gfx, x0, y0, x1, y1, outlineWidth, outlineColor.faded().rgba)
-                }
-            }
-            Style.EDGE_GLOW -> {
-                val d = (minOf(w, h) * glowDepth / 100f).toInt().coerceAtLeast(2)
-                val x0 = if (right) cx else 0
-                val x1 = if (right) w else cx
-                val y0 = if (bottom) cy else 0
-                val y1 = if (bottom) h else cy
-                if (bottom) fadeRect(gfx, x0, h - d, x1, h, c, 0, 1) else fadeRect(gfx, x0, 0, x1, d, c, 0, -1)
-                if (right) fadeRect(gfx, w - d, y0, w, y1, c, 1, 0) else fadeRect(gfx, 0, y0, d, y1, c, -1, 0)
-                midX = (x0 + x1) / 2; midY = (y0 + y1) / 2
-            }
-            Style.BRACKET -> {
-                // An L whose corner points into the quadrant, its arms running back toward the crosshair.
-                val l = bracketSize
-                val bt = bracketWidth
-                val px = cx + sx * (g + l)
-                val py = cy + sy * (g + l)
-                gfx.fill(minOf(px, px - sx * l), minOf(py, py - sy * bt), maxOf(px, px - sx * l), maxOf(py, py - sy * bt), c.rgba)
-                // The second arm starts past the first, so the corner is not drawn twice.
-                gfx.fill(minOf(px, px - sx * bt), minOf(py - sy * bt, py - sy * l), maxOf(px, px - sx * bt), maxOf(py - sy * bt, py - sy * l), c.rgba)
-                midX = px + sx * 12; midY = py + sy * 12
-            }
+            Style.QUADRANT, Style.SIDE, Style.VERTICAL -> drawArea(gfx, i, drawnAreas, several, c, w, h, right, bottom, sx, sy, qx0, qx1, qy0, qy1)
+            Style.EDGE_GLOW -> drawEdgeGlow(gfx, c, w, h, cx, cy, right, bottom)
+            Style.BRACKET -> drawBracket(gfx, c, cx, cy, sx, sy, g)
             Style.LEAP_BOX -> {
-                // Odin's box for that player: 24px off the centre, its Render Scale from the near corner.
-                val bw = LeapMenu.BOX_WIDTH
-                val bh = LeapMenu.BOX_HEIGHT
-                val lx = if (right) 0 else -bw
-                val ly = if (bottom) 0 else -bh
-                val scale = com.engineerclient.misc.OdinLeapScale.get()
-                gfx.pose().pushMatrix()
-                gfx.pose().translate((cx + sx * 24).toFloat(), (cy + sy * 24).toFloat())
-                gfx.pose().scale(scale, scale)
-                if (outline) gfx.roundedRectOutlined(lx, ly, lx + bw, ly + bh, c.rgba, outlineColor.faded().rgba, outlineWidth.toFloat(), 9f)
-                else gfx.roundedRect(lx, ly, lx + bw, ly + bh, c.rgba, 9f)
-                val face = (bh * 0.76).toInt()
-                PlayerFaceExtractor.extractRenderState(gfx, t.skin, lx + 9, ly + 9, face, ARGB.color((64 * fade).toInt(), 255, 255, 255))
-                gfx.text(t.name, lx + 15 + face, ly + (bh / 2.5).toInt(), c, shadow = false)
-                gfx.text(t.clazz, lx + 15 + face, ly + (bh / 1.7).toInt(), c, shadow = false)
-                gfx.pose().popMatrix()
+                drawLeapBox(gfx, t, c, cx, cy, right, bottom, sx, sy)
                 return
             }
         }
 
+        drawName(gfx, t, right, bottom, cx, cy)
+    }
+
+    private fun drawArea(gfx: GuiGraphicsExtractor, i: Int, drawnAreas: MutableSet<Int>, several: Boolean, c: Color, w: Int, h: Int, right: Boolean, bottom: Boolean, sx: Int, sy: Int, qx0: Int, qx1: Int, qy0: Int, qy1: Int) {
+        val x0 = if (style == Style.VERTICAL) 0 else qx0
+        val x1 = if (style == Style.VERTICAL) w else qx1
+        val y0 = if (style == Style.SIDE) 0 else qy0
+        val y1 = if (style == Style.SIDE) h else qy1
+        if (!several || style == Style.QUADRANT) { midX = (x0 + x1) / 2; midY = (y0 + y1) / 2 }
+        val area = when (style) { Style.SIDE -> if (right) 1 else 0; Style.VERTICAL -> if (bottom) 2 else 0; else -> i }
+        if (drawnAreas.add(area)) {
+            val ax = if (style == Style.VERTICAL) 0 else sx
+            val ay = if (style == Style.SIDE) 0 else sy
+            when (fill) {
+                Fill.SOLID -> gfx.fill(x0, y0, x1, y1, c.rgba)
+                Fill.TO_CENTRE -> fadeRect(gfx, x0, y0, x1, y1, c, ax, ay)
+                Fill.TO_EDGE -> fadeRect(gfx, x0, y0, x1, y1, c, -ax, -ay)
+            }
+            if (outline) frame(gfx, x0, y0, x1, y1, outlineWidth, outlineColor.faded().rgba)
+        }
+    }
+
+    private fun drawEdgeGlow(gfx: GuiGraphicsExtractor, c: Color, w: Int, h: Int, cx: Int, cy: Int, right: Boolean, bottom: Boolean) {
+        val d = (minOf(w, h) * glowDepth / 100f).toInt().coerceAtLeast(2)
+        val x0 = if (right) cx else 0
+        val x1 = if (right) w else cx
+        val y0 = if (bottom) cy else 0
+        val y1 = if (bottom) h else cy
+        if (bottom) fadeRect(gfx, x0, h - d, x1, h, c, 0, 1) else fadeRect(gfx, x0, 0, x1, d, c, 0, -1)
+        if (right) fadeRect(gfx, w - d, y0, w, y1, c, 1, 0) else fadeRect(gfx, 0, y0, d, y1, c, -1, 0)
+        midX = (x0 + x1) / 2; midY = (y0 + y1) / 2
+    }
+
+    private fun drawBracket(gfx: GuiGraphicsExtractor, c: Color, cx: Int, cy: Int, sx: Int, sy: Int, g: Int) {
+        val l = bracketSize
+        val bt = bracketWidth
+        val px = cx + sx * (g + l)
+        val py = cy + sy * (g + l)
+        gfx.fill(minOf(px, px - sx * l), minOf(py, py - sy * bt), maxOf(px, px - sx * l), maxOf(py, py - sy * bt), c.rgba)
+        gfx.fill(minOf(px, px - sx * bt), minOf(py - sy * bt, py - sy * l), maxOf(px, px - sx * bt), maxOf(py - sy * bt, py - sy * l), c.rgba)
+        midX = px + sx * 12; midY = py + sy * 12
+    }
+
+    private fun drawLeapBox(gfx: GuiGraphicsExtractor, t: Target, c: Color, cx: Int, cy: Int, right: Boolean, bottom: Boolean, sx: Int, sy: Int) {
+        val bw = LeapMenu.BOX_WIDTH
+        val bh = LeapMenu.BOX_HEIGHT
+        val lx = if (right) 0 else -bw
+        val ly = if (bottom) 0 else -bh
+        val scale = OdinLeapScale.get()
+        gfx.pose().pushMatrix()
+        gfx.pose().translate((cx + sx * 24).toFloat(), (cy + sy * 24).toFloat())
+        gfx.pose().scale(scale, scale)
+        if (outline) gfx.roundedRectOutlined(lx, ly, lx + bw, ly + bh, c.rgba, outlineColor.faded().rgba, outlineWidth.toFloat(), 9f)
+        else gfx.roundedRect(lx, ly, lx + bw, ly + bh, c.rgba, 9f)
+        val face = (bh * 0.76).toInt()
+        PlayerFaceExtractor.extractRenderState(gfx, t.skin, lx + 9, ly + 9, face, ARGB.color((64 * fade).toInt(), 255, 255, 255))
+        gfx.text(t.name, lx + 15 + face, ly + (bh / 2.5).toInt(), c, shadow = false)
+        gfx.text(t.clazz, lx + 15 + face, ly + (bh / 1.7).toInt(), c, shadow = false)
+        gfx.pose().popMatrix()
+    }
+
+    private fun drawName(gfx: GuiGraphicsExtractor, t: Target, right: Boolean, bottom: Boolean, cx: Int, cy: Int) {
         if (!showName) return
         val lines = listOfNotNull(t.name, if (showClass) t.clazz.replaceFirstChar { it.uppercase() } else null)
         val s = nameScale.toFloat()
@@ -323,7 +301,6 @@ object Recore : Module(
         val th = (lines.size * 10 * s).toInt()
         val (tx, ty) = when (nameAt) {
             NamePos.AREA -> midX - tw / 2 to midY - th / 2
-            // Just off the crosshair, on the quadrant's side.
             NamePos.CROSSHAIR -> (if (right) cx + 10 else cx - 10 - tw) to (if (bottom) cy + 10 else cy - 10 - th)
         }
         gfx.pose().pushMatrix()
@@ -334,14 +311,9 @@ object Recore : Module(
         gfx.pose().popMatrix()
     }
 
-    /**
-     * A fill that is [color] at the side [ax]/[ay] point to (-1 left/top, 1 right/bottom, 0 the whole way) and
-     * fades out across the rect: stacked rects, each a little shorter, so they add up toward that side.
-     */
     private fun fadeRect(gfx: GuiGraphicsExtractor, x0: Int, y0: Int, x1: Int, y1: Int, color: Color, ax: Int, ay: Int) {
         if (ax == 0 && ay == 0) { gfx.fill(x0, y0, x1, y1, color.rgba); return }
         val steps = 24
-        // Per layer, so all of them together come to the colour's own opacity.
         val layer = Color(color.rgba, 1f - Math.pow(1.0 - color.alphaFloat, 1.0 / steps).toFloat()).rgba
         for (k in 0 until steps) {
             val f = (steps - k).toFloat() / steps
@@ -371,7 +343,6 @@ object Recore : Module(
     }
 
     override fun onEnable() {
-        // Whatever was half-seen while off is stale.
         reset()
         super.onEnable()
     }
@@ -379,20 +350,18 @@ object Recore : Module(
     init {
         on<LevelEvent.Load> { reset() }
         HudElementRegistry.attachElementBefore(VanillaHudElements.SLEEP, Identifier.fromNamespaceAndPath("engineerclient", "recore")) { gfx, _ ->
-            // The HUD is drawn under any open screen too, so this is also the behind-the-terminal draw.
-            com.engineerclient.EngineerClient.safely("recore") { trackCore(); drawRecore(gfx) }
+            EngineerClient.safely("recore") { drawRecore(gfx) }
         }
+        ClientTickEvents.END_CLIENT_TICK.register { EngineerClient.safely("recore tracking") { trackCore() } }
 
         onReceive<ClientboundSystemChatPacket>(priority = 1000, ignoreCancelled = true) {
             if (overlay) return@onReceive
             val msg = content.string.replace(CONTROL_CODES, "")
             when {
-                // A lever can be flicked the tick before Goldor speaks: its message has started terminals already.
                 msg == GOLDOR_START -> if (!terms) { reset(); terms = true }
                 msg == CORE_OPEN -> { terms = false; coreWatch = true }
                 msg.startsWith("[BOSS] Necron:") -> coreWatch = false
                 else -> {
-                    // The first task message starts terminals too (Goldor's line missed).
                     if (!terms && TASK_COUNT.matches(msg)) { reset(); terms = true }
                     if (terms) countSectionEnd(msg)
                 }

@@ -13,11 +13,6 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/**
- * ADR: every container slot click the client sends (whatever sends it: the vanilla screen,
- * Odin's custom terminal window, hotbar/drop keys - they all end up here), and every block the
- * player right-clicks, for the replay. Recording only; nothing is changed or cancelled.
- */
 @Mixin(MultiPlayerGameMode.class)
 public class GameModeRecordMixin {
 

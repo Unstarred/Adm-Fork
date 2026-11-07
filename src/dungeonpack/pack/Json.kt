@@ -8,11 +8,6 @@ import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import java.util.zip.GZIPInputStream
 
-/*
- * Null-tolerant JSON reading for the data packs. The pack specs say readers ignore unknown fields and tolerate `null`
- * anywhere a field is documented as nullable, so nothing here throws on a missing or null key: it answers null.
- */
-
 internal fun JsonElement?.asObj(): JsonObject? = if (this != null && isJsonObject) asJsonObject else null
 internal fun JsonElement?.asArr(): JsonArray? = if (this != null && isJsonArray) asJsonArray else null
 internal fun JsonElement?.asStr(): String? = if (this != null && isJsonPrimitive) asString else null
@@ -29,20 +24,17 @@ internal fun JsonObject.long(k: String): Long? = get(k).asLongOrNull()
 internal fun JsonObject.dbl(k: String): Double? = get(k).asDoubleOrNull()
 internal fun JsonObject.bool(k: String): Boolean? = get(k).asBoolOrNull()
 
-/** Every element of an array that is an object (anything else is skipped). */
 internal fun JsonArray?.objects(): List<JsonObject> = this?.mapNotNull { it.asObj() }.orEmpty()
 internal fun JsonArray?.strings(): List<String> = this?.mapNotNull { it.asStr() }.orEmpty()
 internal fun JsonArray?.doubles(): DoubleArray = this?.mapNotNull { it.asDoubleOrNull() }?.toDoubleArray() ?: DoubleArray(0)
 internal fun JsonArray?.ints(): IntArray = this?.mapNotNull { it.asIntOrNull() }?.toIntArray() ?: IntArray(0)
 
-/** `[a, b]` as a [Tile]; null when it is not two numbers. */
 internal fun JsonElement?.asTile(): Tile? {
     val a = asArr() ?: return null
     if (a.size() < 2) return null
     return Tile(a[0].asIntOrNull() ?: return null, a[1].asIntOrNull() ?: return null)
 }
 
-/** `[x, y, z]` as a [Pos]; null when it is not three numbers. */
 internal fun JsonElement?.asPos(): Pos? {
     val a = asArr() ?: return null
     if (a.size() < 3) return null
@@ -52,11 +44,9 @@ internal fun JsonElement?.asPos(): Pos? {
 internal fun JsonElement?.asTiles(): List<Tile> = asArr()?.mapNotNull { it.asTile() }.orEmpty()
 internal fun JsonElement?.asPosList(): List<Pos> = asArr()?.mapNotNull { it.asPos() }.orEmpty()
 
-/** Reads gzip-compressed UTF-8 JSON (every pack's index file) into its top-level object; throws on bad gzip or JSON. */
 internal fun readGzipJson(stream: InputStream): JsonObject =
     GZIPInputStream(stream.buffered(), 1 shl 16).use { gz ->
         JsonParser.parseReader(gz.reader(StandardCharsets.UTF_8)).asObj() ?: error("the top level is not a JSON object")
     }
 
-/** Reads plain UTF-8 JSON (used by tests and by dev tools). */
 internal fun parseJson(text: String): JsonObject = JsonParser.parseString(text).asObj() ?: error("the top level is not a JSON object")

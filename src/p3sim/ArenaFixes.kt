@@ -10,6 +10,10 @@ import com.mojang.authlib.properties.Property
 import com.mojang.authlib.properties.PropertyMap
 import net.minecraft.core.BlockPos
 import net.minecraft.core.component.DataComponents
+import net.minecraft.server.level.ServerLevel
+import net.minecraft.sounds.SoundEvents
+import net.minecraft.sounds.SoundSource
+import net.minecraft.world.entity.item.PrimedTnt
 import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.Items
 import net.minecraft.world.item.component.ResolvableProfile
@@ -21,17 +25,6 @@ import java.util.UUID
 import kotlin.random.Random
 import net.minecraft.world.level.block.Blocks as B
 
-/**
- * Static and per-run corrections to the arena that arena.bin (built from the ADR library) does not carry,
- * from packet captures of Hypixel P3s (`arena-fixes.json`, `arena-ext.bin`):
- * - the thicker east wall (x128-134) and the NW column ([Arena.Data] patch, `arena-ext.bin`);
- * - the y63 floor layer, each cell's most common solid block from the recorded spread (no block is removed:
- *   every block stays as built);
- * - player-head textures;
- * - [Replay]: that same recorded run's block changes from Terms on (TNT cubes, polished granite blobs,
- *   the S4 plate), so a fight gets the timing of a real one.
- * Everything that moves at runtime goes through [Blocks.set], so [Blocks.restoreAll] puts it back.
- */
 object ArenaFixes {
     internal class Run(val init: IntArray, val events: IntArray)
 
@@ -59,10 +52,8 @@ object ArenaFixes {
         }
     }
 
-    /** The recorded run this world copies (lantern pattern, and [Replay]'s timing). Picked when the arena data is read. */
     @Volatile private var pick = 0
 
-    /** Called when the arena is read: the base data with every static correction applied (a new, larger box). */
     fun patch(base: Arena.Data): Arena.Data {
         val t = table
         val ext = try { Arena.readBin("arena-ext.bin") } catch (e: Throwable) { EngineerClient.logger.warn("[p3sim] arena-ext.bin unreadable", e); null }
@@ -85,7 +76,6 @@ object ArenaFixes {
         fun put(x: Int, y: Int, z: Int, s: BlockState) { if (inBox(x, y, z)) cells[cell(x, y, z)] = idx(s).toShort() }
         fun at(x: Int, y: Int, z: Int): BlockState = if (inBox(x, y, z)) states[cells[cell(x, y, z)].toInt()] else air
 
-        // The thicker east wall and the NW column.
         if (ext != null) {
             for (y in 0 until ext.h) for (z in 0 until ext.d) for (x in 0 until ext.w) {
                 val s = ext.states[ext.cells[(y * ext.d + z) * ext.w + x].toInt()]
@@ -96,21 +86,15 @@ object ArenaFixes {
         if (t != null) {
             val st = t.states
             val root = t.root
-            // The y63 layer varies per run on Hypixel: here always each cell's most common solid block, the same every
-            // load (a roll per load left holes, and a world saved with one roll never matched the next load's).
             for (e in root.getAsJsonArray("y63")) {
                 val a = e.asJsonArray
                 val best = a[2].asJsonArray.map { it.asJsonArray }.filter { !st[it[0].asInt].isAir }.maxByOrNull { it[1].asInt } ?: continue
                 put(a[0].asInt, 63, a[1].asInt, st[best[0].asInt])
             }
-            // (No removals: the blocks Hypixel's arena has lost by Terms stay, every block as built.)
-            // The run this world's Replay copies. The Arrow Align wall (x -3) is drawn by Devices.Arrows.
             pick = Random.nextInt(t.runs.size)
         }
         return Arena.Data(x0, y0, z0, w, h, d, states.toTypedArray(), cells)
     }
-
-    // ------------------------------------------------------------------ player heads
 
     private class Skull(val x: Int, val y: Int, val z: Int, val profile: ResolvableProfile)
 
@@ -134,8 +118,7 @@ object ArenaFixes {
 
     private object ChunkPosKey { fun of(cx: Int, cz: Int): Long = (cx.toLong() shl 32) or (cz.toLong() and 0xffffffffL) }
 
-    /** A player head put back at [pos] ([Arena.restore], [Arena.resync]) gets its texture again, the clients told. */
-    fun reskull(level: net.minecraft.server.level.ServerLevel, pos: BlockPos) {
+    fun reskull(level: ServerLevel, pos: BlockPos) {
         val state = level.getBlockState(pos)
         if (state.block !is SkullBlock) return
         val s = skulls[ChunkPosKey.of(pos.x shr 4, pos.z shr 4)]?.firstOrNull { it.x == pos.x && it.y == pos.y && it.z == pos.z } ?: return
@@ -147,7 +130,6 @@ object ArenaFixes {
         level.sendBlockUpdated(pos, state, state, 3)
     }
 
-    /** Gives the player heads of a freshly filled chunk their texture (block entities on the proto chunk). */
     fun skulls(chunk: ChunkAccess) {
         val list = skulls[ChunkPosKey.of(chunk.pos.minBlockX shr 4, chunk.pos.minBlockZ shr 4)] ?: return
         for (s in list) {
@@ -162,31 +144,19 @@ object ArenaFixes {
         }
     }
 
-    // ------------------------------------------------------------------ the recorded run's changes
-
-    /**
-     * An S3 crusher: granite columns sliding out of the wall at x [back] towards x [front] over z [z]. Each starts
-     * fully back at Terms (not where the recording caught it then) and comes out on the run's first push after
-     * [CRUSHER_HOLD], whole (the columns behind its front filled). One with a [cycle] ignores the recording: from the
-     * start it steps every [CRUSHER_STEP] ticks through [cycle] (how many columns are out), as Hypixel's does.
-     */
     private class Crusher(val back: Int, val front: Int, val z: IntRange, val cycle: IntArray? = null) {
         val xs = minOf(back, front)..maxOf(back, front)
         fun has(x: Int, y: Int, z: Int) = x in xs && z in this.z && y in 116..124
-        /** Its granite rows (the gap at 120 is the walkway). */
         val ys get() = listOf(117, 118, 119, 121, 122, 123)
     }
-    // The low one (x 2-3) starts one back from all the way out, on its way in.
     private val CRUSHERS get() = listOf(Crusher(14, 12, 101..102), Crusher(2, 3, 82..84, intArrayOf(1, 0, 1, 2)))
     private const val CRUSHER_STEP = 35
     private const val CRUSHER_HOLD = 40
     private fun crusherAt(x: Int, y: Int, z: Int) = CRUSHERS.firstOrNull { it.has(x, y, z) }
 
-    /** One recorded run's block changes, relative to n (server ticks since Goldor's first line). */
     class Replay internal constructor(private val run: Run, private val states: Array<BlockState>) {
         private var ptr = 0
 
-        /** The tick the driven crushers' cycles count from, and how many columns each has out. */
         private var crushBase = 0
         private var crushOut: HashMap<Int, Int>? = null
 
@@ -209,7 +179,6 @@ object ArenaFixes {
             }
         }
 
-        /** Start state at Terms (granite blobs already up, the plate's press), then the changes up to [n0] at once. */
         fun begin(n0: Int) {
             crushBase = n0; crushOut = null
             driveCrushers(n0)
@@ -219,7 +188,6 @@ object ArenaFixes {
             try { tick(n0 - 1) } finally { catchUp = false }
         }
 
-        /** While [begin] catches up on changes before the start: no primed TNT for those. */
         private var catchUp = false
 
         fun tick(n: Int) {
@@ -227,32 +195,28 @@ object ArenaFixes {
             val e = run.events
             while (ptr * 5 < e.size && e[ptr * 5] <= n) {
                 val i = ptr * 5; ptr++
-                if (e[i + 1] == -3) continue // the Arrow Align wall: Devices.Arrows draws it
+                if (e[i + 1] == -3) continue
                 val s = e[i + 4]
                 val pos = BlockPos(e[i + 1], e[i + 2], e[i + 3])
                 val crusher = crusherAt(pos.x, pos.y, pos.z)
-                if (crusher != null && (crusher.cycle != null || e[i] < CRUSHER_HOLD)) continue // driven, or still back at the start
+                if (crusher != null && (crusher.cycle != null || e[i] < CRUSHER_HOLD)) continue
                 if (crusher != null && s >= 0 && states[s].`is`(B.POLISHED_GRANITE)) {
-                    // Out to here: the columns behind it too (it started back in the wall).
                     val step = if (crusher.front < crusher.back) -1 else 1
                     var x = crusher.back
                     while (x != pos.x) { if (Blocks.get(BlockPos(x, pos.y, pos.z))?.`is`(B.POLISHED_GRANITE) != true) place(x, pos.y, pos.z, states[s]); x += step }
                 }
                 if (s < 0) {
-                    // A blob going away: back to as built, if it is still there.
                     if (Blocks.get(pos)?.`is`(B.POLISHED_GRANITE) == true) Blocks.set(pos, Arena.data.get(pos.x, pos.y, pos.z))
                 } else place(pos.x, pos.y, pos.z, states[s])
             }
         }
 
-        /** The blocks this replay put up itself (TNT cubes, granite blobs...): the only ones it ever takes away. */
         private var placed: HashSet<BlockPos>? = null
         private fun placed() = placed ?: HashSet<BlockPos>().also { placed = it }
 
         private fun place(x: Int, y: Int, z: Int, s: BlockState) {
             val pos = BlockPos(x, y, z)
             val cur = Blocks.get(pos) ?: return
-            // Goldor breaks nothing: only a block this replay put up goes, back to what was built there (air only if nothing was).
             if (s.isAir) {
                 if (!placed().remove(pos)) return
                 val built = Arena.data.get(x, y, z)
@@ -260,30 +224,23 @@ object ArenaFixes {
                 Blocks.set(pos, built)
                 return
             }
-            // Block entities (heads, dispensers) are left alone: replacing one would drop its data.
             if (cur.hasBlockEntity()) return
             placed() += pos
             Blocks.set(pos, s)
         }
 
-        /**
-         * A TNT cube going away as Hypixel does it: a primed TNT on each block (fuse 80, vanilla's random
-         * (+-0.02, 0.2, +-0.02) hop, entity.tnt.primed BLOCKS 1.0/1.0 each), the block air one tick later, and the
-         * entity gone 21 ticks on, never exploding or hurting anything.
-         */
         private fun primeCube(pos: BlockPos) {
-            val tnt = object : net.minecraft.world.entity.item.PrimedTnt(Sim.level, pos.x + 0.5, pos.y.toDouble(), pos.z + 0.5, null) {
+            val tnt = object : PrimedTnt(Sim.level, pos.x + 0.5, pos.y.toDouble(), pos.z + 0.5, null) {
                 override fun shouldBeSaved() = false
             }
             tnt.fuse = 80
             Sim.spawn(tnt)
-            Sim.sound(net.minecraft.sounds.SoundEvents.TNT_PRIMED, 1f, 1f, tnt.position(), net.minecraft.sounds.SoundSource.BLOCKS)
+            Sim.sound(SoundEvents.TNT_PRIMED, 1f, 1f, tnt.position(), SoundSource.BLOCKS)
             Fight.later(1, "tnt cube block") { if (Blocks.get(pos)?.`is`(B.TNT) == true) Blocks.set(pos, B.AIR.defaultBlockState()) }
             Fight.later(21, "tnt cube gone") { tnt.discard() }
         }
     }
 
-    /** The replay of this world's picked recorded run, or null if the data is missing. */
     fun replay(): Replay? {
         val t = table ?: return null
         return Replay(t.runs[pick.coerceIn(0, t.runs.size - 1)], t.states)

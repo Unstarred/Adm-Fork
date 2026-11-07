@@ -7,11 +7,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/**
- * {@link ClearBreakdown} carries every player's secrets for the run, so while it is on, Odin's
- * Secrets Counter skips its end-of-run lookups and lines (its fetchAndDisplay). Odin's setting is
- * left alone: turning Clear Breakdown off brings them back.
- */
 @Pseudo
 @Mixin(targets = "com.odtheking.odin.features.impl.dungeon.SecretsCounter", remap = false)
 public class SecretsCounterMixin {

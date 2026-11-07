@@ -8,11 +8,6 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.injection.At;
 
-/**
- * Odin's Goldor Hud (TickTimers$goldorHud$2) formatting its timer, preview included: with Goldor
- * Count Up on, the Tick timer is formatted counting up ({@link OdinTickTimers#tick}). The colour
- * goes in as formatTimer's own override, so the mask bit that defaults it is cleared.
- */
 @Pseudo
 @Mixin(targets = "com.odtheking.odin.features.impl.boss.TickTimers$goldorHud$2", remap = false)
 public class TickTimersGoldorMixin {

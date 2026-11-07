@@ -1,7 +1,8 @@
 package com.engineerclient.p3sim
 
-import com.engineerclient.index
 import com.engineerclient.EngineerClient
+import com.engineerclient.index
+import com.google.gson.GsonBuilder
 import com.google.gson.JsonParser
 import net.minecraft.core.component.DataComponents
 import net.minecraft.core.registries.BuiltInRegistries
@@ -17,20 +18,16 @@ import net.minecraft.world.entity.player.Inventory
 import net.minecraft.world.entity.player.Player
 import net.minecraft.world.inventory.ChestMenu
 import net.minecraft.world.inventory.ContainerInput
+import net.minecraft.world.inventory.ContainerSynchronizer
 import net.minecraft.world.inventory.MenuType
 import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.Items
 import net.minecraft.world.item.component.CustomData
+import net.minecraft.world.item.component.DyedItemColor
 import net.minecraft.world.item.component.ItemLore
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
-/**
- * Hypixel's Loadouts window ("(1/3) Loadouts"), opened with /loadouts (Hypixel re-sends the window after a
- * click). Its items, slots and lore are a recorded window (assets/engineerclient/p3sim/loadouts.json; the
- * helmet / chest / legs / boots / pet slots show what you wear right now). Four preset loadouts are modelled:
- * Cat terms, Phoenix terms, Terror and Mask terms; players can save their own as custom loadouts. A click
- * equips: armour, helmet and pet change, speed follows through [Fight.applySpeed], and the chat line and
- * sounds are the recorded ones (lever click 0.5, then "You equipped X!", then horse saddle 1.0).
- */
 object Loadouts {
     private class Entry(val slot: Int, val item: String, val name: String, val lore: List<String>, val tex: String?,
                         val dye: Int?, val glint: Boolean, val style: String?, val id: String?)
@@ -54,41 +51,32 @@ object Loadouts {
             else Terminals.named(BuiltInRegistries.ITEM.getValue(Identifier.withDefaultNamespace(item)), name)
         if (lore.isNotEmpty()) s.set(DataComponents.LORE, ItemLore(lore.map { l -> Component.literal(l).withStyle { it.withItalic(false) } }))
         if (glint) s.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true)
-        if (dye != null) s.set(DataComponents.DYED_COLOR, net.minecraft.world.item.component.DyedItemColor(dye))
+        if (dye != null) s.set(DataComponents.DYED_COLOR, DyedItemColor(dye))
         if (id != null) s.set(DataComponents.CUSTOM_DATA, CustomData.of(CompoundTag().also { it.putString("id", id); it.putBoolean("p3sim", true) }))
-        if (style != null) SimItems.hy(s, null, style)
+        if (style != null) SimItems.hy(s, null, style) else HypixelPack.look(s, null, null)
         return s
     }
 
-    /** [this] with its lore's helmet line as [line] (the Terror loadout shows Bonzo's Mask). */
     private fun Entry.withHelmet(line: String) = Entry(slot, item, name, lore.map { if (it.startsWith("§r§7Helmet: ")) line else it }, tex, dye, glint, style, id)
 
-    /** Terror Helmet as recorded; worn with the set it is Hydra Strike 4/4. */
     private fun terrorHelmet(): ItemStack {
         val e = entries[54] ?: return ItemStack.EMPTY
         return Entry(e.slot, e.item, e.name, e.lore.map { it.replace("(3/4)", "(4/4)").replace("after 7s", "after 10s") }, e.tex, e.dye, e.glint, e.style, e.id).stack()
     }
 
     private enum class Helm { RACING, MASK, TERROR, WISE }
-    /** [mask]: which mask a [Helm.MASK] loadout wears (its id without STARRED_); null: the one you have on. */
     private class Def(val slot: Int, val name: String, val set: SimItems.ArmorSet, val helm: Helm, val phoenix: Boolean, val mask: String? = null)
 
-    // Gear, pet and speed as the recorded loadouts' lore and walking speeds (Cat 0.65, Phoenix 0.55 with the Racing Helmet; Terror and Mask 0.55 with Black Cat).
     private val defs = listOf(
         Def(24, "Cat terms", SimItems.ArmorSet.WISE, Helm.RACING, false),
         Def(23, "Phoenix terms", SimItems.ArmorSet.WISE, Helm.RACING, true),
-        // Terror with Bonzo's Mask on, not the recorded Terror Helmet (Hydra Strike 3/4).
         Def(34, "Terror", SimItems.ArmorSet.TERROR, Helm.MASK, false, "BONZO_MASK"),
-        // The recorded one wears the Necrotic Spirit Mask.
         Def(41, "Mask terms", SimItems.ArmorSet.MAXOR, Helm.MASK, false, "SPIRIT_MASK"),
     )
 
     private fun maskId(s: ItemStack) = SimItems.idOf(s)?.removePrefix("STARRED_")
     private fun wantedMask() = if (P3Sim.wornMask == 0) "SPIRIT_MASK" else "BONZO_MASK"
 
-    // ------------------------------------------------------------------ worn gear: saved with the hotbar and in custom loadouts
-
-    /** What you wear and your pet, by SkyBlock id (null = nothing / unknown). Saved in p3sim-hotbar.json and p3sim-loadouts.json. */
     data class Worn(val head: String? = null, val chest: String? = null, val legs: String? = null, val feet: String? = null, val phoenix: Boolean = false)
 
     fun capture(p: ServerPlayer) = Worn(
@@ -104,7 +92,6 @@ object Loadouts {
         else -> null
     }
 
-    /** Puts [w] on: armour pieces, the helmet (a mask by Real Masks' rules), the pet and the speed they give. */
     fun applyWorn(p: ServerPlayer, w: Worn) {
         listOf(EquipmentSlot.CHEST to w.chest, EquipmentSlot.LEGS to w.legs, EquipmentSlot.FEET to w.feet).forEach { (slot, id) ->
             id?.let { SimItems.armorPiece(it) }?.let { SimItems.wear(p, slot, it) }
@@ -122,7 +109,6 @@ object Loadouts {
         Fight.applySpeed(p)
     }
 
-    /** A hotbar reset's gear for [p3]'s part: as left or saved ([HotbarLayout.worn]) or, with neither, Maxor + mask (the pet stays as it is). */
     fun applySaved(p: ServerPlayer, p3: Boolean) {
         val w = HotbarLayout.worn(p3)
         if (w != null && w.head?.endsWith("_MASK") == true) P3Sim.setWornMask(if (w.head.endsWith("SPIRIT_MASK")) 0 else 1)
@@ -133,15 +119,12 @@ object Loadouts {
 
     private class Custom(val name: String = "", val worn: Worn = Worn())
 
-    private val gson = com.google.gson.GsonBuilder().setPrettyPrinting().create()
-    /** Each player's custom loadouts (the host's from this computer, a joiner's from their game: [PlayerFiles]). */
-    private val customLists = java.util.concurrent.ConcurrentHashMap<String, MutableList<Custom>>()
+    private val gson = GsonBuilder().setPrettyPrinting().create()
+    private val customLists = ConcurrentHashMap<String, MutableList<Custom>>()
     private fun owner() = PlayerFiles.owner()?.toString() ?: ""
 
-    /** This game's file changed (the sim's server saved a joiner's): read it again. */
     fun forgetLocal() { customLists.remove("") }
-    /** A joiner's files arrived (or they left): read theirs again. */
-    fun forget(id: java.util.UUID) { customLists.remove(id.toString()) }
+    fun forget(id: UUID) { customLists.remove(id.toString()) }
 
     private fun customs(): MutableList<Custom> = customLists[owner()] ?: run {
         val l = runCatching {
@@ -155,7 +138,6 @@ object Loadouts {
         EngineerClient.safely("p3sim loadouts save") { PlayerFiles.write(PlayerFiles.LOADOUTS, gson.toJson(customs().toTypedArray())) }
     }
 
-    /** Free panes on the recorded screen, used by custom loadouts (the Save button is at [SAVE_SLOT]). */
     private val CUSTOM_SLOTS = listOf(12, 13, 14, 15, 16, 17, 30, 31, 32, 33, 39, 40, 42, 43)
     private const val SAVE_SLOT = 47
 
@@ -197,7 +179,6 @@ object Loadouts {
         p.openMenu(SimpleMenuProvider({ id, inv, _ -> LoadoutsMenu(id, inv, p) }, Component.literal("(1/3) Loadouts")))
     }
 
-    /** Anything that can sit on your head in the sim: a mask, the Racing / Wise / Terror helmet. */
     fun isHelmet(s: ItemStack): Boolean {
         val id = SimItems.idOf(s) ?: return false
         return id.endsWith("_MASK") || id.endsWith("_HELMET")
@@ -218,10 +199,6 @@ object Loadouts {
             (d.mask == null || maskId(head) == d.mask)
     }
 
-    /**
-     * The helmet [h] on your head (a mask: the [wantedMask], swapping one mask for the other); the one you had goes
-     * to the spare slot (or the first free one), a copy already in your inventory is swapped in.
-     */
     private fun wearHelmet(p: ServerPlayer, h: Helm) {
         val inv = p.inventory
         val old = p.getItemBySlot(EquipmentSlot.HEAD).copy()
@@ -251,7 +228,6 @@ object Loadouts {
         BuiltInRegistries.SOUND_EVENT.getValue(Identifier.parse(id))?.let { Sim.sound(it, vol, pitch, null, src) }
     }
 
-    /** [d]'s gear, helmet, pet and speed on at once, quietly. */
     private fun wear(p: ServerPlayer, d: Def) {
         SimItems.equipArmor(p, d.set, d.helm == Helm.TERROR)
         d.mask?.let { P3Sim.setWornMask(if (it == "SPIRIT_MASK") 0 else 1) }
@@ -260,10 +236,8 @@ object Loadouts {
         Fight.applySpeed(p)
     }
 
-    /** Terror At Terms: a P3 start's gear is the Terror loadout (over your saved gear). */
     fun wearTerror(p: ServerPlayer) { defs.firstOrNull { it.name == "Terror" }?.let { wear(p, it) } }
 
-    /** Equips [d] as Hypixel does: a tick after the click the lever clicks, the green chat line prints and the saddle creaks. */
     private fun equip(p: ServerPlayer, d: Def) {
         if (matches(p, d)) { Sim.chatStyled("§c${d.name} is already equipped!"); return }
         Fight.later(1, "loadout ${d.name}") {
@@ -276,13 +250,11 @@ object Loadouts {
         }
     }
 
-    /** 9x6 as recorded; your gear (11 helmet, 20/29/38 armour, 21 pet) is live. Your inventory is below, inert. */
     class LoadoutsMenu(id: Int, inv: Inventory, private val sp: ServerPlayer) :
         ChestMenu(MenuType.GENERIC_9x6, id, inv, SimpleContainer(54), 6) {
         init { draw() }
 
-        /** As main sends it: one container_set_slot per slot, not one container_set_content. */
-        override fun setSynchronizer(synchronizer: net.minecraft.world.inventory.ContainerSynchronizer) = super.setSynchronizer(SimItems.PerSlotSync(synchronizer, sp))
+        override fun setSynchronizer(synchronizer: ContainerSynchronizer) = super.setSynchronizer(SpiritLeap.PerSlotSync(synchronizer, sp))
 
         fun refresh() { draw(); broadcastFullState() }
 
@@ -305,12 +277,11 @@ object Loadouts {
 
         override fun clicked(slot: Int, button: Int, input: ContainerInput, p: Player) {
             if (slot == 49) { sp.closeContainer(); return }
-            // Left-click equips ("Left-click to equip!"); on a custom loadout, right- or shift-click deletes it.
             val ci = CUSTOM_SLOTS.indexOf(slot)
             if (slot == SAVE_SLOT) saveCurrent(sp)
             else if (ci in customs().indices) {
                 val cu = customs()[ci]
-                if (button == 1 || input == ContainerInput.QUICK_MOVE) {  // right- or shift-click deletes
+                if (button == 1 || input == ContainerInput.QUICK_MOVE) {
                     customs().removeAt(ci); saveCustoms(); Sim.chatStyled("§cDeleted loadout ${cu.name}.")
                 } else if (button == 0) equipCustom(sp, cu)
             } else if (button == 0) defs.firstOrNull { it.slot == slot }?.let { equip(sp, it) }

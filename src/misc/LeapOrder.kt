@@ -3,8 +3,15 @@ package com.engineerclient.misc
 import com.engineerclient.EngineerClient
 import com.engineerclient.EngineerClient.mc
 import com.engineerclient.adr.PartyTracker
+import com.mojang.blaze3d.platform.InputConstants
+import com.mojang.brigadier.Command
 import com.mojang.brigadier.arguments.StringArgumentType
+import com.mojang.brigadier.tree.CommandNode
 import com.odtheking.odin.clickgui.settings.impl.SelectorSetting
+import com.odtheking.odin.events.ScreenEvent
+import com.odtheking.odin.events.core.EventBus
+import com.odtheking.odin.events.core.EventPriority
+import com.odtheking.odin.events.core.on
 import com.odtheking.odin.features.ModuleManager
 import com.odtheking.odin.features.impl.dungeon.LeapMenu
 import com.odtheking.odin.utils.Color
@@ -13,17 +20,13 @@ import com.odtheking.odin.utils.render.roundedRectOutlined
 import com.odtheking.odin.utils.render.text
 import com.odtheking.odin.utils.skyblock.PartyUtils
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass
-import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonListener
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonPlayer
-import com.odtheking.odin.events.ScreenEvent
-import com.odtheking.odin.events.core.EventBus
-import com.odtheking.odin.events.core.EventPriority
-import com.odtheking.odin.events.core.on
+import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback
-import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands.argument
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal
+import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
 import net.fabricmc.fabric.api.event.Event
 import net.fabricmc.loader.api.FabricLoader
@@ -31,45 +34,29 @@ import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.PlayerFaceExtractor
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.input.MouseButtonEvent
+import net.minecraft.client.resources.DefaultPlayerSkin
 import net.minecraft.network.chat.Component
 import net.minecraft.resources.Identifier
+import net.minecraft.sounds.SoundEvents
+import net.minecraft.util.Util
+import net.minecraft.world.entity.player.PlayerSkin
+import org.lwjgl.sdl.SDLMouse
+import java.nio.FloatBuffer
 import java.nio.file.Files
 import java.util.Locale
 import java.util.Optional
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
-import net.minecraft.client.resources.DefaultPlayerSkin
-import net.minecraft.util.Util
-import net.minecraft.world.entity.player.PlayerSkin
 
-/**
- * Odin's custom leap order (`/od leaporder a b c d`, Leap Menu sorting Custom), kept across restarts: Odin holds
- * it in memory only, so it is saved to config/adm/leaporder.txt whenever it changes (however it was
- * set) and put back at startup.
- *
- * `/od leaporder` (or `/lo`) with no names opens [LeapOrderScreen]: Odin's leap menu as it would look, the
- * order's players in their spots, to drag between them. `/lo a b c d` sets it as Odin's command does.
- *
- * Changing the order (any way) switches Odin's Leap Menu sorting to Custom. It goes back to what it was (Odin
- * Sorting if it was already Custom) only once the party is clearly a different one ([dropReason]): a player or
- * two swapping out doesn't. Only ADR's party tracker counts, and only when it has no doubt, so a party that
- * isn't known never switches it. Kept across restarts in config/adm/leaporder-sorting.txt: the
- * sorting to go back to, the party it was set for, since when you've been out of a party ("-" when in one).
- */
 object LeapOrder {
     private val file by lazy { FabricLoader.getInstance().configDir.resolve("adm").resolve("leaporder.txt") }
     private var saved: List<String> = emptyList()
     private val autoFile by lazy { file.resolveSibling("leaporder-sorting.txt") }
-    /** The sorting to put back when the party changes, while this switched it to Custom. */
     private var revertTo: LeapMenu.Sorting? = null
-    /** Who (besides you) was in the party when the order was set; null until the party is known. */
     private var orderParty: Set<String>? = null
-    /** Since when you've surely been out of a party, or null while in one (or it isn't known). */
     private var aloneSince: Long? = null
 
-    /** Out of a party this long: the order is for a party that's gone. */
     private const val ALONE_MS = 10 * 60_000L
-    /** More of the order's party than this gone: it's another party. */
     private const val MAX_SWAPPED = 3
 
     fun install() {
@@ -89,23 +76,17 @@ object LeapOrder {
             }
         }.onFailure { EngineerClient.logger.warn("[ec] leap order: couldn't read $autoFile", it) }
 
-        // Saved on any change, also from Odin's own command.
         ClientTickEvents.END_CLIENT_TICK.register {
             val now = DungeonUtils.customLeapOrder
             if (now != saved) EngineerClient.safely("leap order save") { save(now); spots.fill(""); if (now.isNotEmpty()) useCustom() }
             EngineerClient.safely("leap order party") { checkParty() }
             EngineerClient.safely("leap order spots") { keepSpots() }
         }
-        // Again just before Odin's leap menu draws or takes a click or key (it redoes its list on every tab list update).
         on<ScreenEvent.Render>(EventPriority.HIGHEST + 50) { EngineerClient.safely("leap order spots") { keepSpots() } }
         on<ScreenEvent.MouseClick>(EventPriority.HIGHEST + 50) { EngineerClient.safely("leap order spots") { keepSpots() } }
         on<ScreenEvent.KeyPress>(EventPriority.HIGHEST + 50) { EngineerClient.safely("leap order spots") { keepSpots() } }
         EventBus.subscribe(this)
 
-        // After Odin's commands, without adding or merging any node into /odin or /od (so nothing else under /od can
-        // be affected): Odin's own "leaporder" node just gets a run for the
-        // bare form, opening the screen. With names it is untouched, Odin's command as always. /od points at a copy
-        // of /odin's node whose children are the same node objects, so both see the one change.
         val afterOdin = Identifier.fromNamespaceAndPath("engineerclient", "after_odin")
         ClientCommandRegistrationCallback.EVENT.addPhaseOrdering(Event.DEFAULT_PHASE, afterOdin)
         ClientCommandRegistrationCallback.EVENT.register(afterOdin) { dispatcher, _ ->
@@ -114,7 +95,7 @@ object LeapOrder {
                     dispatcher.root.getChild("odin")?.getChild("leaporder"),
                     dispatcher.root.getChild("od")?.let { it.redirect ?: it }?.getChild("leaporder"),
                 ).distinct()
-                for (node in nodes) COMMAND.set(node, com.mojang.brigadier.Command<FabricClientCommandSource> { open(); 1 })
+                for (node in nodes) COMMAND.set(node, Command<FabricClientCommandSource> { open(); 1 })
                 if (nodes.isEmpty()) EngineerClient.logger.info("[ec] leap order: Odin has no /od leaporder here, /lo only")
             }
             dispatcher.register(literal("lo").executes { open(); 1 }
@@ -130,10 +111,6 @@ object LeapOrder {
         }
     }
 
-    /**
-     * [name]'s skin: from the tab list when they're in your lobby, else looked up by name (Mojang's profile, then
-     * the skin, in the background, kept for the session). Steve's while that loads or when the name has none.
-     */
     fun skin(name: String): PlayerSkin {
         mc.connection?.getPlayerInfoIgnoreCase(name)?.let { return it.skin }
         if (name.equals(mc.player?.name?.string, ignoreCase = true)) mc.player?.let { return it.skin }
@@ -152,32 +129,26 @@ object LeapOrder {
     private val skins = ConcurrentHashMap<String, PlayerSkin>()
     private val looking = ConcurrentHashMap.newKeySet<String>()
 
-    /** Brigadier's node command (no setter: Odin's node is given the bare run in place). */
-    private val COMMAND by lazy { com.mojang.brigadier.tree.CommandNode::class.java.getDeclaredField("command").apply { isAccessible = true } }
+    private val COMMAND by lazy { CommandNode::class.java.getDeclaredField("command").apply { isAccessible = true } }
 
     private fun open() = mc.schedule { mc.gui.setScreen(LeapOrderScreen()) }
 
-    /** Odin's order, Odin-style (lower case, ranks 0-3: top left, top right, bottom left, bottom right). */
     fun set(names: List<String>) {
         DungeonUtils.customLeapOrder = names.filter { it.isNotBlank() }.map { it.lowercase(Locale.ROOT) }
     }
 
     private val sorting get() = LeapMenu.settings["Sorting"] as? SelectorSetting<LeapMenu.Sorting>
 
-    /** Whether Odin's Leap Menu sorts by the order (sorting Custom). */
     val custom get() = sorting?.value == LeapMenu.Sorting.CUSTOM
 
-    /** The Leap Order screen's checkbox: on is as setting the order, off puts back the sorting from before. */
     fun setCustom(on: Boolean) {
         val s = sorting ?: return
         if (on == custom) return
         if (on) { useCustom(); return }
-        // checkParty sees it's no longer Custom and forgets the rest.
         s.value = revertTo ?: LeapMenu.Sorting.ODIN
         ModuleManager.saveConfigurations()
     }
 
-    /** The order was just set: sort the leap menu by it, for this party. */
     private fun useCustom() {
         val s = sorting ?: return
         if (s.value != LeapMenu.Sorting.CUSTOM) {
@@ -191,11 +162,9 @@ object LeapOrder {
         saveAuto()
     }
 
-    /** The party is clearly another one since the order was set: back to the sorting from before. */
     private fun checkParty() {
         val back = revertTo ?: return
         val s = sorting ?: return
-        // Set back to something else by hand: nothing to put back.
         if (s.value != LeapMenu.Sorting.CUSTOM) { revertTo = null; orderParty = null; aloneSince = null; saveAuto(); return }
         val why = dropReason(System.currentTimeMillis()) ?: return
         s.value = back
@@ -207,13 +176,6 @@ object LeapOrder {
         EngineerClient.msg("§7Leap Menu sorting back to §f${label(back)}§7: $why")
     }
 
-    /**
-     * Why the order no longer fits, or null while it might. Any one of:
-     *  - out of a party for [ALONE_MS] straight;
-     *  - more than [MAX_SWAPPED] of the party it was set for gone;
-     *  - none of the order's players left in the party.
-     * Kept quiet while the party isn't surely known.
-     */
     private fun dropReason(now: Long): String? {
         val me = mc.user.name.lowercase(Locale.ROOT)
         val order = DungeonUtils.customLeapOrder.map { it.lowercase(Locale.ROOT) }.filter { it != me }.toSet()
@@ -232,11 +194,6 @@ object LeapOrder {
         return null
     }
 
-    /**
-     * Who's in your party besides you (lower case; empty: not in one), or null while that isn't surely known.
-     * Only ADR's tracker with no doubt: Odin's list can be partial (after a Party Finder join it only has whoever
-     * joined since), and a partial list would read as people having left.
-     */
     private fun party(): Set<String>? {
         val me = mc.user.name.lowercase(Locale.ROOT)
         val names = synchronized(PartyTracker.state) {
@@ -245,15 +202,9 @@ object LeapOrder {
         return names.map { it.lowercase(Locale.ROOT) }.filter { it != me }.toSet()
     }
 
-    /** Who had each leap menu spot last (lower case, "" for none), so that someone leaving doesn't move anyone else. */
     private val spots = Array(4) { "" }
     private val EMPTY = DungeonPlayer("Empty", DungeonClass.EMPTY, 0, null)
 
-    /**
-     * Odin's Custom sorting packs the teammates in the order's ranks, so with someone gone everyone after them moves up a
-     * spot. Instead each keeps the spot they had: a leaver's spot stays empty until someone new comes, who takes it (the
-     * first free one, when the order doesn't rank them), and a changed order starts the spots over from its ranks.
-     */
     private fun keepSpots() {
         if (!custom || !DungeonUtils.inDungeons) return
         val team = DungeonListener.leapTeammates.filter { it.clazz != DungeonClass.EMPTY }
@@ -273,7 +224,6 @@ object LeapOrder {
         if (list != DungeonListener.leapTeammates) DungeonListener.leapTeammates = list
     }
 
-    /** Its name as Odin's setting shows it ("Odin Sorting"). */
     private fun label(s: LeapMenu.Sorting) = s.toString()
 
     private fun saveAuto() = runCatching {
@@ -292,13 +242,7 @@ object LeapOrder {
     }
 }
 
-/**
- * Odin's leap menu, simulated: the 4 boxes where its Leap Menu puts them (24px off the centre, its Render Scale),
- * the custom order's players in rank order, empty spots filled with your party. Drag a player onto another spot
- * to swap them; the order is set (and saved) on the drop.
- */
 class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
-    /** The names in each spot, as shown ("" for none). */
     private val names = Array(4) { "" }
     private var dragging = -1
     private var sawHeld = false
@@ -306,11 +250,9 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
     private var grabY = 0.0
     private var mouseX = 0.0
     private var mouseY = 0.0
-    /** A box sliding into its spot after a drop: where it started (x, y), and when. */
     private val slideFrom = arrayOfNulls<IntArray>(4)
     private val slideAt = LongArray(4)
 
-    /** The party as last shown ([PartyTracker]'s version), to redo the spots when it changes. */
     private var partyVersion = -1
 
     init {
@@ -318,11 +260,6 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
         EngineerClient.safely("leap order party") { PartyTracker.askIfUnknown() }
     }
 
-    /**
-     * Who goes where: your party (or dungeon teammates) in the order's ranks, those not in the order after them.
-     * With the party known, names in the order that aren't in it are left out (a past party's order would hide
-     * the people you're with now); with it unknown, the order is shown as it is.
-     */
     private fun fill() {
         partyVersion = PartyTracker.state.version
         val me = mc.player?.name?.string
@@ -334,7 +271,6 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
         for (i in 0 until 4) names[i] = shown.getOrElse(i) { "" }
     }
 
-    /** The people you're with: the dungeon's teammates in one, else the party (ADR's tracker, else Odin's). */
     private fun party(): List<String> {
         val team = DungeonUtils.dungeonTeammates.map { it.name }
         if (DungeonUtils.inDungeons && team.isNotEmpty()) return team
@@ -346,9 +282,8 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
 
     override fun isPauseScreen() = false
 
-    private val scale get() = com.engineerclient.misc.OdinLeapScale.get()
+    private val scale get() = OdinLeapScale.get()
 
-    /** Spot [i]'s box on screen: x0, y0, x1, y1. */
     private fun box(i: Int): IntArray {
         val s = scale
         val w = (LeapMenu.BOX_WIDTH * s).toInt()
@@ -358,7 +293,6 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
         return intArrayOf(x0, y0, x0 + w, y0 + h)
     }
 
-    /** Where spot [i]'s box is drawn: its place, or on its way there for [SLIDE_MS] after a drop (easing out). */
     private fun drawnAt(i: Int): IntArray {
         val b = box(i)
         val from = slideFrom[i] ?: return b
@@ -372,13 +306,11 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
 
     private fun slide(i: Int, x: Int, y: Int) { slideFrom[i] = intArrayOf(x, y); slideAt[i] = System.currentTimeMillis() }
 
-    /** Where the dragged box is drawn for the mouse at [x], [y]: held where it was grabbed, kept on screen. */
     private fun heldAt(x: Double, y: Double): IntArray {
         val b = box(dragging)
         return intArrayOf((x - grabX).toInt().coerceIn(0, width - (b[2] - b[0])), (y - grabY).toInt().coerceIn(0, height - (b[3] - b[1])))
     }
 
-    /** The spot for a point anywhere on screen: its quarter (the leap menu's boxes sit one per quarter). */
     private fun spotAt(x: Double, y: Double): Int = (if (x < width / 2.0) 0 else 1) + (if (y < height / 2.0) 0 else 2)
 
     private fun onBox(i: Int, x: Double, y: Double): Boolean { val b = box(i); return x >= b[0] && x < b[2] && y >= b[1] && y < b[3] }
@@ -388,17 +320,13 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
     override fun extractRenderState(gfx: GuiGraphicsExtractor, mx: Int, my: Int, delta: Float) {
         super.extractRenderState(gfx, mx, my, delta)
         mouseX = mx.toDouble(); mouseY = my.toDouble()
-        // The party changed (or a /p list answered) while open: redo the spots, unless one is being dragged.
         if (dragging < 0 && PartyTracker.state.version != partyVersion) fill()
-        // A release the screen never heard about (focus lost, another button): dropped where the mouse is.
-        // Only once SDL has been seen holding it: if its state can't be read, the release event alone drops.
         if (dragging >= 0) when (leftHeld()) {
             true -> sawHeld = true
             false -> if (sawHeld) drop(mouseX, mouseY)
             null -> {}
         }
 
-        // Whether the leap menu uses this order: Odin's sorting is Custom.
         val cb = checkbox()
         val on = LeapOrder.custom
         val hot = dragging < 0 && mouseX >= cb[0] && mouseX < cb[2] && mouseY >= cb[1] && mouseY < cb[3]
@@ -407,7 +335,6 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
         if (on) gfx.fill(cb[0] + 3, cb[1] + 3, cb[0] + CHECK - 3, cb[1] + CHECK - 3, CHECKED.rgba)
         gfx.text(LABEL, cb[0] + CHECK + 4, cb[1] + 1, WHITE, shadow = true)
 
-        // Recheck Party: a /p list now (PartyTracker); the spots redo themselves when it answers.
         val rb = recheckButton()
         val rHot = dragging < 0 && mouseX >= rb[0] && mouseX < rb[2] && mouseY >= rb[1] && mouseY < rb[3]
         gfx.fill(rb[0], rb[1], rb[2], rb[3], (if (rHot) CHECK_HOT else OUTLINE).rgba)
@@ -415,7 +342,6 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
         val label = if (PartyTracker.checking) RECHECKING else RECHECK
         gfx.text(label, (rb[0] + rb[2] - mc.font.width(label)) / 2, rb[1] + 4, WHITE, shadow = true)
 
-        // The quarter a drop would go to.
         if (dragging >= 0) {
             val q = spotAt(mouseX, mouseY)
             val qx = if (q % 2 == 0) 0 else width / 2
@@ -425,7 +351,6 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
         for (i in 0 until 4) {
             val b = box(i)
             if (i == dragging) {
-                // The spot it was lifted from.
                 gfx.roundedRectOutlined(b[0], b[1], b[2], b[3], EMPTY.rgba, OUTLINE.rgba, 1.5f, 9f * scale)
                 continue
             }
@@ -439,7 +364,6 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
         }
     }
 
-    /** A leap menu box at [x], [y] for [name], drawn at Odin's size and scaled as its Render Scale does. */
     private fun drawBox(gfx: GuiGraphicsExtractor, x: Int, y: Int, name: String, fill: Color) {
         val w = LeapMenu.BOX_WIDTH
         val h = LeapMenu.BOX_HEIGHT
@@ -460,7 +384,6 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
         gfx.pose().popMatrix()
     }
 
-    /** The Custom checkbox, centred above the top boxes (its label included): x0, y0, x1, y1. */
     private fun checkbox(): IntArray {
         val w = CHECK + 4 + mc.font.width(LABEL)
         val x0 = (width - w) / 2
@@ -468,7 +391,6 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
         return intArrayOf(x0, y0, x0 + w, y0 + CHECK)
     }
 
-    /** The Recheck Party button, centred under the bottom boxes: x0, y0, x1, y1. */
     private fun recheckButton(): IntArray {
         val w = maxOf(mc.font.width(RECHECK), mc.font.width(RECHECKING)) + 16
         val x0 = (width - w) / 2
@@ -480,13 +402,13 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
         val cb = checkbox()
         if (isLeft(event) && event.x() >= cb[0] && event.x() < cb[2] && event.y() >= cb[1] && event.y() < cb[3]) {
             LeapOrder.setCustom(!LeapOrder.custom)
-            mc.player?.playSound(net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(), 0.4f, 1.2f)
+            mc.player?.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 0.4f, 1.2f)
             return true
         }
         val rb = recheckButton()
         if (isLeft(event) && event.x() >= rb[0] && event.x() < rb[2] && event.y() >= rb[1] && event.y() < rb[3]) {
             EngineerClient.safely("leap order recheck") { PartyTracker.recheck() }
-            mc.player?.playSound(net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(), 0.4f, 1.2f)
+            mc.player?.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 0.4f, 1.2f)
             return true
         }
         val i = spotAt(event.x(), event.y())
@@ -494,7 +416,6 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
             dragging = i
             sawHeld = false
             val b = box(i)
-            // Held where it was grabbed; grabbed elsewhere in its quarter, held by its middle.
             if (onBox(i, event.x(), event.y())) { grabX = event.x() - b[0]; grabY = event.y() - b[1] }
             else { grabX = (b[2] - b[0]) / 2.0; grabY = (b[3] - b[1]) / 2.0 }
             return true
@@ -508,38 +429,30 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
         return true
     }
 
-    /** Lets go of the dragged player at [x], [y]: swapped with the spot there, if any. */
     private fun drop(x: Double, y: Double) {
         val to = spotAt(x, y)
-        // Both boxes slide the rest of the way: the dropped one from the mouse, the one it swapped with from its old spot.
         val held = heldAt(x, y)
         val other = drawnAt(to)
         slide(to, held[0], held[1])
         if (to != dragging) slide(dragging, other[0], other[1])
         if (to != dragging) {
             val t = names[to]; names[to] = names[dragging]; names[dragging] = t
-            // Odin's order has no gaps (its menu fills the spots in rank order), so a player dropped on an
-            // empty spot moves up to the first free one here too: the screen shows the order as it applies.
             val order = names.filter { it.isNotEmpty() }
             for (i in 0 until 4) names[i] = order.getOrElse(i) { "" }
             LeapOrder.set(order)
-            // Moving anyone flicks Custom on, even back to the order it was.
             LeapOrder.setCustom(true)
-            mc.player?.playSound(net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(), 0.4f, 1.2f)
+            mc.player?.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 0.4f, 1.2f)
         }
         dragging = -1
     }
 
-    /** A left click: 26.3 numbers the buttons as SDL does (left 1, middle 2, right 3), not GLFW's (left 0). */
-    private fun isLeft(event: MouseButtonEvent): Boolean = event.button() == com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT
+    private fun isLeft(event: MouseButtonEvent): Boolean = event.button() == InputConstants.MOUSE_BUTTON_LEFT
 
-    /** The left button is still held (SDL), or null when that can't be told. */
     private fun leftHeld(): Boolean? = runCatching {
-        (org.lwjgl.sdl.SDLMouse.SDL_GetMouseState(null as java.nio.FloatBuffer?, null as java.nio.FloatBuffer?) and 1) != 0
+        (SDLMouse.SDL_GetMouseState(null as FloatBuffer?, null as FloatBuffer?) and 1) != 0
     }.getOrNull()
 
     private companion object {
-        /** How long a dropped box takes to slide into its spot. */
         const val SLIDE_MS = 90L
         val WHITE = Color(255, 255, 255, 1f)
         val BOX = Color(30, 30, 30, 0.85f)

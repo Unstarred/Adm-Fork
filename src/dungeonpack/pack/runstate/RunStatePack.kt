@@ -2,57 +2,33 @@ package com.engineerclient.dungeonpack.pack.runstate
 
 import com.engineerclient.dungeonpack.pack.*
 import com.engineerclient.dungeonpack.pack.rooms.checkHeader
+import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import java.nio.file.Files
 import java.nio.file.Path
 
-/*
- * The "Run-state tables" data pack, version 1 (FORMAT-runstate.md): door and key rules, room durations, the check-state
- * machine, score calibration, class roles, puzzle odds, bonus rates, SkyBlock stat presets, damage rules, lag presets and
- * the documented defaults for what is not measured.
- *
- * Every top-level section is independent: a section that is missing or malformed is null here, with one line in the
- * report naming it, and only the feature that needs it is disabled (FORMAT-runstate 1). Each typed section keeps the
- * parsed JSON in `raw` too, so a module can read a field this skeleton did not model. All durations are server ticks
- * with lag removed; the lag layer re-adds loss at run time and applying it twice is a bug.
- */
-
-/** FORMAT-runstate 3: per-room secrets, crypts and durations. Key = the room's in-game name. */
 class RoomRun(
     val name: String,
     val type: String,
     val shape: String,
-    /** Tile count (a 1x4 is 4, a 2x2 is 4, an L is 3): the counter weight. */
     val tiles: Int,
-    /** The number the action bar prints as M and the tab/Odin total use. Authoritative; never `secretsDb`. */
     val secretsMax: Int,
     val secretsMaxSource: String?,
-    /** How many secrets the rooms pack can place for this design. When lower than [secretsMax] the rest are auto-credited. */
     val secretsDb: Int?,
     val cryptsPotential: Int?,
-    /** `mob`, `miniboss`, `none` or null. */
     val clear: String?,
-    /** First entry -> GREEN, all classes pooled; null = use [RunStatePack.roomTypeDur]. */
     val dur: Dist?,
     val byClass: Map<String, Dist>,
     val toWhite: Dist?,
     val toGreen: Dist?,
 )
 
-/**
- * FORMAT-runstate 6.4: the one chest whose opening finishes a trap room. A trap room has no mob to kill; its check mark turns white a few
- * ticks after this chest is opened. [secret] is the rooms-pack secret id and [cell] its canonical (x, y, z) in the design's own frame
- * (turn it with the room's placement); [afterOpen] is the measured gap from the first open to the white mark (0 to 5 ticks, median 2).
- */
 class ChestClear(val room: String, val secret: String?, val cell: Pos?, val afterOpen: Dist?, val visits: Int)
 
-/** FORMAT-runstate 4: door and key rules and tick constants. */
 class DoorRules(
     val volumeW: Int, val volumeH: Int, val volumeD: Int, val volumeY0: Int,
-    /** Ticks a door stays barrier before all 36 blocks turn to air (14). */
     val barrierTicks: Int,
     val barrierTicksQ: DoubleArray,
-    /** Null when unmeasured: use `START_LEAD_TICKS` (20). */
     val startLeadTicks: Int?,
     val entranceFallAfterStart1: Dist?,
     val freeFairyDoorWithinTicks: Int,
@@ -72,7 +48,6 @@ class DoorRules(
     val raw: JsonObject,
 )
 
-/** FORMAT-runstate 5: milestones, ticks since T0. */
 class Splits(val dists: Map<String, Dist>, val raw: JsonObject) {
     val bloodOpen: Dist? get() = dists["bloodOpen"]
     val bloodKey: Dist? get() = dists["bloodKey"]
@@ -85,7 +60,6 @@ class Splits(val dists: Map<String, Dist>, val raw: JsonObject) {
     val roomsGreenFracAtMaxor: Dist? get() = dists["roomsGreenFracAtMaxor"]
 }
 
-/** FORMAT-runstate 6.2: one room type's transition paths (`UNWG` = undiscovered, none, white, green) and tick distributions (`NtoW`, `WtoG`, `NtoG`). */
 class TypeStates(val paths: Map<String, Int>, val ticks: Map<String, Dist>)
 
 class CheckStates(
@@ -95,43 +69,31 @@ class CheckStates(
     val raw: JsonObject,
 )
 
-/** FORMAT-runstate 6.3. */
 class CounterRules(val totalUnits: Int, val excludeEntrance: Boolean, val tabRefreshTicks: Int, val raw: JsonObject)
 
-/** FORMAT-runstate 7: the fitted team score. See `ScoreModule` for evaluation (7.3). */
 class ScoreModel(
     val periodTicks: Int,
     val firstUpdateTick: Int,
     val endScreen: String?,
     val maxSecretPoints: Double,
     val secretsPctDecimals: Int,
-    /** `table[c]` for `c` completed tiles (37 entries, c = 0..36), deaths 0 with secrets and bonus removed. */
     val roomsTable: DoubleArray,
     val roomsInterp: String?,
     val roomsRounding: String?,
     val deathsFormula: String?,
-    /**
-     * Points per unsolved puzzle, as the pack writes it: NEGATIVE when fitted (-9.04; the canonical value is -10). Null = not
-     * fitted; the score module then uses `UNMEASURED_PUZZLE_PENALTY` (10 points, subtracted).
-     */
     val puzzlePenaltyPerUnsolved: Double?,
     val cryptWeight: Double, val cryptCap: Int,
     val mimicWeight: Double, val princeWeight: Double, val batWeight: Double,
     val bonusWeightsFitted: Boolean,
-    /** Speed term as `[seconds, points]` pairs, piecewise linear. */
     val speedPointsSec: List<Pair<Double, Double>>,
     val speedFitted: Boolean,
     val constant: Double,
     val raw: JsonObject,
-    /** The fitted weight on the secrets term (0.991 in the built pack; 1.0 when the pack has none). */
     val secretWeight: Double = 1.0,
-    /** `S` is recomputed at `T0 + clockOriginTicksAfterT0 + periodTicks * k` for k >= 1 (the built pack: 20, so the first value shows at T0 + 220). */
     val clockOriginTicksAfterT0: Int = 0,
-    /** The pack's own statement of the exact formula (read it before writing the score function), or null. */
     val evaluation: String? = null,
 )
 
-/** FORMAT-runstate 9.2: per-class roles for the bots' ClearPlans. */
 class ClassRole(
     val roomsOwnedMean: Double, val puzzlesOwnedMean: Double, val doorOpenerFrac: Double,
     val distanceBlocks: Dist?, val movingSpeedBpt: Double?,
@@ -139,25 +101,20 @@ class ClassRole(
 
 class ClassRoles(val n: Int, val classes: Map<String, ClassRole>, val ownedRoomsSortedMean: DoubleArray, val standingFrac: Double?, val firstEntrantTopLeaderFrac: Double?, val raw: JsonObject)
 
-/** FORMAT-runstate 10.1: how many puzzles a layout has and which ones can occur. */
 class PuzzleOdds(val countOddsN: Int, val counts: Map<Int, Int>, val pool: List<PuzzleEntry>, val raw: JsonObject) {
     class PuzzleEntry(val code: String, val rooms: List<String>, val mapShare: Double, val exclusivePair: Boolean)
 }
 
-/** FORMAT-runstate 11.2: a SkyBlock stat preset. */
 class SbStatPreset(val id: String, val label: String, val floor: Int, val maxHp: Int, val defense: Int, val maxMana: Int, val speed: Int, val vitality: Int?)
 
-/** FORMAT-runstate 11.3. */
 class DamageRules(val trapPctOfMaxHp: Double, val defenseFormula: String?, val raw: JsonObject)
 
-/** FORMAT-runstate 12: lag presets and the freeze-then-burst shape. */
 class LagTier(val good: Double, val typical: Double, val bad: Double, val mean: Double?, val slotOver200: Double?, val slotMultiplier: Double?)
 
 class LagModel(
     val typicalLossPerMin: Double,
     val tiers: Map<String, LagTier>,
     val runLevelMedian: Double?, val runLevelSigma: Double?, val runLevelP10: Double?, val runLevelP90: Double?,
-    /** `[gapMs, perHour]`: freezes at least this long per hour. */
     val freezeExceedPerHour: List<Pair<Double, Double>>,
     val tickIntervalMsPct: DoubleArray, val tickIntervalMsQ: DoubleArray,
     val recoverFracWithin5s: Double?, val burstRateTicksPerSec: Double?,
@@ -165,13 +122,8 @@ class LagModel(
     val raw: JsonObject,
 )
 
-/** The `constants.UNMEASURED` list: named defaults the pack could not measure. */
 class NamedConstant(val name: String, val value: Any?, val why: String?)
 
-/**
- * The loaded run-state tables. Typed sections are null when absent or malformed (see [problems]).
- * [raw] is the whole parsed file for fields this class does not model.
- */
 class RunStatePack internal constructor(
     val version: Int,
     val pct: DoubleArray,
@@ -190,34 +142,24 @@ class RunStatePack internal constructor(
     val damage: DamageRules?,
     val lag: LagModel?,
     val constants: List<NamedConstant>,
-    /** One line per section that was missing or malformed. */
     val problems: List<String>,
     val raw: JsonObject,
-    /** Trap rooms by in-game name: the chest that finishes them (FORMAT-runstate 6.4). Empty when the pack has no `chestClears` section. */
     val chestClears: Map<String, ChestClear> = emptyMap(),
 ) {
-    /** The tables for a room (in-game name, spaces; U+200B stripped); null when the pack has none. */
-    fun room(name: String): RoomRun? = rooms[name.replace("​", "")]
+    fun room(name: String): RoomRun? = rooms[name.replace("\u200b", "")]
 
-    /** The chest that finishes the trap room [name], or null (not a trap room, or the pack has no rule for it). */
     fun chestClear(name: String): ChestClear? = chestClears[name.replace("\u200b", "")]
 
     fun constant(name: String): NamedConstant? = constants.firstOrNull { it.name == name }
 
-    /**
-     * A top-level section this class does not model (`hud`, `loot`, `blessings`, `bonus`, `crypts`, `timing`...), as parsed JSON,
-     * or null. The sidebar and tab templates (`hud`) and the loot and blessing tables are read this way.
-     */
     fun section(name: String): JsonObject? = raw.obj(name)
 
     companion object {
         const val FORMAT = "ads-runstate"
         const val SUPPORTED_VERSION = 1
 
-        /** Loads `runstate.json.gz` from [dir]. Null, with the reason in [report], when missing/unreadable/wrong format. Never throws. */
         fun load(dir: Path, report: PackReport = PackReport()): RunStatePack? = load(PackSource.ofDir(dir), report)
 
-        /** [load] from a resolved [PackSource] (the jar's copy or the override folder's). */
         fun load(source: PackSource, report: PackReport = PackReport()): RunStatePack? {
             val path = source.file(PackFiles.RUNSTATE)
             if (path == null) { report.error("The run-state tables ${PackFiles.RUNSTATE} are missing from ${source.missingFrom}."); return null }
@@ -232,7 +174,6 @@ class RunStatePack internal constructor(
             val problems = ArrayList<String>()
             val pct = root.arr("pct")?.doubles()?.takeIf { it.isNotEmpty() } ?: Dist.DEFAULT_PCT
 
-            /** A section: parsed when present; a missing or malformed one is reported by name and null. */
             fun <T> section(name: String, required: Boolean = true, parse: (JsonObject) -> T?): T? {
                 val o = root.obj(name)
                 if (o == null) { if (required) problems += "section '$name' is missing"; return null }
@@ -269,7 +210,7 @@ class RunStatePack internal constructor(
                 chatFormats, sbPresets, damage, lag, constants, problems, root, chestClears)
         }
 
-        private fun primitive(e: com.google.gson.JsonElement?): Any? {
+        private fun primitive(e: JsonElement?): Any? {
             if (e == null || !e.isJsonPrimitive) return null
             val p = e.asJsonPrimitive
             return if (p.isNumber) p.asDouble else if (p.isBoolean) p.asBoolean else p.asString
@@ -284,7 +225,7 @@ class RunStatePack internal constructor(
         private fun parseRooms(o: JsonObject, pct: DoubleArray): Map<String, RoomRun> =
             o.entrySet().mapNotNull { (name, v) ->
                 val r = v.asObj() ?: return@mapNotNull null
-                val key = name.replace("​", "")
+                val key = name.replace("\u200b", "")
                 key to RoomRun(
                     key, r.str("type") ?: "normal", r.str("shape") ?: "1x1", r.int("tiles") ?: 1, r.int("secretsMax") ?: 0, r.str("secretsMaxSource"),
                     r.int("secretsDb"), r.int("cryptsPotential"), r.str("clear"),

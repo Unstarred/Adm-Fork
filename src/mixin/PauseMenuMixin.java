@@ -17,13 +17,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/**
- * Random Stuff's Clean Menus, Esc side: the pause menu is built as just Back to Game, Options | Mods,
- * (World Options, where 26.3 put Open to LAN, in singleplayer) and Disconnect - no advancements, statistics, server links or icon row -
- * centred on the screen.
- * Replaces the whole build so nothing else's injections into it land half-way through a layout we
- * don't use; P3 Sim's button is added after init and finds Disconnect by its key.
- */
 @Mixin(PauseScreen.class)
 public abstract class PauseMenuMixin extends Screen {
     @Shadow private Button disconnectButton;

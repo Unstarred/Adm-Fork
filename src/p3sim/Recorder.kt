@@ -8,14 +8,7 @@ import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
-/**
- * Records every sim run (the menu's Record runs) to `config/adm/p3sim-runs/`, one JSON
- * line a server tick: you (position, look, open window, held item), the section, what's left in it, every bot
- * (where, heading where, holding, its jobs) and the party's early-enter state; plus every chat line
- * the sim sent and the bots' debug lines as events. The last 20 runs are kept. Server thread only.
- */
 object Recorder {
-    /** Runs recorded in a row at most: then it turns itself off (and says so); turning it back on starts the count again. */
     private const val IN_A_ROW = 50
     private var inRow = 0
     private var out: BufferedWriter? = null
@@ -50,7 +43,6 @@ object Recorder {
         }
     }
 
-    /** A chat line, debug line or anything else worth seeing in order. */
     fun event(text: String) {
         if (out != null) events += text
     }

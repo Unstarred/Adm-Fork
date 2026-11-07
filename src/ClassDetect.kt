@@ -3,11 +3,6 @@ package com.engineerclient
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
 
-/**
- * Own-class detection, for Party Finder Classes' mark on your class. Odin already parses the
- * dungeon tab list into DungeonUtils.dungeonTeammates (class + level per player); we only watch
- * the entry that is us, and stash the last class seen so it is known outside a dungeon too.
- */
 object ClassDetect {
 
     var detected: DungeonClass? = null
@@ -17,7 +12,6 @@ object ClassDetect {
         detected = null
     }
 
-    /** Called every ~second; only does anything in a dungeon. */
     fun poll() {
         if (!DungeonUtils.inDungeons) return
         val clazz = DungeonUtils.currentDungeonPlayer.clazz
@@ -31,13 +25,11 @@ object ClassDetect {
         }
     }
 
-    /** Live tab detection, else the last class seen. Null: never seen one. */
     fun myClass(): DungeonClass? =
         detected ?: EcConfig.data.lastKnownClass?.let { stash ->
             DungeonClass.entries.firstOrNull { it != DungeonClass.EMPTY && (it.name == stash || stashName(it) == stash) }
         }
 
-    /** The title-case spelling older config files stored ("Berserker", "Mage", ...). */
     private fun stashName(clazz: DungeonClass): String =
         if (clazz == DungeonClass.BERSERK) "Berserker" else clazz.name.lowercase().replaceFirstChar(Char::titlecase)
 }

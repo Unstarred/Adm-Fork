@@ -7,14 +7,6 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
-/**
- * The worn-armour half of the No Enchant Glint setting in {@link RandomStuff}.
- *
- * <p>Armour on a body never becomes an {@code ItemStackRenderState} — it is drawn straight from
- * the equipment models, and its glint is a {@code RenderTypes.armorEntityGlint()} pass gated on
- * the same {@code hasFoil()} question. Same redirect, different renderer; the shorter
- * {@code renderLayers} overload delegates to this one, so a single injection covers both.
- */
 @Mixin(EquipmentLayerRenderer.class)
 public class ArmorFoilMixin {
 

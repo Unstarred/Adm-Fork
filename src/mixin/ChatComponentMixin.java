@@ -1,5 +1,6 @@
 package com.engineerclient.mixin;
 
+import com.engineerclient.EngineerClient;
 import com.engineerclient.chat.ChatHider;
 import net.minecraft.client.gui.components.ChatComponent;
 import net.minecraft.client.multiplayer.chat.GuiMessageSource;
@@ -11,12 +12,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/**
- * The chat hider's one hook: the private funnel every visible chat line passes through on its
- * way into the chat GUI (player, server-system and client-system messages alike). Cancelling
- * here drops the line from the screen only — every mod that parses chat has already seen it
- * upstream, and the game log still records it.
- */
 @Mixin(ChatComponent.class)
 public class ChatComponentMixin {
 
@@ -29,7 +24,7 @@ public class ChatComponentMixin {
         try {
             if (ChatHider.INSTANCE.shouldHide(contents)) ci.cancel();
         } catch (Throwable t) {
-            // a broken rule must never eat the chat
+            EngineerClient.warnOnce("chat hider", t);
         }
     }
 }

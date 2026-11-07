@@ -1,26 +1,6 @@
 package com.engineerclient.mappred
 
-/**
- * What the recorded F7/M7 maps on ADR have in common (4494 complete maps, Sep-Oct 2026), as the numbers
- * [MapPredictor] samples with. Found by the analysis behind Map Prediction:
- *
- *  - every map has exactly 7 big rooms, no big shape more than twice, almost always 22 tiles of
- *    them (so 14 1x1s and 21 rooms); [COMBOS] are the shape mixes seen, with how often
- *  - the doors make one tree; the 1x1 dead ends are entrance, blood, trap, yellow and the puzzles
- *    (plus rare rooms on 5-puzzle maps), and a normal 1x1 is never a dead end
- *  - walked tile by tile, the wither path is 9 or 10 steps from the entrance to blood (whichever
- *    the parity of their distance allows; 7/8 where a big room cuts a corner), and the fairy is a
- *    1x1 exactly 4 steps before blood
- *  - trap, yellow and puzzles are spread at random over the other 1x1 dead ends, but the tab list
- *    lists the puzzles in their order on the map, column by column (x, then z), so each named one
- *    says how many puzzles come before it ([FloorRules.puzzleOrder])
- *
- * The weights were fitted so that maps sampled from the first two rooms of a run come out like the
- * recorded ones (tools/mappred, which also re-checks every rule). The other floors follow the same rules
- * with their own numbers ([FloorRules], [FloorStats]); their rooms are among [NAMES], with the same secrets.
- */
 object MapStats {
-    /** Big room shape counts (1x2, 1x3, 1x4, 2x2, L) and how many maps had them. */
     val COMBOS = arrayOf(
         intArrayOf(1, 2, 1, 1, 2, 849),
         intArrayOf(2, 1, 1, 2, 1, 701),
@@ -44,16 +24,12 @@ object MapStats {
         intArrayOf(0, 2, 2, 1, 2, 2),
     )
 
-    /** Weight of the wither path's walk length (tile steps, entrance to blood). */
     val WALK = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0.023f, 0.06f, 1f, 1f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
 
-    /** Weight of blood's distance from the entrance (tiles, |dx| + |dz|). */
     val BLOOD_FROM_ENTRANCE = floatArrayOf(0f, 0.244f, 0.704f, 0.36f, 0.321f, 0.633f, 0.707f, 0.766f, 0.905f, 1f, 0.674f, 0.674f, 0.674f, 0.674f, 0.674f, 0.674f)
 
-    /** Weight of the fairy's distance from the entrance (tiles). */
     val FAIRY_FROM_ENTRANCE = floatArrayOf(0f, 0.029f, 0.46f, 1f, 0.89f, 0.638f, 0.596f, 0.739f, 0.739f, 0.739f, 0.739f, 0.739f, 0.739f, 0.739f, 0.739f, 0.739f)
 
-    /** Weight of a big room covering each tile, with the map turned so the entrance is on the top row, left half. */
     val BIG_TILE = floatArrayOf(
         0.762f, 0.728f, 1f, 0.828f, 0.558f, 0.73f,
         0.795f, 0.722f, 0.728f, 0.548f, 0.519f, 0.628f,
@@ -63,12 +39,6 @@ object MapStats {
         0.72f, 0.648f, 0.476f, 0.566f, 0.466f, 0.694f,
     )
 
-    /** Fairy steps before blood on the wither path. */
-    /**
-     * The calibration of the tiles' chances (tools/mappred calfit.mjs, KEEPZERO, on 300 training maps' snapshots
-     * with the held cells): per Cls (big, 1x1, puzzle, trap, yellow, blood, fairy, rare) the sharpness a, the
-     * offset b and the change d per 3 rooms known. Held-out per-tile log-likelihood -1.0417 to -1.0393.
-     */
     val CALIBRATION = arrayOf(
         doubleArrayOf(0.8835, 0.8623, 0.8383, 0.8911, 0.8757, 0.9302, 0.9268, 0.9375),
         doubleArrayOf(0.1616, -0.0055, -0.0908, -0.1025, -0.1381, 0.0736, 0.0567, 0.0450),
@@ -77,10 +47,8 @@ object MapStats {
 
     const val FAIRY_BEFORE_BLOOD = 4
 
-    /** Chance a sample with dead ends past the puzzles (5-puzzle maps only) keeps them as rare rooms. */
     const val RARE_RATE = 0.25
 
-    /** Name pools: the big normal shapes in [Shape] order, then normal 1x1s and the special types. */
     const val POOL_1X1 = 5
     const val POOL_PUZZLE = 6
     const val POOL_TRAP = 7
@@ -91,12 +59,6 @@ object MapStats {
     const val POOL_ENTRANCE = 12
     const val POOLS = 13
 
-    /**
-     * Every room name on the recorded maps, with its pool, secrets and how many maps had it. A name comes up
-     * at most once a map, and within a pool about equally often (yellow's Default twice as often, New Trap
-     * twice Old Trap).
-     */
-    // 4494 complete F7/M7 maps: name, pool, secrets, times seen
     val NAMES = listOf(
         RoomName("Bridges", 0, 6, 509),
         RoomName("Gold", 0, 1, 504),
@@ -240,10 +202,6 @@ object MapStats {
         RoomName("Entrance", 12, 0, 4494),
     )
 
-    /**
-     * Each pool's average secrets over its names but [skip] (the names the map already has, the names the floor never
-     * has), each as often as it comes up; a pool [skip] empties keeps its average over every name.
-     */
     fun meanSecrets(skip: Set<String> = emptySet()): DoubleArray = DoubleArray(POOLS) { p ->
         val left = NAMES.filter { it.pool == p && it.name !in skip }.ifEmpty { NAMES.filter { it.pool == p } }
         val seen = left.sumOf { it.seen.toDouble() }
@@ -251,5 +209,4 @@ object MapStats {
     }
 }
 
-/** A room name: its pool (MapStats.POOL_*), its secrets, and how many recorded maps had it. */
 class RoomName(val name: String, val pool: Int, val secrets: Int, val seen: Int)

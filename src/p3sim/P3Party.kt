@@ -3,6 +3,7 @@ package com.engineerclient.p3sim
 import com.engineerclient.EngineerClient
 import com.google.gson.JsonParser
 import net.fabricmc.loader.api.FabricLoader
+import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.ConnectScreen
 import net.minecraft.client.gui.screens.TitleScreen
 import net.minecraft.client.multiplayer.ServerData
@@ -19,44 +20,26 @@ import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.WebSocket
 import java.nio.ByteBuffer
+import java.time.Duration
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionStage
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
-/**
- * P3 Sim parties: you host your sim and get a 4-letter code; friends type it in and join your arena.
- *
- * Hosting opens the sim's server to this computer only (the game's Open to LAN, on 127.0.0.1 and not
- * announced: [com.engineerclient.mixin.SimPartyLanMixin]), then connects out to the relay on
- * undonecoffee.com, which hands out the code. Each joiner the relay announces gets its own local
- * connection into the server; bytes go back and forth over the relay, which passes them on unread.
- * Joining: a port on this computer for the game to connect to, piped to the relay with the code.
- * The Minecraft login runs through all of it unchanged (Mojang checks the account, the connection is
- * encrypted game to game). Both sides must have the same EngineerClient version.
- */
 object P3Party {
     private const val RELAY = "wss://undonecoffee.com/p3sim/api"
-    /** Bytes per relay message, at most. */
     private const val CHUNK = 32 * 1024
 
-    /** Set while hosting: the server's published listener binds 127.0.0.1 and isn't announced on the LAN. */
     @JvmStatic @Volatile var loopbackOnly = false
         private set
 
-    private val mc get() = net.minecraft.client.Minecraft.getInstance()
+    private val mc get() = Minecraft.getInstance()
 
-    /**
-     * EngineerClient's version, without the build part or the channel (the relay matches host and joiner on it):
-     * 2026.10.12-beta+44b18f5, 2026.10.12+44b18f5.local and 2026.10.12 all join each other.
-     */
     private val version: String by lazy {
         FabricLoader.getInstance().getModContainer("adm").map { it.metadata.version.friendlyString }.orElse("?").substringBefore('+').substringBefore('-')
     }
 
-    private val http: HttpClient by lazy { HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(10)).build() }
-
-    // ------------------------------------------------------------------ hosting
+    private val http: HttpClient by lazy { HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build() }
 
     private class Host(val port: Int) {
         @Volatile var ws: WebSocket? = null
@@ -69,16 +52,12 @@ object P3Party {
 
     val hosting get() = host != null
 
-    /** In someone's party right now: connected to a host through the relay (the server entry [join] makes). */
     val joined: Boolean get() = !mc.hasSingleplayerServer() && (mc.currentServer?.name?.startsWith(PARTY_NAME) == true || AdsServer.inHostsSim)
     private const val PARTY_NAME = "ADS party"
-    /** The party's code, null until the relay gives it. */
     val code: String? get() = host?.code
 
-    /** Everyone in your sim (you first). */
     fun players(): List<String> = runCatching { SimServer.server?.playerList?.players?.map { it.gameProfile.name }.orEmpty() }.getOrDefault(emptyList())
 
-    /** Opens your sim to a party (the menu's Host Party). */
     fun host() {
         if (host != null) return
         val server = mc.singleplayerServer ?: return
@@ -108,7 +87,6 @@ object P3Party {
             "code" -> { h.code = m.get("code").asString; EngineerClient.msg("§7Party code: §b§l${h.code}§7") }
             "open" -> {
                 val id = m.get("id").asInt
-                // A connection into your own server for this joiner; what it sends back goes to the relay as [id][bytes].
                 val s = runCatching { Socket(InetAddress.getLoopbackAddress(), h.port).also { it.tcpNoDelay = true } }.getOrElse {
                     sendText(h, """{"t":"close","id":$id}"""); return
                 }
@@ -124,7 +102,6 @@ object P3Party {
     private fun sendText(h: Host, t: String) = synchronized(h.sendLock) { runCatching { h.ws?.sendText(t, true)?.get(10, TimeUnit.SECONDS) } }
     private fun sendBinary(h: Host, b: ByteArray) = synchronized(h.sendLock) { h.ws?.sendBinary(ByteBuffer.wrap(b), true)?.get(30, TimeUnit.SECONDS) }
 
-    /** Closes the party: joiners are dropped, your sim goes on alone ([unpublish] false: the server is stopping anyway). */
     fun stopHosting(unpublish: Boolean = true) {
         val h = host ?: return
         host = null
@@ -136,13 +113,6 @@ object P3Party {
         loopbackOnly = false
     }
 
-    // ------------------------------------------------------------------ joining
-
-    /**
-     * Joins the party with [code] (the menu's Join): leaves where you are and connects to the host. [asVersion]: the
-     * version given to the relay; when the host's is ours under a channel's name (an older host sends the whole
-     * 2026.10.12-beta), it's the same code, so we ask again as that.
-     */
     fun join(code: String, asVersion: String = version) {
         val c = code.trim().uppercase()
         if (!Regex("[A-HJ-NP-Z2-9]{4}").matches(c)) { EngineerClient.msg("§cA party code is 4 letters and numbers."); return }
@@ -163,7 +133,6 @@ object P3Party {
                         else EngineerClient.msg("§c$msg")
                     }
                     "ok" -> {
-                        // The game connects here; what it sends goes to the relay, and the relay's bytes come back to it.
                         Thread({
                             val s = runCatching { local.soTimeout = 30_000; local.accept().also { it.tcpNoDelay = true } }.getOrNull()
                             runCatching { local.close() }
@@ -189,11 +158,8 @@ object P3Party {
         }
     }
 
-    // ------------------------------------------------------------------ plumbing
-
     private fun enc(s: String) = URLEncoder.encode(s, Charsets.UTF_8)
 
-    /** Reads [s] until it closes, handing each read to [send]; then [done]. */
     private fun pump(name: String, s: Socket, send: (ByteArray, Int) -> Unit, done: () -> Unit) {
         Thread({
             val buf = ByteArray(CHUNK)
@@ -205,7 +171,6 @@ object P3Party {
         }, name).apply { isDaemon = true }.start()
     }
 
-    /** A WebSocket to the relay; messages whole (text or binary), [onClose] once with the reason given, if any. */
     private fun connect(url: String, onText: (String) -> Unit, onBinary: (ByteArray) -> Unit, onClose: (String?) -> Unit): CompletableFuture<WebSocket> {
         val listener = object : WebSocket.Listener {
             private val text = StringBuilder()

@@ -3,24 +3,8 @@ package com.engineerclient.pov
 import com.engineerclient.mixin.LivingEntityAccessor
 import net.minecraft.client.Minecraft
 import net.minecraft.world.entity.LivingEntity
+import java.util.UUID
 
-/**
- * Decides where a teammate's eyes are for a POV preview pass — the "interpolate head
- * movements" option.
- *
- * Contract (PovCapture relies on exactly this):
- *  - [begin] may rewrite the entity's position/rotation lerp fields so that the following
- *    `Camera.update(delta)` sees the wanted pose; it returns a [Restore] that puts every
- *    field back. Call [Restore.restore] in a `finally`.
- *  - [onClientTick] is called once per client tick (render thread) so CUSTOM can sample.
- *
- * What the camera actually reads (`Camera.alignWithEntity`, first person):
- *  `Mth.lerp(partialTick, entity.xo/yo/zo, entity.getX/Y/Z())` for the eye position,
- *  `entity.getViewYRot(partialTick)` = `Mth.rotLerp(p, yHeadRotO, yHeadRot)` on LivingEntity,
- *  and `entity.getViewXRot(partialTick)` = `Mth.lerp(p, xRotO, getXRot())`.
- * So writing the wanted pose into BOTH halves of each pair makes the partial-tick lerp a no-op
- * and the camera lands exactly on the pose, whatever `partialTick` happens to be.
- */
 object PovPose {
 
     enum class Mode { VANILLA, RAW, CUSTOM }
@@ -31,19 +15,17 @@ object PovPose {
 
     private val NONE = Restore {}
 
-    /** One ring per remote player, fed by [onClientTick], read by CUSTOM. */
     private val interpolator = PovInterpolator()
 
     private const val TICK_NANOS = 50_000_000L
 
     fun begin(entity: LivingEntity, mode: Mode, ticks: Int, partialTick: Float): Restore =
         when (mode) {
-            // Camera.update(delta) already lerps yHeadRotO -> yHeadRot: smooth, ~3 ticks behind.
             Mode.VANILLA -> NONE
             Mode.RAW -> apply(entity, packetTarget(entity))
             Mode.CUSTOM -> {
                 if (ticks <= 0) {
-                    apply(entity, packetTarget(entity)) // ticks = 0 is RAW by definition
+                    apply(entity, packetTarget(entity))
                 } else {
                     val at = System.nanoTime() - ticks * TICK_NANOS
                     val pose = interpolator.poseAt(entity.uuid, at) ?: packetTarget(entity)
@@ -52,7 +34,6 @@ object PovPose {
             }
         }
 
-    /** Samples every remote player's current packet target. Cheap: a handful of players. */
     fun onClientTick() {
         val mc = Minecraft.getInstance()
         val level = mc.level
@@ -69,20 +50,12 @@ object PovPose {
         interpolator.evict(now)
     }
 
-    /** The last pose sampled for this player and when (System.nanoTime), while it is still kept. */
-    fun lastSeen(id: java.util.UUID): PovInterpolator.Sample? = interpolator.newest(id)
+    fun lastSeen(id: UUID): PovInterpolator.Sample? = interpolator.newest(id)
 
-    /** Forgets all history — world change, or the feature being switched off. */
     fun reset() = interpolator.clear()
 
-    /**
-     * The latest thing the server said about this player: the interpolation target while one is
-     * running (that is the packet's position/pitch), the live value otherwise; head yaw is
-     * `lerpYHeadRot` while `lerpHeadSteps > 0` (set by `lerpHeadTo(yHeadRot, 3)` on every
-     * rotation packet), else the settled `yHeadRot`.
-     */
     private fun packetTarget(entity: LivingEntity): PovInterpolator.Pose {
-        val target = entity.interpolation.target() // 26.3: null unless interpolating
+        val target = entity.interpolation.target()
         val pos = target?.position() ?: entity.position()
         val pitch = target?.xRot() ?: entity.xRot
         val accessor = entity as LivingEntityAccessor
@@ -92,11 +65,6 @@ object PovPose {
         return PovInterpolator.Pose(pos.x, pos.y, pos.z, headYaw, pitch)
     }
 
-    /**
-     * Writes [pose] into both the "old" and the current half of every field the camera lerps,
-     * and hands back the undo. Position goes through `setPos` so the bounding box (which
-     * `Camera.getMaxZoom` and the entity renderer read) stays consistent with it.
-     */
     private fun apply(entity: LivingEntity, pose: PovInterpolator.Pose): Restore {
         val oldPos = entity.position()
         val oldXo = entity.xo

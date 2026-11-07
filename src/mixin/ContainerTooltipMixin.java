@@ -1,5 +1,6 @@
 package com.engineerclient.mixin;
 
+import com.engineerclient.EngineerClient;
 import com.engineerclient.pf.PartyFinderStats;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
@@ -11,11 +12,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.List;
 
-/**
- * Rewrites a container item's tooltip lines in place: Party Finder Classes adds the classes a
- * listed party is missing to its Members line. For every other screen and item the
- * original list is returned untouched.
- */
 @Mixin(AbstractContainerScreen.class)
 public class ContainerTooltipMixin {
 
@@ -27,7 +23,8 @@ public class ContainerTooltipMixin {
         try {
             replaced = PartyFinderStats.INSTANCE.decorate((AbstractContainerScreen<?>) (Object) this, itemStack, original);
         } catch (Throwable t) {
-            return; // a broken tooltip is worse than a missing column
+            EngineerClient.warnOnce("party finder stats tooltip", t);
+            return;
         }
         if (replaced != original) cir.setReturnValue(replaced);
     }

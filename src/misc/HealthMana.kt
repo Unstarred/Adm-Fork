@@ -16,12 +16,6 @@ import com.odtheking.odin.utils.skyblock.ActionBarListener
 import com.odtheking.odin.utils.skyblock.LocationUtils
 import net.minecraft.client.gui.GuiGraphicsExtractor
 
-/**
- * Health and mana: bar versions of Odin's Health HUD and Mana HUD, in the colours set in Odin's
- * Player Display, and an option to hide Odin's text HUDs and these bars until the stat runs low.
- * Each bar is its own HUD so it can be placed and toggled on its own; unlike the text, a bar stays
- * up at 0 as an empty bar.
- */
 object HealthMana : Module(
     name = "Health & Mana",
     category = Category.custom("ADM", 860, 10),
@@ -56,23 +50,19 @@ object HealthMana : Module(
     private val manaBarHeight by NumberSetting("Mana Bar Height", 8, 2..30, 1, desc = "Height of the mana bar.")
 
     init {
-        // Off until switched on (in this menu or Edit HUD); Odin's HUD flag would also take their toggle away.
         healthBarHud.enabled = false; manaBarHud.enabled = false
     }
 
-    /**
-     * Whether Odin's own Health HUD or Mana HUD should be skipped this frame: Hide Health/Mana Above
-     * % is on and the stat is above the threshold. Read by OdinHuds for every Odin HUD element; only
-     * those two are ever skipped.
-     */
     fun hidesOdinHud(hud: HudElement): Boolean {
+        val health = hud === healthHud
+        if (!health && hud !== manaHud) return false
         if (!enabled || !hideUnlessLow) return false
-        return when {
-            hud === (PlayerDisplay.settings["Health HUD"] as? HUDSetting)?.value -> aboveThreshold(ActionBarListener.currentHealth, ActionBarListener.maxHealth)
-            hud === (PlayerDisplay.settings["Mana HUD"] as? HUDSetting)?.value -> aboveThreshold(ActionBarListener.currentMana, ActionBarListener.maxMana)
-            else -> false
-        }
+        return if (health) aboveThreshold(ActionBarListener.currentHealth, ActionBarListener.maxHealth)
+            else aboveThreshold(ActionBarListener.currentMana, ActionBarListener.maxMana)
     }
+
+    private val healthHud by lazy { (PlayerDisplay.settings["Health HUD"] as? HUDSetting)?.value }
+    private val manaHud by lazy { (PlayerDisplay.settings["Mana HUD"] as? HUDSetting)?.value }
 
     private fun aboveThreshold(current: Int, max: Int): Boolean =
         hideUnlessLow && max > 0 && current.toFloat() / max >= threshold / 100f
@@ -80,7 +70,6 @@ object HealthMana : Module(
     private fun playerDisplayColor(name: String, fallback: Color): Color =
         (PlayerDisplay.settings[name] as? ColorSetting)?.value ?: fallback
 
-    /** A bar filled to [current]/[max] over a dark background. */
     private fun GuiGraphicsExtractor.statBar(current: Int, max: Int, color: Color, width: Int, height: Int): Pair<Int, Int> {
         val pct = if (max <= 0) 0f else (current.toFloat() / max).coerceIn(0f, 1f)
         fill(0, 0, width, height, Colors.BLACK.withAlpha(0.6f).rgba)

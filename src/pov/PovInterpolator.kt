@@ -2,23 +2,11 @@ package com.engineerclient.pov
 
 import java.util.UUID
 
-/**
- * The time machine behind [PovPose]'s CUSTOM mode: a per-player ring of packet targets stamped
- * with wall-clock nanos, and the lerp that reads the pose back out at an arbitrary past instant.
- *
- * Deliberately free of Minecraft types — [PovPose] is the thin layer
- * that reads the entity's fields into [sample] and writes [poseAt] back out.
- *
- * Thread confinement: the client thread samples and the same thread renders, so no locking.
- */
 class PovInterpolator(
-    /** Samples kept per player; 40 at 20 Hz is 2 s of history, far past the 6-tick maximum delay. */
     private val capacity: Int = 40,
-    /** A player not sampled for this long is dropped entirely (left entity range, died, left party). */
     private val evictAfterNanos: Long = 5_000_000_000L,
 ) {
 
-    /** One packet target as it stood at [nanos]. Rotations in degrees, [headYaw] is head yaw, not body. */
     data class Sample(
         val nanos: Long,
         val x: Double,
@@ -28,7 +16,6 @@ class PovInterpolator(
         val pitch: Float,
     )
 
-    /** What to render: a [Sample] with the timestamp dropped. */
     data class Pose(
         val x: Double,
         val y: Double,
@@ -37,16 +24,14 @@ class PovInterpolator(
         val pitch: Float,
     )
 
-    /** Oldest first. ArrayDeque so the oldest sample falls off the front in O(1). */
     private val rings = HashMap<UUID, ArrayDeque<Sample>>()
 
-    /** Records where [id] was at [nanos]. Out-of-order or repeated stamps replace the newest sample. */
     fun sample(id: UUID, nanos: Long, x: Double, y: Double, z: Double, headYaw: Float, pitch: Float) {
         val ring = rings.getOrPut(id) { ArrayDeque(capacity) }
         val s = Sample(nanos, x, y, z, headYaw, pitch)
         val newest = ring.lastOrNull()
         if (newest != null && nanos <= newest.nanos) {
-            ring[ring.size - 1] = s // clock did not advance: keep one sample per instant, newest wins
+            ring[ring.size - 1] = s
             return
         }
         ring.addLast(s)
@@ -56,12 +41,6 @@ class PovInterpolator(
     fun sample(id: UUID, nanos: Long, pose: Pose) =
         sample(id, nanos, pose.x, pose.y, pose.z, pose.headYaw, pose.pitch)
 
-    /**
-     * The pose [id] held at [nanos], lerped between the two samples bracketing that instant.
-     * Clamps to the oldest sample when [nanos] is older than the ring (the delay outran the
-     * history) and to the newest when it is in the future (delay 0 lands here every frame).
-     * Null only when nothing has ever been sampled for [id].
-     */
     fun poseAt(id: UUID, nanos: Long): Pose? {
         val ring = rings[id] ?: return null
         if (ring.isEmpty()) return null
@@ -70,7 +49,6 @@ class PovInterpolator(
         val newest = ring.last()
         if (nanos >= newest.nanos) return pose(newest)
 
-        // Ring is small (<= capacity) and newest-biased, so walk back from the end.
         var i = ring.size - 1
         while (i > 0 && ring[i - 1].nanos > nanos) i--
         val a = ring[i - 1]
@@ -86,7 +64,6 @@ class PovInterpolator(
         )
     }
 
-    /** Drops every player whose newest sample is older than the eviction window. */
     fun evict(nowNanos: Long) {
         rings.entries.removeAll { (_, ring) ->
             val newest = ring.lastOrNull() ?: return@removeAll true
@@ -94,7 +71,6 @@ class PovInterpolator(
         }
     }
 
-    /** The last sample of [id], if any is still kept. */
     fun newest(id: UUID): Sample? = rings[id]?.lastOrNull()
 
     fun clear() = rings.clear()
@@ -104,7 +80,6 @@ class PovInterpolator(
     companion object {
         fun lerp(t: Double, a: Double, b: Double) = a + (b - a) * t
 
-        /** Degrees to [-180, 180). */
         fun wrapDegrees(deg: Float): Float {
             var d = deg % 360.0f
             if (d >= 180.0f) d -= 360.0f
@@ -112,7 +87,6 @@ class PovInterpolator(
             return d
         }
 
-        /** Shortest-arc angle lerp: 350 -> 10 crosses 0, never 180. Result is wrapped. */
         fun rotLerp(t: Float, a: Float, b: Float): Float = wrapDegrees(a + wrapDegrees(b - a) * t)
     }
 }

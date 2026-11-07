@@ -8,19 +8,6 @@ import net.minecraft.core.BlockPos
 import net.minecraft.world.level.block.state.BlockState
 import net.minecraft.world.level.chunk.status.ChunkStatus
 
-/**
- * Research probes for All Data (undonecoffee.com/alldata): things measured across many runs that the replay
- * itself doesn't need. Kept apart from the rest of ADR so they can go without touching it: delete this file
- * and the one line in RunRecorder that calls it.
- *
- * Puzzle rooms whose layout varies run to run (Boulder's boxes, Water Board's pattern and gates): every block of
- * the room once, as soon as Odin has named it and its chunks are here - before anyone has touched it, as a
- * rule. Which layouts come up and how often, and whether any is missing from the hand-captured sets.
- *
- * {"k":"probe","t":t,"what":"room","name":name,"at":[x0,y0,z0],"size":[w,h,d],"pal":[state, ...],
- *  "rle":[palette index, run, ...]} - blocks in y, then z, then x order from the room's north-west bottom
- *  corner (world coordinates, not turned to the room's frame). About 1-2 KB a room once compressed.
- */
 class Probes(private val emit: (String) -> Unit) {
 
     private val done = HashSet<String>()
@@ -65,7 +52,6 @@ class Probes(private val emit: (String) -> Unit) {
     private companion object {
         val ROOMS = setOf("Boulder", "Water Board")
         const val SIDE = 31
-        /** y 50-99: Water Board's whole height (its board goes below the floor); Boulder sits in y 63-69. */
         const val Y0 = 50
         const val H = 50
     }

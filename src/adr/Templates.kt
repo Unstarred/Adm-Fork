@@ -2,26 +2,13 @@ package com.engineerclient.adr
 
 import com.google.gson.JsonArray
 
-/**
- * Templates: what is the same in every run, sent as its number in a shared catalogue ([Catalogue]).
- * The site builds the catalogues from its own runs (tools/catalogue.mjs there) and never changes
- * one once it's out; the viewer puts each numbered thing back. The same code as the site's
- * public/adr/tpl.js, line for line: a change here is a change there.
- */
 object Templates {
 
-    // Block changes are put in a frame that is the same in every run:
-    //  - the boss arena: world coordinates ("boss");
-    //  - a room: its own coordinates turned to how it sits facing SOUTH, block states turned with it,
-    //    named by its library key without the rotation ("Name" or "Name|core") - only a room the run
-    //    has once (two of the same room would share a frame);
-    //  - doorways and anything else: no frame (sent as they are).
     private val ROT = listOf("SOUTH", "WEST", "NORTH", "EAST")
     private val DIR = listOf("north", "east", "south", "west")
     private fun inGrid(x: Int, z: Int) = x >= -200 && x < -8 && z >= -200 && z < -8
     private fun gap(x: Int, z: Int) = (x + 200) % 32 == 31 || (z + 200) % 32 == 31
 
-    /** A block state turned [q] quarter turns anticlockwise seen from above (north -> west). */
     fun turn(s: String, q0: Int): String {
         val q = ((q0 % 4) + 4) % 4
         if (q == 0 || !s.contains('[')) return s
@@ -42,10 +29,8 @@ object Templates {
         return s.substring(0, at) + "[" + props.keys.sorted().joinToString(",") { it + "=" + props[it] } + "]"
     }
 
-    /** A change in a frame: its space, its place there (a, y, b) and the state turned into it. */
     class Framed(val space: String, val a: Int, val y: Int, val b: Int, val state: String)
 
-    /** The frames of a run's rooms (its roomsAll list). */
     class Frame(rooms: JsonArray?) {
         private class Room(val space: String, val q: Int, val x0: Int, val z0: Int, val w: Int, val d: Int)
         private val byTile = HashMap<Long, Room>()
@@ -80,12 +65,11 @@ object Templates {
             return Framed(f.space, a, y, b, turn(s, f.q))
         }
 
-        /** A place and state in a frame back in the world: x, y, z and the state, or null. */
         fun inv(space: String, a0: Int, y: Int, b0: Int, s: String): Pair<IntArray, String>? {
             if (space == "boss") return intArrayOf(a0, y, b0) to s
             val f = bySpace[space] ?: return null
             if (count[space] != 1) return null
-            var w = if (f.q % 2 == 1) f.d else f.w; var d = if (f.q % 2 == 1) f.w else f.d // (the turned frame's sizes)
+            var w = if (f.q % 2 == 1) f.d else f.w; var d = if (f.q % 2 == 1) f.w else f.d
             var a = a0; var b = b0
             repeat(f.q) { val na = d - 1 - b; b = a; a = na; val nw = d; d = w; w = nw }
             return intArrayOf(a + f.x0, y, b + f.z0) to turn(s, -f.q)
@@ -95,19 +79,10 @@ object Templates {
     private fun short(s: String) = if (s.startsWith("minecraft:")) s.substring(10) else s
     private fun long(s: String) = if (s.contains(':')) s else "minecraft:$s"
 
-    /** A block change: tick, place, state. */
     class Change(val t: Int, val x: Int, val y: Int, val z: Int, val state: String)
 
-    /** A piece (see [pieces]): its tick, key and changes (indexes into the run's, in key order). */
     class Piece(val t: Int, val key: String, val idx: IntArray) { var id = -1 }
 
-    /**
-     * A run's block changes (in the upload's order: by tick, then y, z, x, one block's changes in a
-     * tick in the order they came) as pieces: per tick, each group of changes that touch (26
-     * neighbours) in the same frame. A piece's key - what a catalogue holds - is its frame and its
-     * changes in that frame, by place, then order: each "da,dy,db" from the one before (the first from
-     * 0,0,0), then "=state" where it isn't the one before's ("minecraft:" left off).
-     */
     fun pieces(changes: List<Change>, frame: Frame): List<Piece> {
         val fr = changes.map { frame.fwd(it.x, it.y, it.z, it.state) }
         val out = ArrayList<Piece>()
@@ -149,7 +124,6 @@ object Templates {
         return out
     }
 
-    /** A piece's key as its space and [a, y, b] with states (its frame's places), or null if it isn't one. */
     fun keyCells(key: String): Pair<String, List<Pair<IntArray, String>>>? {
         val nl = key.indexOf('\n')
         if (nl < 0) return null
@@ -166,16 +140,11 @@ object Templates {
         return key.substring(0, nl) to cells
     }
 
-    /** A piece's key back into its changes in the run (at tick [t]), or null where its frame isn't in this run. */
     fun pieceCells(key: String, frame: Frame, t: Int): List<Change>? {
         val (space, cells) = keyCells(key) ?: return null
         return cells.map { (p, s) -> val (w, st) = frame.inv(space, p[0], p[1], p[2], s) ?: return null; Change(t, w[0], w[1], w[2], st) }
     }
 
-    /**
-     * A run's pieces as "devices": pieces that change any of the same blocks (in their frames) are
-     * one device, its pieces in tick order - the catalogue knows which piece usually comes next.
-     */
     fun streams(pieces: List<Piece>): List<List<Int>> {
         val par = IntArray(pieces.size) { it }
         fun find(i0: Int): Int { var i = i0; while (par[i] != i) { par[i] = par[par[i]]; i = par[i] }; return i }
@@ -194,18 +163,8 @@ object Templates {
         return g.values.toList()
     }
 
-    /** One of the boss floors that go all at once (see [ends]). */
     class End(val boxes: List<IntArray>, val min: Int, val near: Int, val all: Boolean, val cells: List<IntArray>)
 
-    /**
-     * The boss floors that go all at once (the platforms at the end of P1, Goldor's floor at the end
-     * of P3) the same in every run: the tick in its boxes with the most blocks turned to air (at least
-     * [End.min]) is when it goes; then every block of its cells goes at that tick ([End.all]), or all
-     * of them when most did and none when most didn't. Some go a tick or two either side, some the
-     * recording never sees go (they'd stand in the viewer's arena for good); they change nothing in
-     * the run. Changes to those blocks within [End.near] ticks of it that make them air are taken off.
-     * The changes with that done (new ones at the end).
-     */
     fun ends(changes: List<Change>, ends: List<End>): List<Change> {
         var out = changes
         for (e in ends) {
