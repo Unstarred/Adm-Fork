@@ -22,29 +22,15 @@ base {
     archivesName.set("adm")
 }
 
-// Code in src/ (package folders without the com/engineerclient root), resources in src/resources/.
-sourceSets.main {
-    java.setSrcDirs(listOf("src"))
-    kotlin.setSrcDirs(listOf("src"))
-    resources.setSrcDirs(listOf("src/resources"))
-}
+// Gradle's standard layout: Kotlin in src/main/kotlin, the Java mixins in src/main/java, resources in src/main/resources.
 
-// Headless tests in test/ (same flat layout as src/), fixtures in test/resources/. They cover the pure parts of the ADS full run
-// (src/p3sim/run and src/p3sim/pack, and each module's pure logic): no Minecraft world, no Odin. Fixtures are synthetic;
-// never put recorded data in them (the repo is public). `gradle build` runs them.
-sourceSets.test {
-    java.setSrcDirs(listOf("test"))
-    kotlin.setSrcDirs(listOf("test"))
-    resources.setSrcDirs(listOf("test/resources"))
-}
+// Headless tests in src/test/kotlin, fixtures in src/test/resources. They cover each module's pure logic: no Minecraft
+// world, no Odin. Fixtures are synthetic; never put recorded data in them (the repo is public). `gradle build` runs them.
 
-// Client gametests in gametest/ (their fabric.mod.json in gametest/resources/): a mod of their own, run with
+// Client gametests in src/gametest/kotlin (their fabric.mod.json in src/gametest/resources): a mod of their own, run with
 // `gradlew runClientGametest` in build/gametest and never built into the release jar. They drive ADM itself, so they
 // get main's output as well as its classpath. Odin goes in build/gametest/mods, as it does in run/mods.
 val gametest: SourceSet = sourceSets.create("gametest") {
-    java.setSrcDirs(listOf("gametest"))
-    kotlin.setSrcDirs(listOf("gametest"))
-    resources.setSrcDirs(listOf("gametest/resources"))
     compileClasspath += sourceSets.main.get().compileClasspath + sourceSets.main.get().output
     runtimeClasspath += sourceSets.main.get().runtimeClasspath + sourceSets.main.get().output
 }

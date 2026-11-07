@@ -1,0 +1,1006 @@
+package com.engineerclient.adr
+
+import com.engineerclient.EngineerClient
+import com.engineerclient.mixin.ArrowInGroundInvoker
+import com.engineerclient.ads.P3Sim
+import com.google.gson.JsonParser
+import com.mojang.authlib.properties.PropertyMap
+import com.odtheking.odin.features.impl.dungeon.map.DungeonScan
+import com.odtheking.odin.utils.itemId
+import com.odtheking.odin.utils.skyblock.Island
+import com.odtheking.odin.utils.skyblock.LocationUtils
+import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
+import net.fabricmc.loader.api.FabricLoader
+import net.minecraft.client.multiplayer.ClientLevel
+import net.minecraft.client.player.LocalPlayer
+import net.minecraft.commands.arguments.blocks.BlockStateParser
+import net.minecraft.core.BlockPos
+import net.minecraft.core.component.DataComponents
+import net.minecraft.core.registries.BuiltInRegistries
+import net.minecraft.network.chat.Component
+import net.minecraft.util.Mth
+import net.minecraft.world.entity.Entity
+import net.minecraft.world.entity.EquipmentSlot
+import net.minecraft.world.entity.LivingEntity
+import net.minecraft.world.entity.decoration.ArmorStand
+import net.minecraft.world.entity.decoration.ItemFrame
+import net.minecraft.world.entity.item.FallingBlockEntity
+import net.minecraft.world.entity.item.ItemEntity
+import net.minecraft.world.entity.player.Player
+import net.minecraft.world.entity.projectile.arrow.AbstractArrow
+import net.minecraft.world.entity.projectile.hurtingprojectile.AbstractHurtingProjectile
+import net.minecraft.world.entity.projectile.hurtingprojectile.WitherSkull
+import net.minecraft.world.item.ItemStack
+import net.minecraft.world.level.block.AbstractSkullBlock
+import net.minecraft.world.level.block.entity.SkullBlockEntity
+import net.minecraft.world.level.block.state.BlockState
+import net.minecraft.world.level.block.state.properties.BlockStateProperties
+import net.minecraft.world.level.chunk.status.ChunkStatus
+import net.minecraft.world.phys.Vec3
+import java.io.BufferedWriter
+import java.io.IOException
+import java.io.OutputStreamWriter
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Base64
+import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.zip.GZIPOutputStream
+import kotlin.math.abs
+
+/**
+ * One recording session: everything that happens in one world, from the moment it loads.
+ *
+ * Format: gzipped JSON Lines, one event per line, every line has "k" (kind) and, for anything that
+ * happens during the run, "t" (ticks since the world loaded).
+ *
+ * Nothing is kept unless the world turns out to be a dungeon: until [DungeonUtils.inDungeons]
+ * reports true, lines pile up in memory; the moment it does, the file is opened and the backlog
+ * flushed, so the recording still starts at instance load. If Odin works out the area is
+ * something else, or a minute passes without it, the session is dropped - a hub or island visit
+ * costs nothing on disk.
+ *
+ * Disk writes happen on a single background thread; the client thread only builds strings, and
+ * hands them over once a tick (one batch, not one hand-off per line).
+ */
+class RunRecorder(
+    private val dir: Path,
+    private val captureGeometry: Boolean,
+    private val onSaved: (Path) -> Unit = {},
+) {
+
+    private var tick = 0
+    private var confirmed = false
+    var abandoned = false
+        private set
+    private val backlog = ArrayList<String>()
+
+    private val io = Executors.newSingleThreadExecutor { Thread(it, "engineerclient-adr-writer").apply { isDaemon = true } }
+    private var writer: BufferedWriter? = null
+    private var tempFile: Path? = null
+    private var linesWritten = 0L
+
+    private val startedAt = LocalDateTime.now()
+    private var floorName: String? = null
+    private var partyKey = ""
+
+    // Entity tracking: last written position/name per entity id, to only write changes.
+    private class Tracked(var x: Double, var y: Double, var z: Double, var yaw: Float, var name: String, var headYaw: Float, var flight: Int = NO_FLIGHT) {
+        val ballistic get() = flight != NO_FLIGHT
+        // A flying projectile: where the viewer thinks it is and how fast it's going - the game's
+        // physics from the last line written, run here too, so a line is only written when the
+        // projectile strays from it. Wither skulls and fireballs also speed up along their way
+        // ([accel]) and keep [inertia] of their speed each tick.
+        var px = 0.0; var py = 0.0; var pz = 0.0; var vx = 0.0; var vy = 0.0; var vz = 0.0
+        var accel = 0.0; var inertia = 0.0
+        // Where the client had it when it was last launched: until the client moves it (it only does
+        // when the server says, every few ticks for skulls), it hasn't strayed - it just hasn't moved yet.
+        var lx = Double.NaN; var ly = Double.NaN; var lz = Double.NaN
+        fun launch(x: Double, y: Double, z: Double, v: Vec3) {
+            lx = x; ly = y; lz = z
+            px = r(x, 1000.0); py = r(y, 1000.0); pz = r(z, 1000.0); vx = r(v.x, 10000.0); vy = r(v.y, 10000.0); vz = r(v.z, 10000.0)
+        }
+        /** The viewer's projectile, a tick on. */
+        fun fly() {
+            if (flight == ARROW) {
+                // Arrows: move, slow to 0.99, drop 0.05 (blocks a tick).
+                px += vx; py += vy; pz += vz; vx *= 0.99; vy = vy * 0.99 - 0.05; vz *= 0.99
+            } else {
+                // Skulls and fireballs: speed up by accel along their way, keep inertia of it, then move.
+                val len = Math.sqrt(vx * vx + vy * vy + vz * vz)
+                if (len > 1e-9) { vx += vx / len * accel; vy += vy / len * accel; vz += vz / len * accel }
+                vx *= inertia; vy *= inertia; vz *= inertia
+                px += vx; py += vy; pz += vz
+            }
+        }
+        /** The flight line (as the viewer reads it, rounded as written). */
+        fun flight() = ",\"x\":$px,\"y\":$py,\"z\":$pz,\"v\":[$vx,$vy,$vz]" + if (flight == POWERED) ",\"a\":$accel,\"i\":$inertia" else ""
+        private fun r(v: Double, s: Double) = Math.round(v * s) / s
+    }
+    private val tracked = HashMap<Int, Tracked>()
+
+    // Geometry: the rooms are all in the server's room library; each run only reads its doorways (GeometryCapture).
+    private val geometry = GeometryCapture(::emit)
+    // The HUD (tab list, sidebar, boss bars, titles, action bar), and the research probes (Probes: removable).
+    val hud = HudCapture(::emit)
+    private val probes = Probes(::emit)
+    private val palette = HashMap<BlockState, Int>()
+
+    // ------------------------------------------------------------------ inputs
+
+    fun onTick(level: ClientLevel) {
+        flushFrames()
+        flushMouse()
+        tick++
+        if (!confirmed && P3Sim.inSim) {
+            // Never the P3 Sim world as a Hypixel run: Odin is told it is in F7 there, and ADR would take it for one.
+            abandon(); return
+        } else if (!confirmed) {
+            if (DungeonUtils.inDungeons && !confirm()) return
+            // Area is known a second or two after load; anything that is known and not a dungeon is dropped
+            // right away rather than buffered for the full timeout.
+            else if (tick > ABANDON_AFTER_TICKS || !LocationUtils.isCurrentArea(Island.Unknown)) { abandon(); return }
+        }
+        // The wall clock: the viewer counts 50 ms a tick from the last "time" line (and between two,
+        // evenly), so only a tick where that is more than 50 ms out is written.
+        val now = System.currentTimeMillis()
+        if (lastClockTick < 0 || Math.abs(now - (lastClockMs + (tick - lastClockTick) * 50L)) > 50) {
+            emit("""{"k":"time","t":$tick,"ms":$now}""")
+            lastClockMs = now; lastClockTick = tick
+        }
+        // The viewer counts on a server tick each client tick from the last "st" (meta "stx"): only
+        // a tick where the server fell behind that (or caught up) is written.
+        val st = serverTicks
+        if (st != lastServerTicks + (tick - lastServerTickAt)) emit("""{"k":"st","t":$tick,"n":$st}""")
+        lastServerTicks = st; lastServerTickAt = tick
+        recordEther()
+        recordFloorAndParty()
+        if (tick % 10 == 0) recordRooms()
+        recordPlayers(level)
+        recordHotbar()
+        recordSwings(level)
+        if (tick % 5 == 0) recordMapPlayers()
+        recordEntities(level)
+        if (confirmed) recordSkulls(level)
+        if (confirmed && captureGeometry) geometry.tick(level, tick)
+        hud.tick(tick)
+        if (confirmed) probes.tick(level, tick)
+        flushPending()
+    }
+
+    // Your own look direction every rendered frame, not just every tick: the mouse turns the camera
+    // between ticks, so this is what you actually saw. Written once per tick as a "cam" line. Frames
+    // where the view didn't move are left out, except the last one before it moves again, so a
+    // replay holds still through the gap instead of drifting across it.
+    private val frames = StringBuilder()
+    private var lastFrameYaw = Float.NaN
+    private var lastFramePitch = Float.NaN
+    private var heldFrame: String? = null
+    private var lastFrameNs = 0L
+
+    fun onFrame(partialTick: Float, yaw: Float, pitch: Float) {
+        // At most Camera FPS a second (ADR's setting, 20-160), whatever the game's frame rate;
+        // a little under the interval, so uneven frame times at that rate still keep every frame.
+        val now = System.nanoTime()
+        if (now - lastFrameNs < 960_000_000L / ADR.cameraFps.coerceIn(20, 160)) return
+        lastFrameNs = now
+        val entry = "[${f2(partialTick)},${f2(Mth.wrapDegrees(yaw))},${f2(pitch)}]"
+        if (yaw == lastFrameYaw && pitch == lastFramePitch) { heldFrame = entry; return }
+        heldFrame?.let { if (frames.isNotEmpty()) frames.append(','); frames.append(it) }
+        heldFrame = null
+        lastFrameYaw = yaw; lastFramePitch = pitch
+        if (frames.isNotEmpty()) frames.append(',')
+        frames.append(entry)
+    }
+
+    private fun flushFrames() {
+        if (frames.isEmpty()) return
+        emit("""{"k":"cam","t":$tick,"d":[$frames]}""")
+        frames.setLength(0)
+    }
+
+    fun onBlockUpdate(pos: BlockPos, state: BlockState) {
+        if (state.block is AbstractSkullBlock && freshSkulls.size < FRESH_SKULLS) freshSkulls.putIfAbsent(pos.immutable(), tick)
+        emit("""{"k":"block","t":$tick,"x":${pos.x},"y":${pos.y},"z":${pos.z},"s":${paletteIndex(state)}}""")
+    }
+
+    // ------------------------------------------------------------------ server ticks
+    // The server's own tick count (Odin's per-tick ping), written when it moved: split and tick
+    // timers count these, and they fall behind the client's ticks when the server lags.
+    @Volatile private var serverTicks = 0
+    private var lastServerTicks = 0
+    private var lastServerTickAt = 0
+    private var lastClockMs = 0L
+    private var lastClockTick = -1
+    fun onServerTick() { serverTicks++ }
+
+    /** The server tick count right now: read on the network thread, where the pings are counted. */
+    val serverTickCount: Int get() = serverTicks
+    /** Ticks since the world loaded: what every line's "t" counts. */
+    val currentTick: Int get() = tick
+    val isConfirmed: Boolean get() = confirmed
+    /** When the world loaded, as the saved file's name starts (yyyy-MM-dd_HH-mm-ss). */
+    val stamp: String get() = startedAt.format(STAMP)
+
+    // ------------------------------------------------------------------ what you do
+    /** A container slot click you sent (any window, any way: mouse, Odin's terminal GUI, keys). */
+    fun onSlotClick(slot: Int, button: Int, type: String) =
+        emit("""{"k":"slotclick","t":$tick,"slot":$slot,"button":$button,"type":${str(type)}}""")
+
+    /** A block you right-clicked (chests, levers, secrets...). */
+    fun onBlockUse(pos: BlockPos) = emit("""{"k":"use","t":$tick,"x":${pos.x},"y":${pos.y},"z":${pos.z}}""")
+
+    /**
+     * A teleport the server put you through, where it put you (absolute); rel lists any parts the
+     * packet gave relative to where you were, when that couldn't be worked out.
+     */
+    fun onTeleport(x: Double, y: Double, z: Double, yaw: Float, pitch: Float, rel: List<String>) {
+        val r = if (rel.isEmpty()) "" else rel.joinToString(",", ",\"rel\":[", "]") { str(it) }
+        emit("""{"k":"tp","t":$tick,"x":${n(x)},"y":${n(y)},"z":${n(z)},"yaw":${w(yaw)},"pitch":${a(pitch)}$r}""")
+    }
+
+    /** A bat hurt or killed (the sound's position and volume: secret bats squeak at 0.1). */
+    fun onBatSound(x: Double, y: Double, z: Double, volume: Float) =
+        emit("""{"k":"batsound","t":$tick,"x":${n(x)},"y":${n(y)},"z":${n(z)},"v":${f2(volume)}}""")
+
+    /** An item entity picked up, and by whom (a player's name, else the collector's entity id). */
+    fun onPickup(itemId: Int, collectorId: Int) {
+        val by = EngineerClient.mc.level?.getEntity(collectorId)?.let { if (it is Player) str(it.name.string) else null } ?: collectorId.toString()
+        emit("""{"k":"pickup","t":$tick,"id":$itemId,"by":$by}""")
+    }
+
+    // Your held item's etherwarp: whether it has Etherwarp merged and how many Transmission Tuners
+    // (each +1 block of range), written when it changes.
+    private var lastEther = ""
+    private var lastEtherStack: ItemStack? = null
+    private fun recordEther() {
+        // (the same stack as last tick is no change: the game swaps in a new one when it changes)
+        val stack = EngineerClient.mc.player?.mainHandItem
+        if (stack != null && stack === lastEtherStack) return
+        lastEtherStack = stack
+        val tag = stack?.get(DataComponents.CUSTOM_DATA)?.copyTag()
+        val entry = """"merge":${tag?.getIntOr("ethermerge", 0) ?: 0},"tuners":${tag?.getIntOr("tuned_transmission", 0) ?: 0}"""
+        if (entry == lastEther) return
+        lastEther = entry
+        emit("""{"k":"ether","t":$tick,$entry}""")
+    }
+
+    /** A chat line: plain [message], plus [colored] (with § formatting codes) when it has any formatting. */
+    fun onChat(message: String, colored: String? = null, n: Int? = null) {
+        val c = if (colored != null && colored != message) ",\"c\":${str(colored)}" else ""
+        val st = if (n != null) ",\"n\":$n" else ""
+        emit("""{"k":"chat","t":$tick$st,"m":${str(message)}$c}""")
+    }
+
+    /** A chest (or ender chest) lid event: [openCount] players now have it open (0 = it closes). */
+    fun onChestEvent(pos: BlockPos, openCount: Int) =
+        emit("""{"k":"bev","t":$tick,"x":${pos.x},"y":${pos.y},"z":${pos.z},"b":$openCount}""")
+
+    fun onRoomEnter(name: String?) = emit("""{"k":"room","t":$tick,"name":${str(name ?: "Unknown")}}""")
+
+    /** Your own container screens (terminals are GUIs with fixed titles): exact open/close times. */
+    fun onGuiClose() {
+        flushMouse()
+        lastSlots.clear(); lastCarried = null; lastMouseX = Float.NaN
+        emit("""{"k":"guiclose","t":$tick}""")
+    }
+
+    // ------------------------------------------------------------------ what's in your open container
+    // So the viewer can redraw the window you had open: its layout (on the gui line), every slot's
+    // item (changes only), the item on your cursor, the mouse at every frame (up to 60 a second)
+    // and your clicks. Positions are GUI pixels from the window's top-left.
+
+    /** A container screen opened: its menu type ("inventory" for your own), size and slot positions. */
+    fun onContainerOpen(title: String, menu: String, w: Int, h: Int, slots: List<IntArray>) {
+        lastSlots.clear(); lastCarried = null; lastMouseX = Float.NaN
+        val sb = StringBuilder()
+        slots.forEachIndexed { i, p -> if (i > 0) sb.append(','); sb.append('[').append(p[0]).append(',').append(p[1]).append(']') }
+        emit("""{"k":"gui","t":$tick,"title":${str(title)},"menu":${str(menu)},"w":$w,"h":$h,"slots":[$sb]}""")
+    }
+
+    private val lastSlots = HashMap<Int, String>()
+    private var lastCarried: String? = null
+
+    /** Each tick while a container is open: slots that changed since the last line, and the cursor's item. */
+    fun onContainerTick(items: List<ItemStack>, carried: ItemStack) {
+        val sb = StringBuilder()
+        items.forEachIndexed { i, stack ->
+            val entry = slotEntry(i, stack)
+            if (lastSlots.put(i, entry) == entry) return@forEachIndexed
+            if (sb.isNotEmpty()) sb.append(',')
+            sb.append(entry)
+        }
+        if (sb.isNotEmpty()) emit("""{"k":"slots","t":$tick,"s":[$sb]}""")
+        val c = """"id":${str(vanillaId(carried))},"count":${if (carried.isEmpty) 0 else carried.count}"""
+        if (c != lastCarried) { lastCarried = c; emit("""{"k":"carried","t":$tick,$c}""") }
+    }
+
+    private fun slotEntry(i: Int, stack: ItemStack): String {
+        val tex = stack.get(DataComponents.PROFILE)?.let { texturesOf(it.partialProfile().properties()) }
+        // [index, id, count, head skin or "", plain name, glint 0/1] - terminals are solved by names
+        // and Hypixel marks clicked items with the enchantment glint.
+        val name = if (stack.isEmpty) "" else stack.hoverName.string.replace(FORMAT_CODES, "")
+        val glint = if (!stack.isEmpty && (stack.has(DataComponents.ENCHANTMENT_GLINT_OVERRIDE) || stack.hasFoil())) 1 else 0
+        return "[$i,${str(vanillaId(stack))},${if (stack.isEmpty) 0 else stack.count},${str(tex ?: "")},${str(name)},$glint]"
+    }
+
+    private val mouse = StringBuilder()
+    private var lastMouseNs = 0L
+    private var lastMouseX = Float.NaN
+    private var lastMouseY = Float.NaN
+    private var heldMouse: String? = null
+
+    /** The mouse over the open container, per rendered frame (60 a second at most); still frames skipped. */
+    fun onContainerMouse(partialTick: Float, x: Float, y: Float) {
+        val now = System.nanoTime()
+        if (now - lastMouseNs < FRAME_NS) return
+        lastMouseNs = now
+        val entry = "[${f2(partialTick)},${f2(x)},${f2(y)}]"
+        if (x == lastMouseX && y == lastMouseY) { heldMouse = entry; return }
+        heldMouse?.let { if (mouse.isNotEmpty()) mouse.append(','); mouse.append(it) }
+        heldMouse = null
+        lastMouseX = x; lastMouseY = y
+        if (mouse.isNotEmpty()) mouse.append(',')
+        mouse.append(entry)
+    }
+
+    private fun flushMouse() {
+        if (mouse.isEmpty()) return
+        emit("""{"k":"mouse","t":$tick,"d":[$mouse]}""")
+        mouse.setLength(0)
+    }
+
+    fun onContainerClick(x: Float, y: Float, button: Int) =
+        emit("""{"k":"click","t":$tick,"x":${f2(x)},"y":${f2(y)},"button":$button}""")
+
+    /** Ends the session: closes the file (on the writer thread) and gives it its final name. */
+    fun finish() {
+        if (!confirmed) { abandon(); return }
+        emit("""{"k":"end","t":$tick,"ms":${System.currentTimeMillis()}}""")
+        flushPending()
+        val temp = tempFile ?: return
+        val finalName = "${startedAt.format(STAMP)}_${(floorName ?: "unknown").replace(Regex("[^A-Za-z0-9]+"), "")}.jsonl.gz"
+        val lines = linesWritten
+        io.execute {
+            try {
+                writer?.close()
+                val target = temp.resolveSibling(finalName)
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING)
+                val mb = Files.size(target) / 1_000_000.0
+                if (ADR.savedMessage) EngineerClient.msg("§7ADR: saved run §f$finalName §7(${String.format(Locale.ROOT, "%.1f", mb)} MB, $lines lines, ${tick / 20}s)")
+                onSaved(target)
+            } catch (t: Throwable) {
+                EngineerClient.logger.error("[ec] adr: failed to finish run file", t)
+            }
+        }
+        io.shutdown()
+    }
+
+    // ------------------------------------------------------------------ lifecycle
+
+    /**
+     * The run is a dungeon: its file opens and the backlog goes in. False, and the run abandoned, when the file can't
+     * be opened. It used to be marked confirmed first, so a failed open left a run that dropped every line quietly.
+     */
+    private fun confirm(): Boolean {
+        val temp = dir.resolve("recording-${startedAt.format(STAMP)}.jsonl.gz.part")
+        val opened = try {
+            Files.createDirectories(dir)
+            BufferedWriter(OutputStreamWriter(GZIPOutputStream(Files.newOutputStream(temp)), Charsets.UTF_8), 1 shl 16)
+        } catch (e: IOException) {
+            EngineerClient.logger.warn("[ec] adr recording file could not be opened, run not recorded path={}", temp, e)
+            abandon()
+            return false
+        }
+        confirmed = true
+        tempFile = temp
+        writer = opened
+        val self = EngineerClient.mc.player?.name?.string ?: "?"
+        fun modVersion(id: String) = FabricLoader.getInstance().getModContainer(id)
+            .map { it.metadata.version.friendlyString }.orElse("?")
+        val version = modVersion("engineerclient")
+        // The game version as running, not a literal: this file ships on more than one MC version.
+        val mc = modVersion("minecraft")
+        writeNow("""{"k":"meta","format":2,"mod":${str(version)},"mc":${str(mc)},"self":${str(self)},"startMs":${System.currentTimeMillis() - tick * 50L},"confirmedAtTick":$tick,"geometry":$captureGeometry,"farHalf":$FAR_HALF,"stx":1}""")
+        backlog.forEach(::writeNow)
+        backlog.clear()
+        flushPending()
+        return true
+    }
+
+
+    private fun abandon() {
+        abandoned = true
+        backlog.clear()
+        tracked.clear()
+        io.shutdown()
+    }
+
+    private fun emit(line: String) {
+        if (abandoned) return
+        if (confirmed) writeNow(line) else backlog.add(line)
+    }
+
+    // This tick's lines, handed to the writer thread together at the end of the tick.
+    private val pending = StringBuilder(1 shl 14)
+
+    private fun writeNow(line: String) {
+        if (writer == null) return
+        linesWritten++
+        pending.append(line).append('\n')
+    }
+
+    private fun flushPending() {
+        val w = writer ?: return
+        if (pending.isEmpty()) return
+        val chunk = pending.toString()
+        pending.setLength(0)
+        io.execute {
+            try { w.write(chunk) } catch (t: Throwable) { EngineerClient.logger.error("[ec] adr write failed", t) }
+        }
+    }
+
+    // ------------------------------------------------------------------ per-tick snapshots
+
+    private fun recordFloorAndParty() {
+        val floor = DungeonUtils.floor?.name
+        if (floor != null && floor != floorName) {
+            floorName = floor
+            emit("""{"k":"floor","t":$tick,"floor":${str(floor)}}""")
+        }
+        val party = DungeonUtils.dungeonTeammates
+        val key = party.joinToString("|") { "${it.name}:${it.clazz.name}" }
+        if (key != partyKey && party.isNotEmpty()) {
+            partyKey = key
+            emit("""{"k":"party","t":$tick,"m":[${party.joinToString(",") { "[${str(it.name)},${str(it.clazz.name)}]" }}]}""")
+        }
+    }
+
+    private var roomsKey = ""
+
+    /**
+     * Odin's own room classification: every room it knows (from the dungeon map, and named once its
+     * core has been seen), with type, shape, rotation and checkmark. Rewritten whenever any of that
+     * changes, which is also how cleared/failed state shows up over time.
+     */
+    private fun recordRooms() {
+        val rooms = DungeonScan.rooms
+        if (rooms.isEmpty()) return
+        val sb = StringBuilder()
+        rooms.forEachIndexed { i, r ->
+            if (i > 0) sb.append(',')
+            sb.append('[').append(str(r.name ?: "")).append(',').append(str(r.type.name)).append(',')
+                .append(str(r.shape.name)).append(',').append(str(r.rotation?.name ?: "")).append(',')
+                .append(str(r.checkmark.name)).append(",[")
+            r.tiles.forEachIndexed { j, t -> if (j > 0) sb.append(','); sb.append('[').append(t.x).append(',').append(t.z).append(']') }
+            // Secrets found / total. "Found" comes from the action bar (the room you're in) and other
+            // Odin users, so it's a lower bound for rooms nobody running Odin is in.
+            sb.append("],").append(r.foundSecrets ?: -1).append(',').append(r.data?.maxSecrets ?: -1)
+            // [8]: the room's library key when it's known (rotation found, variant told apart).
+            RoomKeys.key(r)?.let { sb.append(',').append(str(it)) }
+            sb.append(']')
+        }
+        val body = sb.toString()
+        if (body == roomsKey) return
+        roomsKey = body
+        emit("""{"k":"rooms","t":$tick,"r":[$body]}""")
+    }
+
+    // Last written entry per player name; only players whose entry changed go in a "p" line.
+    private val lastPlayer = HashMap<String, String>()
+
+    // Your own hotbar: the nine items, which slot is selected, and the skins of any player heads in it.
+    private var lastHotbar = ""
+    private val lastHotbarStacks = arrayOfNulls<ItemStack>(9)
+    private var lastHotbarSel = -1
+    private fun recordHotbar() {
+        val inv = EngineerClient.mc.player?.inventory ?: return
+        // Nothing to build when the same nine stacks are there, the same one selected.
+        if (lastHotbarSel == inv.selectedSlot && (0 until 9).all { lastHotbarStacks[it] === inv.getItem(it) }) return
+        for (i in 0 until 9) lastHotbarStacks[i] = inv.getItem(i)
+        lastHotbarSel = inv.selectedSlot
+        val items = (0 until 9).joinToString(",", "[", "]") { str(vanillaId(inv.getItem(it))) }
+        val tex = (0 until 9).mapNotNull { i ->
+            inv.getItem(i).get(DataComponents.PROFILE)?.let { texturesOf(it.partialProfile().properties()) }?.let { "\"$i\":${str(it)}" }
+        }.joinToString(",", "{", "}")
+        val body = """"items":$items,"sel":${inv.selectedSlot},"tex":$tex"""
+        if (body == lastHotbar) return
+        lastHotbar = body
+        emit("""{"k":"hotbar","t":$tick,$body}""")
+    }
+
+    // The skin of a player head someone holds (the leap item, for one), written when it changes.
+    private val lastHeldHead = HashMap<String, String>()
+    private val lastHeldStack = HashMap<String, ItemStack>()
+    private fun recordHeldHead(p: Player, name: String) {
+        if (lastHeldStack.put(name, p.mainHandItem) === p.mainHandItem) return
+        val tex = p.mainHandItem.get(DataComponents.PROFILE)?.let { texturesOf(it.partialProfile().properties()) } ?: ""
+        val prev = lastHeldHead.put(name, tex)
+        if (prev != tex && !(prev == null && tex.isEmpty())) emit("""{"k":"held","t":$tick,"name":${str(name)},"tex":${str(tex)}}""")
+    }
+
+    private class PlayerRaw(var x: Double = Double.NaN, var y: Double = 0.0, var z: Double = 0.0, var yRot: Float = 0f, var xRot: Float = 0f,
+                            var crouching: Boolean = false, var stack: ItemStack? = null, var held: String = "", var vanilla: String = "")
+    private val playerRaw = HashMap<String, PlayerRaw>()
+
+    private fun recordPlayers(level: ClientLevel) {
+        val sb = StringBuilder()
+        var changed = 0
+        val seen = HashSet<String>()
+        for (p in level.players()) {
+            // Hypixel's player-shaped mobs (uuid version 2) share names - sixteen "Crypt Souleater"s -
+            // so each is keyed by its entity id too ("Crypt Souleater#1234"): otherwise they would
+            // overwrite each other here, every one would look changed every tick, and the viewer
+            // would draw them as one mob jumping about. Real players keep their names.
+            val name = if (p.uuid.version() == 2) "${p.name.string}#${p.id}" else p.name.string
+            seen += name
+            if (skinsWritten.add(name)) texturesOf(p.gameProfile.properties())?.let { emit("""{"k":"skin","t":$tick,"name":${str(name)},"tex":${str(it)}}""") }
+            recordEquipment(p, "\"name\":${str(name)}", name)
+            recordHeldHead(p, name)
+            // Exactly where it was, facing the same way, holding the same stack: the same line, not built again.
+            val raw = playerRaw.getOrPut(name) { PlayerRaw() }
+            val stack = p.mainHandItem
+            if (lastPlayer.containsKey(name) && raw.x == p.x && raw.y == p.y && raw.z == p.z && raw.yRot == p.yRot &&
+                raw.xRot == p.xRot && raw.stack === stack && raw.crouching == p.isCrouching) continue
+            raw.x = p.x; raw.y = p.y; raw.z = p.z; raw.yRot = p.yRot; raw.xRot = p.xRot; raw.crouching = p.isCrouching
+            if (raw.stack !== stack) {
+                raw.stack = stack
+                // (Odin's itemId copies the item's whole custom data: once per stack, not every tick)
+                raw.vanilla = vanillaId(stack)
+                raw.held = if (stack.isEmpty) "" else stack.itemId.ifEmpty { raw.vanilla }
+            }
+            // [8] is the vanilla item (for drawing it); [6] the Skyblock id when there is one; [9] 1 while crouching.
+            val entry = "[${str(name)},${m(p.x)},${m(p.y)},${m(p.z)},${w(p.yRot)},${a(p.xRot)},${str(raw.held)},${p.uuid.version()},${str(raw.vanilla)},${if (raw.crouching) 1 else 0}]"
+            if (lastPlayer.put(name, entry) == entry) continue
+            if (changed++ > 0) sb.append(',')
+            sb.append(entry)
+        }
+        if (changed > 0) emit("""{"k":"p","t":$tick,"d":[$sb]}""")
+        for (name in lastPlayer.keys.filter { it !in seen }) {
+            lastPlayer.remove(name)
+            playerRaw.remove(name)
+            emit("""{"k":"pgone","t":$tick,"name":${str(name)}}""")
+        }
+    }
+
+    // Arm swings: a left click, or a right click that hit something (opening a terminal swings too).
+    // Other players' swings arrive as animation packets. Since 26.3 every swing (a restart too) starts
+    // a new SwingDescription, so a new one is a current swing that isn't the same object as last tick.
+    private val lastSwing = HashMap<String, Any?>()
+
+    private fun recordSwings(level: ClientLevel) {
+        val sb = StringBuilder()
+        var count = 0
+        for (p in level.players()) {
+            val name = p.name.string
+            val swing = p.currentSwing
+            val prev = lastSwing.put(name, swing)
+            if (swing == null || swing === prev) continue
+            if (count++ > 0) sb.append(',')
+            sb.append(str(name))
+        }
+        if (count > 0) emit("""{"k":"sw","t":$tick,"d":[$sb]}""")
+    }
+
+    /**
+     * Your own click on a Simon Says button (start or grid), once per click: whether a mod blocked
+     * it (Odin's Block Wrong Clicks / Block Wrong on Start), and whether the button already showed
+     * as pressed here - the start button's presses almost never show as a block change, the
+     * likely reason being that it already reads as pressed, so a click changes nothing you can see.
+     */
+    fun onSsClick(pos: BlockPos, blocked: Boolean) {
+        val state = EngineerClient.mc.level?.getBlockState(pos)
+        val powered = state != null && state.hasProperty(BlockStateProperties.POWERED) &&
+            state.getValue(BlockStateProperties.POWERED)
+        emit("""{"k":"ssclick","t":${tick},"x":${pos.x},"y":${pos.y},"z":${pos.z},"blocked":${if (blocked) 1 else 0},"powered":${if (powered) 1 else 0}}""")
+    }
+
+    /** Whether [pos] is one of Simon Says' buttons. */
+    fun isSsButton(pos: BlockPos) = pos in SS_BUTTONS
+
+    /** Any sound at the Simon Says device (button clicks included, whoever pressed). */
+    fun onSsSound(id: String, x: Double, y: Double, z: Double, volume: Float, pitch: Float) =
+        emit("""{"k":"sssound","t":$tick,"id":${str(id)},"x":${n(x)},"y":${n(y)},"z":${n(z)},"v":${f2(volume)},"p":${f2(pitch)}}""")
+
+    // Teammates the game isn't rendering: where the dungeon map puts them (Odin decodes the map's
+    // player markers), turned into world coordinates the way Odin's map draws them. Clear only -
+    // the map shows the room grid, not the boss.
+    private val lastMapPos = HashMap<String, String>()
+
+    private fun recordMapPlayers() {
+        if (!DungeonUtils.inDungeons || DungeonUtils.inBoss) return
+        val sb = StringBuilder()
+        var count = 0
+        for (p in DungeonUtils.dungeonTeammatesNoSelf) {
+            if (p.isDead || p.entity != null) { lastMapPos.remove(p.name); continue }
+            val x = ((p.mapPos.x + 128) / 2.0 - DungeonScan.startX) * 32.0 / DungeonScan.roomGap - 200
+            val z = ((p.mapPos.z + 128) / 2.0 - DungeonScan.startY) * 32.0 / DungeonScan.roomGap - 200
+            val entry = "[${str(p.name)},${n(x)},${n(z)},${a(p.yaw)}]"
+            if (lastMapPos.put(p.name, entry) == entry) continue
+            if (count++ > 0) sb.append(',')
+            sb.append(entry)
+        }
+        if (count > 0) emit("""{"k":"mp","t":$tick,"d":[$sb]}""")
+    }
+
+    /**
+     * Name tags riding their mob: a stand spawned just after a mob (Hypixel's name tag, 1 or 3 ids
+     * on), straight above it, is written once as following it ("tag": which mob, how far above)
+     * and its moves are left out while it keeps that place - the viewer puts it there from the
+     * mob's. If it ever leaves that place, a "tag" line with "of":null and its moves again.
+     */
+    private class Tag(val mob: Int, val dx: Double, val dy: Double, val dz: Double)
+    private val tags = HashMap<Int, Tag>()
+
+    private fun tagOf(level: ClientLevel, stand: ArmorStand): Tag? {
+        for (back in intArrayOf(1, 3)) {
+            val mob = level.getEntity(stand.id - back) as? LivingEntity ?: continue
+            if (mob is ArmorStand || mob is Player) continue
+            val dx = q(stand.x - mob.x); val dy = q(stand.y - mob.y); val dz = q(stand.z - mob.z)
+            if (abs(dx) <= 0.05 && abs(dz) <= 0.05 && dy in 0.0..4.0) return Tag(mob.id, dx, dy, dz)
+        }
+        return null
+    }
+
+    // Each entity's name as text, plain and with its colours, kept while it has the same name (the
+    // game keeps the same Component until the name changes): working both out for every entity every
+    // tick was most of the time this took.
+    private class Named(val of: Component?, val name: String, val colored: String)
+    private val names = HashMap<Int, Named>()
+    private fun namesOf(e: Entity): Named {
+        val c = e.customName
+        names[e.id]?.let { if (it.of === c) return it }
+        return Named(c, c?.string ?: "", c?.let { ADR.legacyText(it) } ?: "").also { names[e.id] = it }
+    }
+
+    private val seenIds = HashSet<Int>()
+    /** The moves in this tick's "e" line so far: 0 at the top of [recordEntities], counted up by [recordMove]. */
+    private var movedCount = 0
+
+    private fun recordEntities(level: ClientLevel) {
+        seenIds.clear()
+        val moved = StringBuilder()
+        movedCount = 0
+        val me = EngineerClient.mc.player
+        // Mobs more than FAR_HALF blocks from you move on every other tick only (the viewer fills in
+        // the one between): far off, 10 a second is plenty, and they are most of the moves.
+        val oddTick = tick % 2 == 1
+        for (e in level.entitiesForRendering()) {
+            if (e is Player) continue
+            // An entity the game hasn't placed yet (NaN position) would make an unreadable line.
+            if (!e.x.isFinite() || !e.y.isFinite() || !e.z.isFinite()) continue
+            val id = e.id
+            seenIds += id
+            val named0 = namesOf(e)
+            val name = named0.name
+            // The name with its colours (§ codes), when it has any: "c" next to the plain "name".
+            val colored = named0.colored
+            val c = if (colored.isNotEmpty() && colored != name) ",\"c\":${str(colored)}" else ""
+            val t = tracked[id]
+            // Mobs turn their heads apart from their bodies (the way they look at you).
+            val headYaw = if (e is LivingEntity) e.yHeadRot else e.yRot
+            if (t == null) {
+                recordSpawn(level, e, id, name, colored, c, headYaw)
+                continue
+            }
+            if (t.ballistic) {
+                // Stuck in a block (the game's own flag, from the server): an ordinary entity from here.
+                if (!(e is AbstractArrow && (e as ArrowInGroundInvoker).`ec$isInGround`())) {
+                    t.fly()
+                    if (e.x == t.lx && e.y == t.ly && e.z == t.lz) continue
+                    val dx = e.x - t.px; val dy = e.y - t.py; val dz = e.z - t.pz
+                    if (dx * dx + dy * dy + dz * dz > ARC_SLACK * ARC_SLACK) {
+                        t.launch(e.x, e.y, e.z, e.deltaMovement)
+                        emit("""{"k":"arc","t":$tick,"id":$id${t.flight()}}""")
+                    }
+                    continue
+                }
+                t.flight = NO_FLIGHT
+            }
+            if (e is LivingEntity) recordEquipment(e, "\"id\":$id", "#$id")
+            if (e is ArmorStand) recordStand(e)
+            if (e is ItemFrame) recordFrame(e)
+            if (colored != t.name) {
+                t.name = colored
+                emit("""{"k":"name","t":$tick,"id":$id,"name":${str(name)}$c}""")
+            }
+            recordMove(level, e, t, id, headYaw, oddTick, me, moved)
+        }
+        if (movedCount > 0) emit("""{"k":"e","t":$tick,"d":[$moved]}""")
+        recordGone()
+    }
+
+    /** An entity seen for the first time: its "spawn" line (a projectile's is its flight), and its stand look, name tag and frame. */
+    private fun recordSpawn(level: ClientLevel, e: Entity, id: Int, name: String, colored: String, c: String, headYaw: Float) {
+        // Arrows fly on the game's own physics, so their flight is the spawn and its velocity
+        // ("v", blocks a tick): the viewer works out the rest. Only when the arrow strays from
+        // that by more than a tenth of a block (a hit, a server correction) is there a new
+        // flight ("arc"); when it sticks it is an ordinary entity again - one move to where it
+        // stuck - and "gone" ends it.
+        // Wither skulls and fireballs fly the same way, on their own physics (see Tracked.fly).
+        val flight = when {
+            name.isNotEmpty() -> NO_FLIGHT
+            e is AbstractArrow -> if ((e as ArrowInGroundInvoker).`ec$isInGround`()) NO_FLIGHT else ARROW // (already stuck: an ordinary entity)
+            e is AbstractHurtingProjectile -> POWERED
+            else -> NO_FLIGHT
+        }
+        val tr = Tracked(q(e.x), q(e.y), q(e.z), deg(e.yRot), colored, deg(headYaw), flight)
+        tracked[id] = tr
+        if (e is AbstractHurtingProjectile && flight == POWERED) {
+            tr.accel = Math.round(e.accelerationPower * 10000) / 10000.0
+            // (the game's inertia: 0.95, a blue wither skull's 0.73)
+            tr.inertia = if (e is WitherSkull && e.isDangerous) 0.73 else 0.95
+        }
+        if (flight != NO_FLIGHT) {
+            // A projectile's spawn is its flight: where it is and how fast it goes. It has no
+            // name, and which way it faces is its velocity.
+            tr.launch(e.x, e.y, e.z, e.deltaMovement)
+            emit("""{"k":"spawn","t":$tick,"id":$id,"type":${str(typeOf(e))}${tr.flight()}}""")
+            return
+        }
+        // Falling blocks carry which block they are, so the viewer can draw it.
+        val block = (e as? FallingBlockEntity)?.let { ",\"block\":" + str(BlockStateParser.serialize(it.blockState)) } ?: ""
+        // Dropped items say what they are (secret items: Decoys, Spirit Leaps...).
+        val item = (e as? ItemEntity)?.item?.let { ",\"item\":" + str(it.hoverName.string.replace(FORMAT_CODES, "")) + ",\"itemId\":" + str(vanillaId(it)) } ?: ""
+        // (no name: no "name" - the viewer takes it as "")
+        val named = if (name.isEmpty()) "" else ",\"name\":${str(name)}$c"
+        emit("""{"k":"spawn","t":$tick,"id":$id,"type":${str(typeOf(e))}$named,"x":${n(e.x)},"y":${n(e.y)},"z":${n(e.z)},"yaw":${w(e.yRot)}${if (e is LivingEntity) ",\"headYaw\":" + w(headYaw) else ""}${if (e is LivingEntity && e.isBaby) ",\"baby\":1" else ""}$block$item}""")
+        if (e is ArmorStand) {
+            recordStand(e)
+            tagOf(level, e)?.let { tg -> tags[id] = tg; emit("""{"k":"tag","t":$tick,"id":$id,"of":${tg.mob},"dx":${tg.dx},"dy":${tg.dy},"dz":${tg.dz}}""") }
+        }
+        if (e is ItemFrame) recordFrame(e)
+    }
+
+    /** A tracked entity's move this tick, as a row in [moved] (this tick's "e" line), when it moved enough to count. */
+    private fun recordMove(level: ClientLevel, e: Entity, t: Tracked, id: Int, headYaw: Float, oddTick: Boolean, me: LocalPlayer?, moved: StringBuilder) {
+        // Mobs at 1/100 of a block and whole degrees (finer is invisible), and only when that
+        // changes: a mob twitching less than that is not a move.
+        val qx = q(e.x); val qy = q(e.y); val qz = q(e.z); val qYaw = deg(e.yRot); val qHead = deg(headYaw)
+        // A name tag still in its place over its mob: nothing to write (the viewer follows the mob).
+        val tag = tags[id]
+        if (tag != null) {
+            val mob = level.getEntity(tag.mob)
+            if (mob != null && abs(mob.x + tag.dx - e.x) < 0.006 && abs(mob.y + tag.dy - e.y) < 0.006 && abs(mob.z + tag.dz - e.z) < 0.006) { t.x = qx; t.y = qy; t.z = qz; return }
+            tags.remove(id)
+            emit("""{"k":"tag","t":$tick,"id":$id,"of":null}""")
+        }
+        if (oddTick && me != null && e.distanceToSqr(me) > FAR_HALF * FAR_HALF) return
+        if (qx != t.x || qy != t.y || qz != t.z || qYaw != t.yaw || qHead != t.headYaw) {
+            t.x = qx; t.y = qy; t.z = qz; t.yaw = qYaw; t.headYaw = qHead
+            if (movedCount++ > 0) moved.append(',')
+            moved.append('[').append(id).append(',').append(m(e.x)).append(',').append(m(e.y)).append(',')
+                .append(m(e.z)).append(',').append(qYaw.toInt())
+            if (e is LivingEntity) moved.append(',').append(qHead.toInt())
+            moved.append(']')
+        }
+    }
+
+    /** The entities not seen this tick: forgotten, each with a "gone" line. */
+    private fun recordGone() {
+        val gone = tracked.keys.filter { it !in seenIds }
+        for (id in gone) {
+            tracked.remove(id)
+            names.remove(id)
+            tags.remove(id)
+            lastEquipment.remove("#$id")
+            lastStacks.remove("#$id")
+            lastStand.remove(id)
+            lastStandRaw.remove(id)
+            lastFrame.remove(id)
+            emit("""{"k":"gone","t":$tick,"id":$id}""")
+        }
+    }
+
+    // Item frames: what they hold and how it's turned (0-7), on spawn and when either changes
+    // (the Arrow Align device's arrows).
+    private val lastFrame = HashMap<Int, String>()
+    private fun recordFrame(f: ItemFrame) {
+        val entry = """"item":${str(vanillaId(f.item))},"rot":${f.rotation}"""
+        if (lastFrame.put(f.id, entry) == entry) return
+        emit("""{"k":"frame","t":$tick,"id":${f.id},$entry}""")
+    }
+
+    // Players' skins (their profile's "textures" property, base64) once per name.
+    private val skinsWritten = HashSet<String>()
+
+    // Held item and armour per player name / "#entityId", written when it changes: vanilla ids, plus
+    // the head item's skin texture when it's a player head (dungeon mobs wear those).
+    private val lastEquipment = HashMap<String, String>()
+    /** Each entity's equipment stacks last tick (the objects): the same five again means no change, without building its line. */
+    private val lastStacks = HashMap<String, Array<ItemStack>>()
+
+    // Armor stands: size, visibility, arms/base plate and their pose (Hypixel poses them for heads,
+    // held items and nametags), written when any of it changes.
+    private val lastStand = HashMap<Int, String>()
+    // The flags and six pose objects each stand had when its line was last built: the game makes new
+    // pose objects when a pose changes, so the same ones are no change (most stands never move).
+    private val lastStandRaw = HashMap<Int, Array<Any>>()
+
+    private fun recordStand(e: ArmorStand) {
+        val f = (if (e.isSmall) 1 else 0) or (if (e.isInvisible) 2 else 0) or (if (e.showArms()) 4 else 0) or
+            (if (!e.showBasePlate()) 8 else 0) or (if (e.isMarker) 16 else 0)
+        val raw = lastStandRaw[e.id]
+        if (raw != null && raw[0] == f && raw[1] === e.headPose && raw[2] === e.bodyPose && raw[3] === e.leftArmPose &&
+            raw[4] === e.rightArmPose && raw[5] === e.leftLegPose && raw[6] === e.rightLegPose) return
+        lastStandRaw[e.id] = arrayOf(f, e.headPose, e.bodyPose, e.leftArmPose, e.rightArmPose, e.leftLegPose, e.rightLegPose)
+        val pose = listOf(e.headPose, e.bodyPose, e.leftArmPose, e.rightArmPose, e.leftLegPose, e.rightLegPose)
+            .joinToString(",") { "${a(it.x())},${a(it.y())},${a(it.z())}" }
+        val body = """"f":$f,"pose":[$pose]"""
+        if (lastStand.put(e.id, body) == body) return
+        emit("""{"k":"stand","t":$tick,"id":${e.id},$body}""")
+    }
+
+    // Player heads placed as blocks (skulls on walls, floors, the boss arena): their skin, once per
+    // position and again if it changes. The viewer would otherwise draw a default head.
+    private val lastSkull = HashMap<BlockPos, String>()
+    // Heads just placed (and when): looked at the next ticks too, till their skin is in - the sweep
+    // below misses heads that are gone within a second (the boss arena's animated ones).
+    private val freshSkulls = HashMap<BlockPos, Int>()
+
+    // Each chunk around you is looked at once a second, a twentieth of them each tick: all 625 in
+    // one tick made that tick a spike.
+    private fun recordSkulls(level: ClientLevel) {
+        val player = EngineerClient.mc.player ?: return
+        val cx = player.blockPosition().x shr 4
+        val cz = player.blockPosition().z shr 4
+        val fresh = freshSkulls.entries.iterator()
+        while (fresh.hasNext()) {
+            val (pos, at) = fresh.next()
+            val be = level.getBlockEntity(pos) as? SkullBlockEntity
+            val tex = be?.ownerProfile?.let { texturesOf(it.partialProfile().properties()) }
+            if (tex == null) { if (tick - at > FRESH_TICKS) fresh.remove(); continue }
+            fresh.remove()
+            if (lastSkull.put(pos, tex) != tex) emit("""{"k":"skull","t":$tick,"x":${pos.x},"y":${pos.y},"z":${pos.z},"tex":${str(tex)}}""")
+        }
+        val slice = tick % 20
+        for (x in cx - SKULL_CHUNKS..cx + SKULL_CHUNKS) for (z in cz - SKULL_CHUNKS..cz + SKULL_CHUNKS) {
+            if (Math.floorMod(x * 7 + z, 20) != slice) continue
+            val chunk = level.chunkSource.getChunk(x, z, ChunkStatus.FULL, false) ?: continue
+            for (be in chunk.blockEntities.values) {
+                if (be !is SkullBlockEntity) continue
+                val tex = be.ownerProfile?.let { texturesOf(it.partialProfile().properties()) } ?: continue
+                val pos = be.blockPos
+                if (lastSkull.put(pos.immutable(), tex) == tex) continue
+                emit("""{"k":"skull","t":$tick,"x":${pos.x},"y":${pos.y},"z":${pos.z},"tex":${str(tex)}}""")
+            }
+        }
+    }
+
+    private fun recordEquipment(e: LivingEntity, who: String, key: String) {
+        // (the game swaps in new stacks when equipment changes: the same objects as last tick are no change -
+        // building the line for every entity every tick would be most of the recorder's time)
+        val was = lastStacks[key]
+        if (was != null && was[0] === e.mainHandItem && was[1] === e.getItemBySlot(EquipmentSlot.HEAD) && was[2] === e.getItemBySlot(EquipmentSlot.CHEST) &&
+            was[3] === e.getItemBySlot(EquipmentSlot.LEGS) && was[4] === e.getItemBySlot(EquipmentSlot.FEET)) return
+        lastStacks[key] = arrayOf(e.mainHandItem, e.getItemBySlot(EquipmentSlot.HEAD), e.getItemBySlot(EquipmentSlot.CHEST), e.getItemBySlot(EquipmentSlot.LEGS), e.getItemBySlot(EquipmentSlot.FEET))
+        val head = e.getItemBySlot(EquipmentSlot.HEAD)
+        val items = listOf(e.mainHandItem, head, e.getItemBySlot(EquipmentSlot.CHEST), e.getItemBySlot(EquipmentSlot.LEGS), e.getItemBySlot(EquipmentSlot.FEET))
+        val headTex = head.get(DataComponents.PROFILE)?.let { texturesOf(it.partialProfile().properties()) }
+        val body = items.joinToString(",", "[", "]") { str(vanillaId(it)) } + (headTex?.let { ",\"headTex\":${str(it)}" } ?: "")
+        // Rainbow armour changes its dye every tick or two, which would make nearly every line this
+        // writes a dye change, each with the head's texture again. Only a change of item counts; the
+        // first colour stays.
+        val same = body.replace(DYE, "")
+        val previous = lastEquipment.put(key, same)
+        if (previous == same || (previous == null && body == NO_EQUIPMENT)) return
+        emit("""{"k":"eq","t":$tick,$who,"eq":$body}""")
+    }
+
+    /** The game item id, plus "#rrggbb" for dyed items (leather armour) so the viewer can colour it. */
+    private fun vanillaId(stack: ItemStack): String {
+        if (stack.isEmpty) return ""
+        // The item it looks like: Hypixel builds many items on a base item with another item's model
+        // (paper that is drawn as TNT), so a vanilla item_model wins over the base item.
+        val modelId = stack.get(DataComponents.ITEM_MODEL)
+        val model = modelId?.takeIf { it.namespace == "minecraft" }?.toString()
+        var id = model ?: BuiltInRegistries.ITEM.getKey(stack.item).toString()
+        // A model from another namespace (Hypixel's own) is kept after "@", for the viewer to map.
+        if (modelId != null && model == null) id += "@" + modelId
+        val dye = stack.get(DataComponents.DYED_COLOR) ?: return id
+        return id + "#" + Integer.toHexString((dye.rgb() and 0xFFFFFF) or 0x1000000).substring(1)
+    }
+
+    /**
+     * A skin as the viewer needs it: the texture's hash on textures.minecraft.net, ":s" after it for
+     * the slim model. The profile value it comes from (base64 JSON) also carries a profile id, name
+     * and timestamp - three times the size, and nothing the viewer uses. Kept whole if it can't be read.
+     */
+    private fun texturesOf(props: PropertyMap): String? {
+        val value = props.get("textures").firstOrNull()?.value() ?: return null
+        return skinHashes.getOrPut(value) {
+            runCatching {
+                val skin = JsonParser.parseString(String(Base64.getDecoder().decode(value))).asJsonObject["textures"].asJsonObject["SKIN"].asJsonObject
+                val hash = skin["url"].asString.substringAfterLast('/')
+                if (!hash.matches(SKIN_HASH)) value
+                else hash + if (skin["metadata"]?.asJsonObject?.get("model")?.asString == "slim") ":s" else ""
+            }.getOrDefault(value)
+        }
+    }
+    private val skinHashes = HashMap<String, String>()
+
+    // ------------------------------------------------------------------ block palette (for "block" change lines)
+
+    private fun paletteIndex(state: BlockState): Int = palette.getOrPut(state) {
+        val i = palette.size
+        emit("""{"k":"pal","i":$i,"s":${str(BlockStateParser.serialize(state))}}""")
+        i
+    }
+
+    // ------------------------------------------------------------------ formatting
+
+    private fun typeOf(e: Entity): String = BuiltInRegistries.ENTITY_TYPE.getKey(e.type).toString()
+
+    private fun n(v: Double) = fixed(v, 3)
+    /** A position to 1/100 of a block, and as written ("12.5", not "12.500"). */
+    private fun q(v: Double) = Math.round(v * 100) / 100.0
+    private fun m(v: Double): String { val r = Math.round(v * 100); return if (r % 100 == 0L) (r / 100).toString() else (r / 100.0).toString() }
+    private fun deg(v: Float) = Math.round(Mth.wrapDegrees(v)).toFloat()
+    /** A yaw to 0.1 degree, wrapped to -180..180 (the game lets them run on past 360 as you turn). */
+    private fun w(v: Float) = a(Mth.wrapDegrees(v))
+    private fun a(v: Float) = fixed(v.toDouble(), 1)
+    /** Two decimals: partial ticks, volumes, pitches and GUI pixels. */
+    private fun f2(v: Float) = fixed(v.toDouble(), 2)
+
+    /**
+     * [v] to [decimals] places, as String.format("%.Nf") writes it but without its cost (it runs
+     * thousands of times a second): rounded half up, trailing zeros kept.
+     */
+    private fun fixed(v: Double, decimals: Int): String {
+        if (!v.isFinite()) return "0"
+        val scale = POW10[decimals]
+        val r = Math.round(v * scale)
+        val abs = abs(r)
+        val sb = StringBuilder(20)
+        if (r < 0) sb.append('-')
+        sb.append(abs / scale)
+        if (decimals == 0) return sb.toString()
+        sb.append('.')
+        val frac = (abs % scale).toString()
+        for (i in frac.length until decimals) sb.append('0')
+        return sb.append(frac).toString()
+    }
+
+    private fun str(s: String): String {
+        val sb = StringBuilder(s.length + 2).append('"')
+        for (ch in s) when {
+            ch == '"' -> sb.append("\\\"")
+            ch == '\\' -> sb.append("\\\\")
+            ch == '\n' -> sb.append("\\n")
+            ch < ' ' -> sb.append(String.format(Locale.ROOT, "\\u%04x", ch.code))
+            else -> sb.append(ch)
+        }
+        return sb.append('"').toString()
+    }
+
+    private companion object {
+        const val ABANDON_AFTER_TICKS = 20 * 60
+        private val POW10 = longArrayOf(1, 10, 100, 1000, 10000)
+        /** How far (blocks) a flying arrow may be from the flight last written before a new one is. */
+        private const val ARC_SLACK = 0.1
+        // Tracked.flight: not flying, an arrow, a wither skull or fireball.
+        private const val NO_FLIGHT = 0
+        private const val ARROW = 1
+        private const val POWERED = 2
+        private val SKIN_HASH = Regex("[0-9a-f]{20,80}")
+        private val FORMAT_CODES = Regex("\u00a7.")
+        // A little under 1/60 s, so a game running at 60 fps with uneven frame times keeps every frame.
+        const val FRAME_NS = 16_000_000L
+        /** Simon Says' start button and its 16 grid buttons. */
+        private val SS_BUTTONS = listOf(BlockPos(110, 121, 91)) + (120..123).flatMap { y -> (92..95).map { z -> BlockPos(110, y, z) } }
+
+        /** Mobs further than this (blocks) from you are written every other tick. */
+        const val FAR_HALF = 32
+        const val NO_EQUIPMENT = """["","","","",""]"""
+        /** A dye colour on an item id ("#rrggbb"), left out when comparing equipment. */
+        private val DYE = Regex("#[0-9a-f]{6}")
+        // How far around you (in chunks) placed player heads are looked for, every second.
+        const val SKULL_CHUNKS = 12
+        private const val FRESH_SKULLS = 4096
+        private const val FRESH_TICKS = 5
+        val STAMP: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss")
+    }
+}
