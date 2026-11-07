@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "adm-gametest",
+  "version": "1.0.0",
+  "name": "ADM gametests",
+  "description": "ADM's client gametests. Development only: not built into the release jar.",
+  "license": "All-Rights-Reserved",
+  "environment": "client",
+  "entrypoints": {
+    "fabric-client-gametest": [
+      "com.engineerclient.gametest.FpsGameTest"
+    ]
+  },
+  "depends": {
+    "adm": "*"
+  }
+}

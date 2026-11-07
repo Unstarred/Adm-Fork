@@ -1,4 +1,6 @@
+import net.fabricmc.loom.api.LoomGradleExtensionAPI
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 // Fabric Loom is only on Fabric's maven, so it is loaded here rather than through a settings file.
 buildscript {
@@ -34,6 +36,34 @@ sourceSets.test {
     java.setSrcDirs(listOf("test"))
     kotlin.setSrcDirs(listOf("test"))
     resources.setSrcDirs(listOf("test/resources"))
+}
+
+// Client gametests in gametest/ (their fabric.mod.json in gametest/resources/): a mod of their own, run with
+// `gradlew runClientGametest` in build/gametest and never built into the release jar. They drive ADM itself, so they
+// get main's output as well as its classpath. Odin goes in build/gametest/mods, as it does in run/mods.
+val gametest: SourceSet = sourceSets.create("gametest") {
+    java.setSrcDirs(listOf("gametest"))
+    kotlin.setSrcDirs(listOf("gametest"))
+    resources.setSrcDirs(listOf("gametest/resources"))
+    compileClasspath += sourceSets.main.get().compileClasspath + sourceSets.main.get().output
+    runtimeClasspath += sourceSets.main.get().runtimeClasspath + sourceSets.main.get().output
+}
+
+// Loom is applied with apply(plugin = ...), so its extension has no generated accessor: it is reached by name.
+(extensions.getByName("loom") as LoomGradleExtensionAPI).runs.create("clientGametest") {
+    client()
+    name("Client Gametest")
+    source(gametest)
+    // The client harness starts only with this switch (-Dfabric-api.gametest is the server one). Without it the
+    // client sits on the title screen and runs nothing.
+    vmArg("-Dfabric.client.gametest")
+    vmArg("-Dfabric.client.gametest.modid=adm-gametest")
+    // No Vulkan implicit layers. 26.3 opens the Vulkan loader at startup even when it ends up on OpenGL (and even with
+    // --graphicsBackend opengl), and the loader then injects every installed implicit layer: screen recorders' and
+    // overlays' capture hooks (Medal, OBS, Steam, Epic). Benches compare runs, so nothing outside the game should be
+    // in the process.
+    environmentVariable("VK_LOADER_LAYERS_DISABLE", "~implicit~")
+    runDir("build/gametest")
 }
 
 repositories {
@@ -77,6 +107,12 @@ tasks {
     }
 
     compileKotlin {
+        compilerOptions {
+            jvmTarget = JvmTarget.JVM_25
+        }
+    }
+
+    named<KotlinCompile>("compileGametestKotlin") {
         compilerOptions {
             jvmTarget = JvmTarget.JVM_25
         }
