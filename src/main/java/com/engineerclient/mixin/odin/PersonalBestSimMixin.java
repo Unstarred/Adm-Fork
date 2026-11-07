@@ -38,8 +38,10 @@ public class PersonalBestSimMixin {
     /**
      * With nothing stored, a sim run faster than the stored PB would print "(New PB) Old PB was X"
      * every time. Its PB is capped at this run's time in the sim, so it reads "(this time)", never "New PB".
+     * The local is picked by its name, oldPB (0.3.7 and 0.4.0 alike, javap): "ordinal = 0" among the floats was the
+     * time parameter, which is never stored, so this never applied.
      */
-    @ModifyVariable(method = "time(Ljava/lang/String;FLjava/lang/String;Ljava/lang/String;Z)V", at = @At("STORE"), ordinal = 0, remap = false)
+    @ModifyVariable(method = "time(Ljava/lang/String;FLjava/lang/String;Ljava/lang/String;Z)V", at = @At("STORE"), name = "oldPB", remap = false)
     private float ec$noNewPb(float old, String name, float time) {
         return P3Sim.getInSim() ? Math.min(old, time) : old;
     }

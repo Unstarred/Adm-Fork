@@ -12,18 +12,12 @@ import java.util.Collection;
 
 /**
  * Odin's Dungeon Map drawing its "?" tiles (renderPathHints, in Odin's map space): Room
- * Prediction ({@link OdinMapPrediction}) draws its own instead while it has one. Odin builds differ
- * on the method's arguments (the hint tiles; newer ones also the rooms), so both are hooked and
- * whichever this Odin has is the one that applies.
+ * Prediction ({@link OdinMapPrediction}) draws its own instead while it has one. The method takes the hint tiles and
+ * the rooms in 0.3.7 and 0.4.0 (javap); the hint-tiles-only form was older Odin's, which ADM no longer loads with.
  */
 @Pseudo
 @Mixin(targets = "com.odtheking.odin.features.impl.dungeon.map.MapRendererKt", remap = false)
 public class MapPathHintsMixin {
-
-    @Inject(method = "renderPathHints(Lnet/minecraft/client/gui/GuiGraphicsExtractor;Ljava/util/Collection;)V", at = @At("HEAD"), cancellable = true, remap = false, require = 0)
-    private static void ec$prediction(GuiGraphicsExtractor g, Collection<?> hints, CallbackInfo ci) {
-        if (OdinMapPrediction.render(g)) ci.cancel();
-    }
 
     @Inject(method = "renderPathHints(Lnet/minecraft/client/gui/GuiGraphicsExtractor;Ljava/util/Collection;Ljava/util/Collection;)V", at = @At("HEAD"), cancellable = true, remap = false, require = 0)
     private static void ec$predictionRooms(GuiGraphicsExtractor g, Collection<?> hints, Collection<?> rooms, CallbackInfo ci) {
