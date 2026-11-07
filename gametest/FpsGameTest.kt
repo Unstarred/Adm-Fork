@@ -1,12 +1,11 @@
 package com.engineerclient.gametest
 
-import com.engineerclient.clearbreakdown.ClearBreakdown
+import com.engineerclient.EngineerClient
+import com.engineerclient.misc.RandomStuff
 import com.engineerclient.p3sim.P3Sim
 import com.engineerclient.p3sim.SimItems
 import com.engineerclient.p3sim.SimWorld
-import com.engineerclient.pov.PovPreviews
-import com.engineerclient.practice.TerminalHitboxes
-import com.engineerclient.splits.DungeonSplits
+import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.features.Module
 import com.odtheking.odin.features.impl.boss.SimonSays
 import com.odtheking.odin.features.impl.boss.TerminalSolver
@@ -41,11 +40,16 @@ import java.time.format.DateTimeFormatter
 class FpsGameTest : FabricClientGameTest {
     private val log = LoggerFactory.getLogger("adm-gametest")
 
-    /** The modules this bench measures, switched on whatever the gametest config says. */
-    private val modules: List<Module> = listOf(
-        PovPreviews, DungeonSplits, ClearBreakdown, TerminalHitboxes, P3Sim,
+    /** The modules this bench measures, switched on whatever the gametest config says: all of ADM's, and Odin's it adds to. */
+    private val modules: List<Module> get() = EngineerClient.MODULES + listOf(
         LeapMenu, Splits, DungeonMap, TerminalSolver, TerminalTimes, SimonSays, TickTimers, InvincibilityTimer,
     )
+
+    /**
+     * Options off by default that add work to every frame, on for the bench. Blur In GUI stays off: it is vanilla's own
+     * blur, a picture the player chooses, and it would swamp everything else in the leap menu phase.
+     */
+    private val perFrameOptions = listOf(RandomStuff to "Clean Scoreboard")
 
     override fun runTest(context: ClientGameTestContext) {
         context.onClient { mc -> prepare(mc) }
@@ -86,6 +90,7 @@ class FpsGameTest : FabricClientGameTest {
         mc.options.inactivityFpsLimit().set(InactivityFpsLimit.MINIMIZED)
         mc.options.enableVsync().set(false)
         for (module in modules) if (!module.enabled) module.toggle()
+        for ((module, name) in perFrameOptions) (module.settings[name] as BooleanSetting).value = true
         P3Sim.autoStartS.value = true
     }
 

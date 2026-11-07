@@ -1,6 +1,7 @@
 package com.engineerclient.pov
 
 import net.fabricmc.loader.api.FabricLoader
+import java.lang.reflect.Field
 
 /**
  * Switches EntityCulling off for the duration of a preview's extract.
@@ -51,13 +52,22 @@ object EntityCullingBridge {
      * when the camera moved or this is set, and a frame of previews does not move your camera.
      */
     fun requestRecull() {
-        val modClass = modBaseClass ?: return
-        // The instance is resolved per call, not cached: the mod is constructed during its own
-        // init and a cached null would never be retried.
+        val instanceField = instanceField ?: return
+        val cullTaskField = cullTaskField ?: return
+        // The instance is read per call, not kept: the mod is constructed during its own init and a
+        // kept null would never be retried. The fields are looked up once: this runs every frame the
+        // previews do.
         runCatching {
-            val instance = modClass.getField("instance").get(null) ?: return
-            val task = modClass.getField("cullTask").get(instance) ?: return
-            task.javaClass.getField("requestCull").setBoolean(task, true)
+            val instance = instanceField.get(null) ?: return
+            val task = cullTaskField.get(instance) ?: return
+            val requestCull = requestCullField?.takeIf { it.declaringClass.isInstance(task) }
+                ?: task.javaClass.getField("requestCull").also { requestCullField = it }
+            requestCull.setBoolean(task, true)
         }
     }
+
+    private val instanceField by lazy { modBaseClass?.let { runCatching { it.getField("instance") }.getOrNull() } }
+    private val cullTaskField by lazy { modBaseClass?.let { runCatching { it.getField("cullTask") }.getOrNull() } }
+    /** The cull task's flag, looked up on its own class the first time there is a task to read it from. */
+    private var requestCullField: Field? = null
 }

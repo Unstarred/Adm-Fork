@@ -172,6 +172,7 @@ object OdinMapPrediction {
         session.cancel()
         worker.execute { session.clear() }
         shown = null; shownView = null; shownNames = null; lastKey = ""
+        lastDerived = null
         pathDoors.clear()
     }
 
@@ -398,11 +399,12 @@ object OdinMapPrediction {
         // every tile behind a door the map shows is drawn anyway, never left blank
         val hints = hintTiles(known)
         val splits = p.splits.associateBy { it.tile }
-        secretsAt = if (splitSecrets.value) MapPredictor.splitSecrets(v, p.splits).let { s -> p.splits.indices.associate { p.splits[it].tile to s[it] } } else emptyMap()
+        val d = derived(p, v, shownNames, splitSecrets.value)
+        secretsAt = d.secretsAt
         // the last rooms the secret total leaves only one size and place for: in full, named when only one name fits
         val exact = BooleanArray(W * W)
         // (every room, discovered ones nobody has opened too, once the map is known for sure)
-        if (exactRooms.value) for ((_, names) in (shownNames ?: p.namedRooms).groupBy { it.tiles.joinToString(",") }) {
+        if (exactRooms.value) for (names in d.namedGroups) {
             val tiles = names[0].tiles
             if (names.sumOf { it.chance.toDouble() } < SURE) continue
             if (tiles.all { known[it] }) { if (!namedOnMap(tiles[0])) roomText(g, tiles, names); continue }
@@ -412,7 +414,7 @@ object OdinMapPrediction {
         }
         // anything shown at 100% (a room's size and place), named or not: drawn in full in its type's colour (or the
         // kinds a dead end can still be), keeping the split's label on its door's tile
-        if (exactRooms.value) for (tiles in MapPredictor.certainShapes(p, SURE)) {
+        if (exactRooms.value) for (tiles in d.certain) {
             if (tiles.any { known[it] || exact[it] || it in blood }) continue
             for (t in tiles) exact[t] = true
             val q = p.probs[tiles[0]] ?: p.raw[tiles[0]]
@@ -656,6 +658,29 @@ object OdinMapPrediction {
 
     /** Each split's secrets, by its door's tile, for the prediction being drawn (Split Secrets). */
     private var secretsAt: Map<Int, Float> = emptyMap()
+
+    /**
+     * What [draw] works out from the prediction alone: each split's secrets, every shape shown at 100%, and the sure
+     * names grouped by their tiles. A prediction, its map and its names are replaced, never changed, when a new one
+     * comes in (a few times a room), and these were worked out on every frame the map was drawn, the secret split
+     * looking every known room up in the name table. Each is worked out the first time it's drawn.
+     */
+    private class Derived(val p: Prediction, val v: MapView, val names: List<NamedRoom>?, val split: Boolean) {
+        val secretsAt: Map<Int, Float> by lazy(LazyThreadSafetyMode.NONE) {
+            if (split) MapPredictor.splitSecrets(v, p.splits).let { s -> p.splits.indices.associate { p.splits[it].tile to s[it] } } else emptyMap()
+        }
+        val certain: List<IntArray> by lazy(LazyThreadSafetyMode.NONE) { MapPredictor.certainShapes(p, SURE) }
+        val namedGroups: Collection<List<NamedRoom>> by lazy(LazyThreadSafetyMode.NONE) {
+            (names ?: p.namedRooms).groupBy { it.tiles.joinToString(",") }.values
+        }
+    }
+
+    /** The last [Derived], render thread only. */
+    private var lastDerived: Derived? = null
+
+    private fun derived(p: Prediction, v: MapView, names: List<NamedRoom>?, split: Boolean): Derived =
+        lastDerived?.takeIf { it.p === p && it.v === v && it.names === names && it.split == split }
+            ?: Derived(p, v, names, split).also { lastDerived = it }
 
     /** "2P T Y B" (what's more likely there than not, puzzles by their expected count) over "~6" rooms (and "23s" secrets). */
     private fun splitLabel(g: GuiGraphicsExtractor, x: Int, y: Int, s: Split) {

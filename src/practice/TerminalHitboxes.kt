@@ -1,9 +1,16 @@
 package com.engineerclient.practice
 
+import com.engineerclient.EngineerClient
 import com.engineerclient.EngineerClient.mc
+import com.engineerclient.p3sim.Fight
+import com.engineerclient.p3sim.GoldorPhase
+import com.engineerclient.p3sim.P3Sim
+import com.engineerclient.p3sim.Station
+import com.google.gson.JsonParser
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.ColorSetting
 import com.odtheking.odin.events.RenderExtractEvent
+import com.odtheking.odin.events.TickEvent
 import com.odtheking.odin.events.core.on
 import com.odtheking.odin.features.Category
 import com.odtheking.odin.features.Module
@@ -12,8 +19,22 @@ import com.odtheking.odin.utils.Color.Companion.withAlpha
 import com.odtheking.odin.utils.render.drawFilledBox
 import com.odtheking.odin.utils.render.drawWireFrameBox
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback
+import net.fabricmc.fabric.api.event.player.UseEntityCallback
 import net.minecraft.core.BlockPos
+import net.minecraft.world.InteractionResult
+import net.minecraft.world.entity.Entity
+import net.minecraft.world.entity.decoration.ArmorStand
 import net.minecraft.world.entity.player.Player
+import net.minecraft.world.level.ClipContext
+import net.minecraft.world.level.Level
+import net.minecraft.world.level.block.Blocks
+import net.minecraft.world.phys.AABB
+import net.minecraft.world.phys.EntityHitResult
+import net.minecraft.world.phys.HitResult
+import net.minecraft.world.phys.Vec3
+import java.nio.file.Files
+import kotlin.math.abs
 
 /**
  * Terminal Hitboxes: each P3 terminal's clickable box (both its stands) while terminals run, in F7/M7 and the P3 Sim,
@@ -53,9 +74,9 @@ object TerminalHitboxes : Module(
 
     /**
      * The 17 terminals, as the P3 Sim places them (Hypixel's stand spots): Hypixel's "Inactive Terminal" stand spawns on
-     * [com.engineerclient.p3sim.Station.at] and settles 0.02 above it, its "CLICK HERE" stand 0.355 below it.
+     * [Station.at] and settles 0.02 above it, its "CLICK HERE" stand 0.355 below it.
      */
-    private val TERMINALS by lazy { com.engineerclient.p3sim.Station.all().filter { it.kind == com.engineerclient.p3sim.Station.Kind.TERMINAL } }
+    private val TERMINALS by lazy { Station.all().filter { it.kind == Station.Kind.TERMINAL } }
     /** Terminals seen done this run (Hypixel): their stands can go out of tracking range, a done one stays done. */
     private val doneSeen = BooleanArray(17)
     /** The terminal you last clicked (index in [TERMINALS]). */
@@ -89,31 +110,40 @@ object TerminalHitboxes : Module(
      * the chat says so. 1 + the doors open, in order. Not barrier rather than air (a head was once placed in an open
      * one), and only loaded (an unloaded chunk reads as air).
      */
-    private fun doorSection(level: net.minecraft.world.level.Level): Int {
+    private fun doorSection(level: Level): Int {
         var s = 1
         for (p in DOOR_PROBES) {
-            if (!level.isLoaded(p) || level.getBlockState(p).`is`(net.minecraft.world.level.block.Blocks.BARRIER)) break
+            if (!level.isLoaded(p) || level.getBlockState(p).`is`(Blocks.BARRIER)) break
             s++
         }
         return s
     }
 
     /** The terminal whose stand [e] is, as an index in [TERMINALS], or -1. */
-    private fun terminalOf(e: net.minecraft.world.entity.Entity): Int {
-        if (e !is net.minecraft.world.entity.decoration.ArmorStand) return -1
-        return TERMINALS.indexOfFirst { kotlin.math.abs(e.x - it.at.x) < 0.01 && kotlin.math.abs(e.z - it.at.z) < 0.01 && e.y > it.at.y - 0.5 && e.y < it.at.y + 0.1 }
+    private fun terminalOf(e: Entity): Int {
+        if (e !is ArmorStand) return -1
+        return TERMINALS.indexOfFirst { abs(e.x - it.at.x) < 0.01 && abs(e.z - it.at.z) < 0.01 && e.y > it.at.y - 0.5 && e.y < it.at.y + 0.1 }
     }
 
-    private fun RenderExtractEvent.drawTerminals() {
+    /**
+     * One tick's terminals: each one's box (both its stands), which are done, and the live section. Built by [scan] at
+     * the end of each tick and drawn from every frame: the stands only move on a tick, and finding them is 17 entity
+     * searches that ran on every frame before.
+     */
+    private class Scan(val boxes: Array<AABB>, val done: BooleanArray, val live: Int)
+
+    /** This tick's [Scan], or null: not in F7/M7's boss or a sim, or no terminals running. */
+    private var lastScan: Scan? = null
+
+    private fun scan(): Scan? {
         // Your own sim: its state. Someone else's (a party): the world and chat, as on Hypixel.
-        val sim = com.engineerclient.p3sim.P3Sim.localSim
-        if (!com.engineerclient.p3sim.P3Sim.inSim && !(DungeonUtils.inBoss && DungeonUtils.floor?.floorNumber == 7)) return
-        val level = mc.level ?: return
-        val player = mc.player ?: return
-        val simStations = if (sim) (com.engineerclient.p3sim.Fight.phase as? com.engineerclient.p3sim.GoldorPhase)?.stations else null
+        val sim = P3Sim.localSim
+        if (!P3Sim.inSim && !(DungeonUtils.inBoss && DungeonUtils.floor?.floorNumber == 7)) return null
+        val level = mc.level ?: return null
+        val simStations = if (sim) (Fight.phase as? GoldorPhase)?.stations else null
         val stands = TERMINALS.mapIndexed { i, t ->
-            level.getEntitiesOfClass(net.minecraft.world.entity.decoration.ArmorStand::class.java,
-                net.minecraft.world.phys.AABB(t.at.x - 0.1, t.at.y - 0.5, t.at.z - 0.1, t.at.x + 0.1, t.at.y + 0.1, t.at.z + 0.1)) { terminalOf(it) == i }
+            level.getEntitiesOfClass(ArmorStand::class.java,
+                AABB(t.at.x - 0.1, t.at.y - 0.5, t.at.z - 0.1, t.at.x + 0.1, t.at.y + 0.1, t.at.z + 0.1)) { terminalOf(it) == i }
         }
         val done = BooleanArray(TERMINALS.size) { i ->
             val t = TERMINALS[i]
@@ -133,16 +163,28 @@ object TerminalHitboxes : Module(
             val doneBound = TERMINALS.indices.filter { done[it] }.maxOfOrNull { TERMINALS[it].section } ?: 0
             if (TermInfo.coreOpened || chat == 0 && doneBound == 0) 0 else maxOf(chat, doneBound, doorSection(level))
         }
-        if (live == 0) return
+        if (live == 0) return null
+        val boxes = Array(TERMINALS.size) { i ->
+            val at = TERMINALS[i].at
+            stands[i].map { it.boundingBox }.reduceOrNull { a, b -> a.minmax(b) }
+                ?: AABB(at.x - 0.25, at.y - 0.355, at.z - 0.25, at.x + 0.25, at.y + 1.995, at.z + 0.25)
+        }
+        return Scan(boxes, done, live)
+    }
+
+    /** This tick's [Scan], drawn: the aim and the reach are the frame's, as the crosshair and the eyes move with it. */
+    private fun RenderExtractEvent.drawTerminals() {
+        val scan = lastScan ?: return
+        val level = mc.level ?: return
+        val player = mc.player ?: return
+        val live = scan.live
         val eye = player.getEyePosition(mc.deltaTracker.getGameTimeDeltaPartialTick(false))
         val reach = player.entityInteractionRange()
-        val aimedAt = (mc.hitResult as? net.minecraft.world.phys.EntityHitResult)?.entity?.let { terminalOf(it) } ?: -1
+        val aimedAt = (mc.hitResult as? EntityHitResult)?.entity?.let { terminalOf(it) } ?: -1
         TERMINALS.forEachIndexed { i, t ->
             // Done ones, and any of an earlier section (it only ended once all its terminals were done).
-            if (done[i] || t.section < live) return@forEachIndexed
-            val at = t.at
-            val box = stands[i].map { it.boundingBox }.reduceOrNull { a, b -> a.minmax(b) }
-                ?: net.minecraft.world.phys.AABB(at.x - 0.25, at.y - 0.355, at.z - 0.25, at.x + 0.25, at.y + 1.995, at.z + 0.25)
+            if (scan.done[i] || t.section < live) return@forEachIndexed
+            val box = scan.boxes[i]
             // Aiming: the game's own pick (what a click goes to) is one of its stands.
             val aimed = aimedAt == i
             val near = aimed || inReach(level, player, eye, box, reach)
@@ -158,19 +200,19 @@ object TerminalHitboxes : Module(
      * to your eyes and before any block (outline shapes). So some point of the box that close with a clear line to it:
      * the nearest point, else a grid over the box (a stand's foot sits in the floor block).
      */
-    private fun inReach(level: net.minecraft.world.level.Level, player: Player, eye: net.minecraft.world.phys.Vec3, box: net.minecraft.world.phys.AABB, reach: Double): Boolean {
+    private fun inReach(level: Level, player: Player, eye: Vec3, box: AABB, reach: Double): Boolean {
         if (box.contains(eye)) return true
         val r2 = reach * reach
-        val near = net.minecraft.world.phys.Vec3(eye.x.coerceIn(box.minX, box.maxX), eye.y.coerceIn(box.minY, box.maxY), eye.z.coerceIn(box.minZ, box.maxZ))
+        val near = Vec3(eye.x.coerceIn(box.minX, box.maxX), eye.y.coerceIn(box.minY, box.maxY), eye.z.coerceIn(box.minZ, box.maxZ))
         if (near.distanceToSqr(eye) >= r2) return false
-        fun clear(p: net.minecraft.world.phys.Vec3): Boolean {
-            val hit = level.clip(net.minecraft.world.level.ClipContext(eye, p, net.minecraft.world.level.ClipContext.Block.OUTLINE, net.minecraft.world.level.ClipContext.Fluid.NONE, player))
-            return hit.type == net.minecraft.world.phys.HitResult.Type.MISS || hit.location.distanceToSqr(eye) >= p.distanceToSqr(eye) - 1e-6
+        fun clear(p: Vec3): Boolean {
+            val hit = level.clip(ClipContext(eye, p, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player))
+            return hit.type == HitResult.Type.MISS || hit.location.distanceToSqr(eye) >= p.distanceToSqr(eye) - 1e-6
         }
         if (clear(near)) return true
         val e = 1e-3
         for (i in 0..2) for (j in 0..8) for (k in 0..2) {
-            val p = net.minecraft.world.phys.Vec3(
+            val p = Vec3(
                 box.minX + e + (box.maxX - box.minX - 2 * e) * i / 2, box.minY + e + (box.maxY - box.minY - 2 * e) * j / 8, box.minZ + e + (box.maxZ - box.minZ - 2 * e) * k / 2)
             if (p.distanceToSqr(eye) < r2 && clear(p)) return true
         }
@@ -186,7 +228,7 @@ object TerminalHitboxes : Module(
         if (adopted) return
         adopted = true
         val file = mc.gameDirectory.toPath().resolve("config/odin/addons/adm.json")
-        val old = if (java.nio.file.Files.exists(file)) com.google.gson.JsonParser.parseString(java.nio.file.Files.readString(file)).asJsonArray
+        val old = if (Files.exists(file)) JsonParser.parseString(Files.readString(file)).asJsonArray
             .firstOrNull { it.asJsonObject.get("name")?.asString == "Term Info" }?.asJsonObject?.getAsJsonObject("settings") else null
         if (old != null) {
             for ((name, element) in old.entrySet()) {
@@ -206,15 +248,19 @@ object TerminalHitboxes : Module(
     }
 
     init {
-        on<RenderExtractEvent> { com.engineerclient.EngineerClient.safely("terminal hitboxes") { drawTerminals() } }
-        // The terminal your clicks go to, so your own "activated a terminal!" marks it done at once.
-        net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.register { _, level, _, entity, _ ->
-            if (level.isClientSide) terminalOf(entity).let { if (it >= 0) lastClicked = it }
-            net.minecraft.world.InteractionResult.PASS
+        on<TickEvent.End> {
+            lastScan = null
+            EngineerClient.safely("terminal hitboxes scan") { lastScan = scan() }
         }
-        net.fabricmc.fabric.api.event.player.AttackEntityCallback.EVENT.register { _, level, _, entity, _ ->
+        on<RenderExtractEvent> { EngineerClient.safely("terminal hitboxes") { drawTerminals() } }
+        // The terminal your clicks go to, so your own "activated a terminal!" marks it done at once.
+        UseEntityCallback.EVENT.register { _, level, _, entity, _ ->
             if (level.isClientSide) terminalOf(entity).let { if (it >= 0) lastClicked = it }
-            net.minecraft.world.InteractionResult.PASS
+            InteractionResult.PASS
+        }
+        AttackEntityCallback.EVENT.register { _, level, _, entity, _ ->
+            if (level.isClientSide) terminalOf(entity).let { if (it >= 0) lastClicked = it }
+            InteractionResult.PASS
         }
     }
 }

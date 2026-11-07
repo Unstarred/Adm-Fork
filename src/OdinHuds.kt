@@ -1,6 +1,8 @@
 package com.engineerclient
 
 import com.engineerclient.misc.HealthMana
+import com.engineerclient.p3sim.P3Sim
+import com.engineerclient.p3sim.Practice
 import com.engineerclient.splits.OdinSplitsLook
 import com.odtheking.odin.clickgui.settings.impl.HUDSetting
 import com.odtheking.odin.clickgui.settings.impl.HudElement
@@ -22,12 +24,13 @@ object OdinHuds {
 
     class Draw(private val block: (GuiGraphicsExtractor, Boolean) -> Pair<Int, Int>) : (GuiGraphicsExtractor, Boolean) -> Pair<Int, Int> {
         var hud: HudElement? = null
-        var name = ""
+        /** One of [PRACTICE_HIDDEN], decided once when the HUD is made rather than by name on every draw. */
+        var practiceHidden = false
 
         override fun invoke(g: GuiGraphicsExtractor, example: Boolean): Pair<Int, Int> {
             val h = hud ?: return block(g, example)
             if (!example && HealthMana.hidesOdinHud(h)) return 0 to 0
-            if (!example && name in PRACTICE_HIDDEN && com.engineerclient.p3sim.Practice.active && com.engineerclient.p3sim.P3Sim.inSim) return 0 to 0
+            if (!example && practiceHidden && Practice.active && P3Sim.inSim) return 0 to 0
             return OdinSplitsLook.render(h, g, example) ?: block(g, example)
         }
     }
@@ -49,7 +52,7 @@ object OdinHuds {
         val draw = pending ?: return
         pending = null
         draw.hud = setting.value
-        draw.name = setting.name
+        draw.practiceHidden = setting.name in PRACTICE_HIDDEN
         draws[setting] = draw
     }
 

@@ -150,10 +150,11 @@ object OdinSplitsLook {
      */
     @JvmStatic
     fun render(hud: HudElement, g: GuiGraphicsExtractor, example: Boolean): Pair<Int, Int>? {
-        if (!engineer || failed) return null
-        val display = (Splits.settings["Splits Display HUD"] as? HUDSetting)?.value
-        val current = (Splits.settings[CURRENT_SPLIT_HUD] as? HUDSetting)?.value
+        // Which HUD first: every Odin HUD comes through here every frame, and the look is a Compose setting.
+        val display = displayHud
+        val current = currentHud
         if (hud !== display && hud !== current) return null
+        if (!engineer || failed) return null
         return try {
             if (hud === display) drawDisplay(g, example) else drawCurrent(g, example)
         } catch (t: Throwable) {
@@ -162,6 +163,10 @@ object OdinSplitsLook {
             null
         }
     }
+
+    /** Odin's two Splits HUDs, looked up once: a HUD setting's element is made once, with its module. */
+    private val displayHud by lazy { (Splits.settings["Splits Display HUD"] as? HUDSetting)?.value }
+    private val currentHud by lazy { (Splits.settings[CURRENT_SPLIT_HUD] as? HUDSetting)?.value }
 
     private fun bool(name: String, fallback: Boolean) = (Splits.settings[name] as? BooleanSetting)?.value ?: fallback
 

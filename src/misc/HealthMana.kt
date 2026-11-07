@@ -66,13 +66,18 @@ object HealthMana : Module(
      * those two are ever skipped.
      */
     fun hidesOdinHud(hud: HudElement): Boolean {
+        // Which HUD first: this runs for every Odin HUD every frame and only two are ever hidden, while the settings
+        // are Compose state in Odin 0.4.0 (a snapshot lookup each).
+        val health = hud === healthHud
+        if (!health && hud !== manaHud) return false
         if (!enabled || !hideUnlessLow) return false
-        return when {
-            hud === (PlayerDisplay.settings["Health HUD"] as? HUDSetting)?.value -> aboveThreshold(ActionBarListener.currentHealth, ActionBarListener.maxHealth)
-            hud === (PlayerDisplay.settings["Mana HUD"] as? HUDSetting)?.value -> aboveThreshold(ActionBarListener.currentMana, ActionBarListener.maxMana)
-            else -> false
-        }
+        return if (health) aboveThreshold(ActionBarListener.currentHealth, ActionBarListener.maxHealth)
+            else aboveThreshold(ActionBarListener.currentMana, ActionBarListener.maxMana)
     }
+
+    /** Odin's Health HUD and Mana HUD. A HUD setting's element is made once, with its module (as OdinHuds relies on). */
+    private val healthHud by lazy { (PlayerDisplay.settings["Health HUD"] as? HUDSetting)?.value }
+    private val manaHud by lazy { (PlayerDisplay.settings["Mana HUD"] as? HUDSetting)?.value }
 
     private fun aboveThreshold(current: Int, max: Int): Boolean =
         hideUnlessLow && max > 0 && current.toFloat() / max >= threshold / 100f

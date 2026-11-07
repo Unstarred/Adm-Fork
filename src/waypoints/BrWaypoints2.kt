@@ -197,6 +197,7 @@ object BrWaypoints2 : Module(
             BrRoles.pull()
             BrRoles.newRun(dungeonOver = wasInDungeon)
             wasInDungeon = false
+            drawnThisTick = null
             entryDoors.clear(); noPlanSaid.clear(); walkedIn.clear(); myTile = null
             boxes.clear(); loadedRooms.clear(); mobs.clear(); byId.clear()
             rushing = false; rushRoom = null; rushed.clear(); startDoor = false; barriers.clear(); witherSides.clear(); path = emptyMap(); exits = emptyMap(); entrances = emptyMap(); lastRoom = null
@@ -218,6 +219,7 @@ object BrWaypoints2 : Module(
         }
 
         on<TickEvent.End> {
+            drawnThisTick = null
             BrRoles.settingKilling = killers.ordinal + 2
             BrRoles.settingRole = when (myRole.ordinal) { 0 -> null; 1 -> 0; else -> myRole.ordinal - 1 }
             BrRoles.doorKills = doorKills
@@ -242,20 +244,21 @@ object BrWaypoints2 : Module(
         on<RenderExtractEvent> {
             if (!DungeonUtils.inDungeons) return@on
 
-            for ((box, colour, label, next, done) in drawn()) {
-                val bb = box.aabb()
+            val drawn = drawnThisTick ?: drawn().also { drawnThisTick = it }
+            for (d in drawn) {
+                val bb = d.bb
                 // Done (Recolor Done Boxes): a whole box in Done Color, number greyed, never "next".
-                if (done && recolorDone) {
+                if (d.done && recolorDone) {
                     drawFilledBox(bb, doneColor.withAlpha(opacity), depth = false)
                     drawWireFrameBox(bb, doneColor, depth = false)
-                    drawText("§7" + label.replace(CONTROL_CODES, ""), Vec3((bb.minX + bb.maxX) / 2, bb.maxY + 0.6, (bb.minZ + bb.maxZ) / 2), 1.5f, false)
+                    drawText(d.doneLabel, d.labelAt, 1.5f, false)
                     continue
                 }
                 // Seen through walls; the faces faint enough to walk through without noticing, the
                 // next one of yours to kill filled in more.
-                drawFilledBox(bb, colour.withAlpha(if (next) (opacity * 3).coerceIn(opacity + 0.15f, 1f) else opacity), depth = false)
-                drawWireFrameBox(bb, colour, depth = false)
-                drawText(label, Vec3((bb.minX + bb.maxX) / 2, bb.maxY + 0.6, (bb.minZ + bb.maxZ) / 2), 1.5f, false)
+                drawFilledBox(bb, d.colour.withAlpha(if (d.next) (opacity * 3).coerceIn(opacity + 0.15f, 1f) else opacity), depth = false)
+                drawWireFrameBox(bb, d.colour, depth = false)
+                drawText(d.label, d.labelAt, 1.5f, false)
             }
 
             if (spawnMarkers) {
@@ -608,7 +611,19 @@ object BrWaypoints2 : Module(
      * A box as drawn: its colour, the label over it, whether it is the next of yours to kill, and
      * whether it is done (its mobs dead or its room cleared), drawn in Done Color with Recolor Done Boxes.
      */
-    private data class Drawn(val box: Box, val colour: Color, val label: String, val next: Boolean, val done: Boolean = false)
+    private data class Drawn(val box: Box, val colour: Color, val label: String, val next: Boolean, val done: Boolean = false) {
+        /** The box in the world, where its label goes, and the label greyed for a done box: worked out once per tick. */
+        val bb: AABB = box.aabb()
+        val labelAt = Vec3((bb.minX + bb.maxX) / 2, bb.maxY + 0.6, (bb.minZ + bb.maxZ) / 2)
+        val doneLabel = "§7" + label.replace(CONTROL_CODES, "")
+    }
+
+    /**
+     * [drawn] for this tick, built on the first frame that draws and dropped at the end of each tick. Everything it
+     * reads (the mobs, the map's rooms, the roles, the boxes) changes on the tick or with a packet, while it was built
+     * for every frame: grouping, sets, each box's number by a scan of its room, a label string and a box per box.
+     */
+    private var drawnThisTick: List<Drawn>? = null
 
     /** Rooms already told they have no roles for this door and team size, once each per run. */
     private val noPlanSaid = HashSet<String>()

@@ -196,7 +196,7 @@ object PovCapture {
      * largest share of ADM's own time in the leap menu in the FPS bench (2026-11-06).
      */
     fun costLine(): String? {
-        if (!PovPreviews.showCost || !PovPreviews.wants()) return null
+        if (!PovPreviews.wants() || !PovPreviews.showCost) return null
         val now = System.nanoTime()
         costText?.let { if (now - costTextAt < COST_LINE_NANOS) return it }
         val live = (0 until FEEDS).count { !empty[it] && !outOfRange[it] }
@@ -294,7 +294,12 @@ object PovCapture {
     private fun redrawKeptHuds(gfx: GuiGraphicsExtractor) {
         for (hud in ModuleManager.hudSettingsCache) {
             if (!hud.isEnabled || !PovPreviews.keepsHud(hud.name)) continue
-            EngineerClient.safely("pov keep hud ${hud.name}") { OdinHuds.redraw(gfx, hud) }
+            // Not safely(): its label would be built for every HUD every frame, failing or not.
+            try {
+                OdinHuds.redraw(gfx, hud)
+            } catch (t: Throwable) {
+                EngineerClient.logger.error("[ec] pov keep hud ${hud.name} failed", t)
+            }
         }
     }
 

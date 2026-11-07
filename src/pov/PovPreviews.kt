@@ -248,10 +248,28 @@ object PovPreviews : Module(
      * GUI), a place the Only In checkboxes allow, and the Spirit Leap screen open. Same title check as `LeapHighlight.leapScreen`.
      */
     fun wants(): Boolean {
+        // The screen first: it's a field read, and no container is open for nearly every frame of a run. The settings
+        // after it are Compose state in Odin 0.4.0 (a snapshot lookup each), and this runs several times a frame.
+        val screen = Minecraft.getInstance().gui.screen() as? AbstractContainerScreen<*> ?: return false
         if (!enabled || PovCapture.disabledForSession) return false
         if (!LeapMenu.enabled) return false
         if (!ShowIn.allows(places())) return false
-        val screen = Minecraft.getInstance().gui.screen() as? AbstractContainerScreen<*> ?: return false
-        return screen.title.string.equalsOneOf("Spirit Leap", "Teleport to Player")
+        return isLeapScreen(screen)
+    }
+
+    /** The screen [isLeapScreen] last read the title of, and whether it was the leap menu's. */
+    private var titledScreen: AbstractContainerScreen<*>? = null
+    private var titledLeap = false
+
+    /**
+     * Whether [screen] is the Spirit Leap menu, by its title. A screen's title is fixed for its life, and flattening it
+     * builds a new string, so each screen's is read once rather than on every call.
+     */
+    private fun isLeapScreen(screen: AbstractContainerScreen<*>): Boolean {
+        if (screen !== titledScreen) {
+            titledScreen = screen
+            titledLeap = screen.title.string.equalsOneOf("Spirit Leap", "Teleport to Player")
+        }
+        return titledLeap
     }
 }

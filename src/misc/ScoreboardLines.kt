@@ -139,13 +139,30 @@ object ScoreboardLines {
         val hidden = HashSet<PlayerScoreEntry>()
         var previous: Kind? = null
         for (entry in all.filter { !it.isHidden }.sortedWith(DISPLAY_ORDER)) {
-            val text = plain(lineText(scoreboard, entry))
-            val kind = kindOf(text, previous)
+            val kind = contextFreeKind(lineText(scoreboard, entry)) ?: if (previous == Kind.OBJECTIVE) Kind.OBJECTIVE_TASK else null
             if (hidesKind(kind)) hidden += entry
             previous = kind
         }
         return all.filter { it !in hidden }
     }
+
+    /**
+     * Each line's kind out of context ([kindOf] with no line above it), by the line's text as drawn. The sidebar is
+     * drawn every frame, its lines change a few times a second at most, and an unknown line goes through every one of
+     * the patterns, so each text is matched once. The objective's task, the one kind that depends on the line above,
+     * is added by [visibleEntries]: [kindOf] gives it only when nothing else matched. Cleared once it holds
+     * [KIND_MEMO_MAX] texts, which only the lines that keep changing (the clock, Time Elapsed) ever fill.
+     */
+    private fun contextFreeKind(line: Component): Kind? {
+        val raw = line.string
+        if (kindMemo.containsKey(raw)) return kindMemo[raw]
+        if (kindMemo.size >= KIND_MEMO_MAX) kindMemo.clear()
+        return kindOf(raw.replace(FORMATTING, "").trim(), null).also { kindMemo[raw] = it }
+    }
+
+    /** [contextFreeKind]'s memo, render thread only. A null kind is a line none of the patterns know. */
+    private val kindMemo = HashMap<String, Kind?>()
+    private const val KIND_MEMO_MAX = 512
 
     // --- text helpers --------------------------------------------------------------------------
 

@@ -1,5 +1,6 @@
 package com.engineerclient.practice
 
+import com.engineerclient.EngineerClient
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.ColorSetting
@@ -17,6 +18,7 @@ import com.odtheking.odin.utils.render.roundedRect
 import com.odtheking.odin.utils.render.roundedRectOutlined
 import com.odtheking.odin.utils.render.text
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements
 import net.minecraft.client.gui.GuiGraphicsExtractor
@@ -154,7 +156,10 @@ object Recore : Module(
 
     private fun watchingCore() = coreWatch || simS4()
 
-    /** Keeps [inCoreSince] up to date: teammates in the core box, by when they were first seen there. */
+    /**
+     * Keeps [inCoreSince] up to date: teammates in the core box, by when they were first seen there. Once a client tick:
+     * the positions it reads only move on a tick, and it ran in the HUD callback, every frame, before.
+     */
     private fun trackCore() {
         if (!enabled || !coreLeap || !watchingCore()) { inCoreSince.clear(); return }
         val level = mc.level ?: return
@@ -380,8 +385,10 @@ object Recore : Module(
         on<LevelEvent.Load> { reset() }
         HudElementRegistry.attachElementBefore(VanillaHudElements.SLEEP, Identifier.fromNamespaceAndPath("engineerclient", "recore")) { gfx, _ ->
             // The HUD is drawn under any open screen too, so this is also the behind-the-terminal draw.
-            com.engineerclient.EngineerClient.safely("recore") { trackCore(); drawRecore(gfx) }
+            EngineerClient.safely("recore") { drawRecore(gfx) }
         }
+        // Not on Odin's tick: it only runs while the module is on, and this clears the box when it goes off.
+        ClientTickEvents.END_CLIENT_TICK.register { EngineerClient.safely("recore tracking") { trackCore() } }
 
         onReceive<ClientboundSystemChatPacket>(priority = 1000, ignoreCancelled = true) {
             if (overlay) return@onReceive
