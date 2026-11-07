@@ -54,6 +54,9 @@ loomRuns.create("clientGametest") {
     // client sits on the title screen and runs nothing.
     vmArg("-Dfabric.client.gametest")
     vmArg("-Dfabric.client.gametest.modid=adm-gametest")
+    // Every class a mixin changes is written to .mixin.out/ as it loads: StartupGameTest reads them to check each ADM
+    // mixin actually injected (one into Odin that finds no target otherwise does nothing and says nothing).
+    vmArg("-Dmixin.debug.export=true")
     vmArg("-XX:StackShadowPages=32")
     // No Vulkan implicit layers. 26.3 opens the Vulkan loader at startup even when it ends up on OpenGL (and even with
     // --graphicsBackend opengl), and the loader then injects every installed implicit layer: screen recorders' and

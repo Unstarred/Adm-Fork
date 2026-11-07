@@ -19,11 +19,9 @@ import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext
 import net.minecraft.client.InactivityFpsLimit
 import net.minecraft.client.Minecraft
-import net.minecraft.client.gui.screens.TitleScreen
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
 import net.minecraft.util.profiling.jfr.Environment
 import net.minecraft.util.profiling.jfr.JvmProfiler
-import org.slf4j.LoggerFactory
 import java.nio.file.Files
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -38,8 +36,6 @@ import java.time.format.DateTimeFormatter
  * the window size the harness gives the client, on the card, and on anything else using the GPU at the time.
  */
 class FpsGameTest : FabricClientGameTest {
-    private val log = LoggerFactory.getLogger("adm-gametest")
-
     /** The modules this bench measures, switched on whatever the gametest config says: all of ADM's, and Odin's it adds to. */
     private val modules: List<Module> get() = EngineerClient.MODULES + listOf(
         LeapMenu, Splits, DungeonMap, TerminalSolver, TerminalTimes, SimonSays, TickTimers, InvincibilityTimer,
@@ -52,6 +48,9 @@ class FpsGameTest : FabricClientGameTest {
     private val perFrameOptions = listOf(RandomStuff to "Clean Scoreboard")
 
     override fun runTest(context: ClientGameTestContext) {
+        // A minute and a half of measuring: only when asked for (ADM_BENCH=1, as the bench script runs it), not with
+        // every gametest run.
+        if (System.getenv("ADM_BENCH") != "1") return
         context.onClient { mc -> prepare(mc) }
         context.waitTicks(20)
         context.onClient { SimWorld.open() }
@@ -69,20 +68,8 @@ class FpsGameTest : FabricClientGameTest {
         val jfr = context.onClient { JvmProfiler.INSTANCE.stop() }
         val leapName = if (leapOpened) "leap-menu" else "leap-menu(NOT OPENED)"
         report(context, listOf("boss" to boss, leapName to leap, "boss-after" to after), jfr.toAbsolutePath().toString())
-        // The harness fails a test that ends with a server still running, or off the title screen. It defers the
-        // disconnect, so ADS's own TitleScreen goes up before it and "Leaving ADS" is left showing; and the client can
-        // keep its reference to the stopping server well after the level is gone. So: the level, time for the server
-        // thread to stop, then the title screen put up here.
-        context.onClient { SimWorld.leave() }
-        context.waitFor({ mc -> mc.level == null }, 20 * 60)
-        context.waitTicks(20 * 10)
-        context.setScreen { TitleScreen() }
-        context.waitForScreen(TitleScreen::class.java)
+        context.leaveAds()
     }
-
-    /** [ClientGameTestContext.computeOnClient] with its exception type fixed, which Kotlin can't infer from a lambda. */
-    private fun <T> ClientGameTestContext.onClient(block: (Minecraft) -> T): T =
-        computeOnClient<T, RuntimeException> { mc -> block(mc) }
 
     /** What every run measures against: no frame cap, no vsync, no AFK limit, the modules on, P3 on join. */
     private fun prepare(mc: Minecraft) {

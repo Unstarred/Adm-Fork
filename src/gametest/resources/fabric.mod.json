@@ -7,8 +7,14 @@
   "license": "All-Rights-Reserved",
   "environment": "client",
   "entrypoints": {
+    "preLaunch": [
+      { "adapter": "kotlin", "value": "com.engineerclient.gametest.ProblemLog" }
+    ],
     "fabric-client-gametest": [
-      "com.engineerclient.gametest.FpsGameTest"
+      "com.engineerclient.gametest.StartupGameTest",
+      "com.engineerclient.gametest.AdsGameTest",
+      "com.engineerclient.gametest.FpsGameTest",
+      "com.engineerclient.gametest.VerdictGameTest"
     ]
   },
   "depends": {
