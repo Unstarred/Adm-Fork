@@ -7,6 +7,7 @@ import com.engineerclient.mixin.GameRendererInvoker
 import com.engineerclient.rotation.EcLog
 import com.mojang.blaze3d.pipeline.RenderTarget
 import com.mojang.blaze3d.pipeline.TextureTarget
+import com.mojang.blaze3d.platform.Window
 import com.mojang.blaze3d.systems.RenderSystem
 import com.mojang.renderpearl.api.GpuFormat
 import com.mojang.renderpearl.api.textures.FilterMode
@@ -17,12 +18,16 @@ import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet
 import net.minecraft.client.CameraType
 import net.minecraft.client.DeltaTracker
+import net.minecraft.client.Minecraft
+import net.minecraft.client.Options
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.render.TextureSetup
+import net.minecraft.client.renderer.GameRenderer
 import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.client.renderer.culling.Frustum
 import net.minecraft.client.renderer.feature.FeatureRenderDispatcher
 import net.minecraft.client.renderer.state.gui.BlitRenderState
+import net.minecraft.client.renderer.state.gui.GuiRenderState
 import net.minecraft.client.renderer.state.level.LevelRenderState
 import net.minecraft.core.BlockPos
 import net.minecraft.world.entity.Entity
@@ -423,6 +428,11 @@ object PovCapture {
         }
         outOfRange[index] = false
 
+        renderPass(mc, feed, target, deltaTracker)
+    }
+
+    /** One quadrant's pass: [feed] rendered from [target]'s eyes, then everything put back ("The pass itself", above). */
+    private fun renderPass(mc: Minecraft, feed: RenderTarget, target: Entity, deltaTracker: DeltaTracker) {
         val gameRenderer = mc.gameRenderer
         val invoker = gameRenderer as GameRendererInvoker
         val camera = gameRenderer.mainCamera()
@@ -431,18 +441,7 @@ object PovCapture {
         val options = mc.options
         val gui = gameRenderer.gameRenderState().guiRenderState
 
-        val saved = Saved(
-            cameraEntity = mc.cameraEntity,
-            windowWidth = window.width,
-            windowHeight = window.height,
-            cameraType = options.cameraType,
-            hudHidden = gui.isHudHidden,
-            capturedFrustum = cameraAccess.`ec$getCapturedFrustum`(),
-            eyeHeight = cameraAccess.`ec$getEyeHeight`(),
-            eyeHeightOld = cameraAccess.`ec$getEyeHeightOld`(),
-            target = gameRenderer.mainRenderTarget(),
-            hud3D = invoker.`ec$getHud3DTarget`(),
-        )
+        val saved = saveState(mc, gameRenderer, invoker, cameraAccess, window, options, gui)
         var pose: PovPose.Restore? = null
         var cullingWas: Boolean? = null
         // Vanilla's level render pushes the model-view stack and takes the PreparedFrame with no
@@ -502,6 +501,31 @@ object PovCapture {
             pose?.restore()
             EntityCullingBridge.restore(cullingWas)
         }
+    }
+
+    /** This quadrant's [Saved]: the state as it stood before its pass. */
+    private fun saveState(
+        mc: Minecraft,
+        gameRenderer: GameRenderer,
+        invoker: GameRendererInvoker,
+        cameraAccess: CameraAccessor,
+        window: Window,
+        options: Options,
+        gui: GuiRenderState,
+    ): Saved {
+        val saved = Saved(
+            cameraEntity = mc.cameraEntity,
+            windowWidth = window.width,
+            windowHeight = window.height,
+            cameraType = options.cameraType,
+            hudHidden = gui.isHudHidden,
+            capturedFrustum = cameraAccess.`ec$getCapturedFrustum`(),
+            eyeHeight = cameraAccess.`ec$getEyeHeight`(),
+            eyeHeightOld = cameraAccess.`ec$getEyeHeightOld`(),
+            target = gameRenderer.mainRenderTarget(),
+            hud3D = invoker.`ec$getHud3DTarget`(),
+        )
+        return saved
     }
 
     /**

@@ -8,7 +8,7 @@ import net.fabricmc.loader.api.FabricLoader
  * Sodium replaces the whole vanilla terrain path: what a `renderLevel` draws is whatever the last
  * `SodiumWorldRenderer.setupTerrain` produced. Sodium runs that from inside the level
  * extract, from whichever camera is extracted, unless the camera has a captured frustum; a preview
- * pass lends it one unless Re-cull Terrain is on (`PovCapture.renderFeed`). Without a re-cull a
+ * pass lends it one unless Re-cull Terrain is on (`PovCapture.renderPass`). Without a re-cull a
  * preview shows only the sections visible from your own frustum - from a teammate's eyes, mostly a
  * hole. The re-cull also puts the sections only the preview can see into the build queue, so a
  * cold direction fills in over the next few frames.
