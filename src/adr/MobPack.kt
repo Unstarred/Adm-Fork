@@ -107,11 +107,6 @@ internal class MobPlan private constructor(
     /** The life of [id] that tick [t] is in (from its spawn to its gone), or null. */
     fun lifeAt(id: Int, t: Int): Life? = lives[id]?.lastOrNull { it.spawn <= t }?.takeIf { it.gone == null || t <= it.gone!! }
 
-    /**
-     * The rows the viewer can't draw from the others (see the top), in order. First the true path
-     * as points with a straight line between each two: a row, and where a mob stood until it moved
-     * on (the tick before its next row: it holds still till then), unless that is the next tick.
-     */
     /** Where [life] spawned as its spawn line has it (MobWriter.spawn's rounding). */
     private fun spawnPlace(life: Life): DoubleArray = DoubleArray(3) { i ->
         val v = life.at[i]
@@ -121,6 +116,11 @@ internal class MobPlan private constructor(
     /** Where the viewer has [life] spawn, to a fifth of a block: its moves are from there. */
     private fun anchor(life: Life): DoubleArray = DoubleArray(3) { i -> fifthOf(life.spawnAt!![i]) }
 
+    /**
+     * The rows the viewer can't draw from the others (see the top), in order. First the true path
+     * as points with a straight line between each two: a row, and where a mob stood until it moved
+     * on (the tick before its next row: it holds still till then), unless that is the next tick.
+     */
     private fun thin(rows: List<DoubleArray>, rough: Boolean, walking: Boolean): List<DoubleArray> {
         val pts = ArrayList<DoubleArray>(rows.size * 2)
         for ((i, r) in rows.withIndex()) {

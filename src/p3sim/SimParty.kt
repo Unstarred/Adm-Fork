@@ -144,7 +144,6 @@ object Players {
     /** Whether a player plays [c] (no bot then). */
     fun isPlayerClass(c: DungeonClass?) = c != null && c in playerClasses()
 
-    /** Their jobs: the host's plan's, a joiner's own (or their class's role). */
     /** [p]'s own [key] spot ("spawn", "ee3"...) for this skill and their class: the host's plan's, a joiner's as their game sent it, else the default. */
     fun spotOf(p: ServerPlayer, key: String): Spots.Spot? {
         if (Sim.isHost(p)) return P3Plan.customSpot(key)
@@ -152,6 +151,7 @@ object Players {
         return profiles[p.uuid]?.spots?.get("${P3Plan.skill}/${c.name}/$key") ?: P3Plan.defaultSpot(c, key)
     }
 
+    /** Their jobs: the host's plan's, a joiner's own (or their class's role). */
     fun jobsOf(p: ServerPlayer): Set<String> {
         if (Sim.isHost(p)) return P3Plan.mine()
         // Not yet in (no class until their hello): nothing of theirs.

@@ -302,11 +302,6 @@ object UploadPacker {
         return Scan(summary, layout?.replaceFirst(""""k":"rooms"""", """"k":"roomsAll""""), world, counts, projs, self, startMs, thinCamera(frames, camLines), camTimes(frames), blocks.changes(), thinMouse(mice, mouseLines))
     }
 
-    /**
-     * Which camera frames to keep (see the top): from each kept frame, the furthest one the viewer's
-     * straight line to it stays within [CAM_TOLERANCE] of every frame between, at most [CAM_GAP]
-     * ticks on. In time order, as the viewer sorts them.
-     */
     /** The frames thinCamera kept (it marks them, f[5]): their times as the viewer reads them (partial ticks in tenths). */
     private fun camTimes(frames: List<DoubleArray>): DoubleArray =
         frames.filter { it.size > 5 && it[5] > 0 }.map { f -> val t = Math.floor(f[0]) ; t + Math.round((f[0] - t) * 10) / 10.0 }.sorted().toDoubleArray()
@@ -351,6 +346,11 @@ object UploadPacker {
         return keep.toList()
     }
 
+    /**
+     * Which camera frames to keep (see the top): from each kept frame, the furthest one the viewer's
+     * straight line to it stays within [CAM_TOLERANCE] of every frame between, at most [CAM_GAP]
+     * ticks on. In time order, as the viewer sorts them.
+     */
     private fun thinCamera(frames: MutableList<DoubleArray>, lines: Int): List<BooleanArray?> {
         val keep = arrayOfNulls<BooleanArray>(lines)
         if (frames.size < 3) return keep.toList()
@@ -742,7 +742,6 @@ object UploadPacker {
         return line
     }
 
-    /** A "cam" line with only the frames [keep] keeps, or null when none are left. */
     /** A "mouse" line with only the points [keep] has (see thinMouse): when to a hundredth of a tick (it moves fast), where to a tenth of a GUI pixel. */
     private fun mouse(line: String, keep: BooleanArray?): String? = runCatching {
         val l = JsonParser.parseString(line).asJsonObject
@@ -753,6 +752,7 @@ object UploadPacker {
         l.toString()
     }.getOrDefault(line)
 
+    /** A "cam" line with only the frames [keep] keeps, or null when none are left. */
     private fun thin(line: String, keep: BooleanArray?): String? {
         if (keep == null || keep.all { it }) return line
         if (keep.none { it }) return null

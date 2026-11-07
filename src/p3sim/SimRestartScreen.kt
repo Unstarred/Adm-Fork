@@ -418,11 +418,6 @@ class SimRestartScreen : Screen(Component.literal(P3Sim.FULL_NAME)) {
 
     // ------------------------------------------------------------------ teleport
 
-    /** A column for each group (a long one split in two), early enters last. */
-    /**
-     * A column per part of the run (P1, P2, S1-S4), its places top to bottom in the order you get to them. CEE3 is
-     * the high EE3. The spots are here, not in [Spots], so a hotswap brings them in.
-     */
     /** The boss fight: where the run stops. Green when on. */
     private fun bossPanel() {
         row(listOf(stack("§eStop", 120, "Where the run stops on its own (as the menu's Stop: everything back as built).", listOf(
@@ -431,6 +426,10 @@ class SimRestartScreen : Screen(Component.literal(P3Sim.FULL_NAME)) {
         ))))
     }
 
+    /**
+     * A column per part of the run (P1, P2, S1-S4), its places top to bottom in the order you get to them. CEE3 is
+     * the high EE3. The spots are here, not in [Spots], so a hotswap brings them in.
+     */
     private fun teleportPanel() {
         val w = 64
         fun spot(name: String, x: Double, y: Double, z: Double, yaw: Float, pitch: Float): Pair<String, Spots.Spot?> = name to Spots.Spot(name, x, y, z, yaw, pitch)

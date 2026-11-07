@@ -195,9 +195,9 @@ object P3Sim : Module(
     val hydraStart: Int get() = mine("hydra", { hydraStartS.value.toInt() }) { it.asDouble.toInt() }
     val lava: Boolean get() = lavaS.value
     val noMelodies: Boolean get() = noMelodiesS.value
-    /** Terminal Luck, -1 to 1 (null-safe: a hotswapped field starts null). */
     /** SS Luck, -1 to 1. */
     val ssLuck: Double get() = ((ssLuckS as NumberSetting<*>?)?.value?.toDouble() ?: 0.0) / 100.0
+    /** Terminal Luck, -1 to 1 (null-safe: a hotswapped field starts null). */
     val termLuck: Double get() = ((termLuckS as NumberSetting<*>?)?.value?.toDouble() ?: 0.0) / 100.0
     val mageAll: Boolean get() = mine("mageAll", { (mageAllS as BooleanSetting?)?.value == true }) { it.asBoolean }
     val firstClickMelody: Boolean get() = (firstClickMelodyS as BooleanSetting?)?.value == true

@@ -42,8 +42,10 @@ import kotlin.random.Random
 object Terminals {
     enum class Type(val rows: Int) { ORDER(4), PANES(5), RUBIX(5), STARTS(5), SELECT(6), MELODY(6) }
 
-    /** A random draw: the six are equally likely (as measured on first opens). */
-    /** A random type, as on Hypixel; Terminal Luck makes a Melody (the slow one) rarer, bad luck more common. */
+    /**
+     * A random type, as on Hypixel, where the six are equally likely (as measured on first opens); Terminal Luck
+     * makes a Melody (the slow one) rarer, bad luck more common.
+     */
     fun randomType(): Type = lucky(10, { t: Type -> if (t == Type.MELODY) 1 else 0 }) { Type.entries.filter { it != Type.MELODY || !P3Sim.noMelodies }.random() }
 
     fun <T> weighted(w: List<Pair<T, Int>>): T {
