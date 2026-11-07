@@ -182,6 +182,15 @@ internal class Players(private val scan: Scan, private val sib: Sibling, private
  * anything off throws, and the run goes up as if there were no sibling.
  */
 internal fun readSibling(input: InputStream, cat: Catalogue.Blocks? = null, values: Catalogue.Values? = null, dict: Catalogue.Dict? = null): Sibling {
+    return SiblingReader(cat).read(input, values, dict)
+}
+
+/**
+ * One [readSibling] under way: what the lines so far have said, every count and row checked against the limits as it
+ * comes. [values] is handed to [read] rather than kept here: inside a class, the meta line's `runCatching { }` takes the
+ * reader as its receiver, so a property's null check outside the block wouldn't carry into it.
+ */
+private class SiblingReader(cat: Catalogue.Blocks?) {
     val out = HashMap<Int, Int>()
     var self = ""
     var startMs = 0L
@@ -213,168 +222,191 @@ internal fun readSibling(input: InputStream, cat: Catalogue.Blocks? = null, valu
         out.merge(id, n) { a, b -> minOf(a.toLong() + b, Int.MAX_VALUE.toLong()).toInt() }
         if (out.size > SIB_MAX_IDS) throw Malformed("too many mobs")
     }
-    lines(input, dict).use { r ->
-        for (line in capped(r)) {
-            val kind = kindOf(line) ?: continue
-            HEAD.find(line)?.let { if (kind !in WORLD) tick(it.groupValues[2].toLongOrNull() ?: throw Malformed("tick")) }
-            blocks.read(kind, line)
-            when (kind) {
-                "meta" -> obj(line).let { m ->
-                    self = runCatching { str(m["self"]) }.getOrDefault("").takeIf { it.length <= 16 } ?: ""
-                    startMs = runCatching { long(m["startMs"]) }.getOrDefault(0L)
-                    lerp = runCatching { int(m["lerp"]) }.getOrDefault(0).coerceIn(0, 200)
-                    erel = runCatching { int(m["erel"]) }.getOrDefault(0) == 1
-                    tab2 = runCatching { int(m["tab2"]) }.getOrDefault(0) == 1
-                    valuesOk = values != null && runCatching { int((m["cat"] as? JsonObject)?.get("values")) == values.version }.getOrDefault(false)
+
+    fun read(input: InputStream, values: Catalogue.Values?, dict: Catalogue.Dict?): Sibling {
+        lines(input, dict).use { r ->
+            for (line in capped(r)) {
+                val kind = kindOf(line) ?: continue
+                HEAD.find(line)?.let { if (kind !in WORLD) tick(it.groupValues[2].toLongOrNull() ?: throw Malformed("tick")) }
+                blocks.read(kind, line)
+                when (kind) {
+                    "meta" -> obj(line).let { m ->
+                        self = runCatching { str(m["self"]) }.getOrDefault("").takeIf { it.length <= 16 } ?: ""
+                        startMs = runCatching { long(m["startMs"]) }.getOrDefault(0L)
+                        lerp = runCatching { int(m["lerp"]) }.getOrDefault(0).coerceIn(0, 200)
+                        erel = runCatching { int(m["erel"]) }.getOrDefault(0) == 1
+                        tab2 = runCatching { int(m["tab2"]) }.getOrDefault(0) == 1
+                        valuesOk = values != null && runCatching { int((m["cat"] as? JsonObject)?.get("values")) == values.version }.getOrDefault(false)
+                    }
+                    "p" -> { val l = obj(line); val t = tick(long(l["t"])); for (x in arr(l["d"])) { val r = arr(x); val name = str(at(r, 0)); row(name, t); if (r.size() >= 4) player(name, t, num(r[1]), num(r[2]), num(r[3])) } }
+                    "e" -> { val l = obj(line); val t = tick(long(l["t"])); for (x in arr(l["d"])) { val r = arr(x); val id = int(at(r, 0)); count(id, 1); if (r.size() >= 4) mob(id, t, num(r[1]), num(r[2]), num(r[3])) } }
+                    "pgone" -> { val l = obj(line); row(str(l["name"]), -(tick(long(l["t"])) + 1)) }
+                    "cols" -> cols(line)
+                    "grp" -> grp(line, values)
+                    "proj" -> {
+                        val l = obj(line)
+                        val n = 1 + (l["arcs"]?.let { arr(it).size() } ?: 0) + (if (l.has("s")) 1 else 0) + (if (l.has("g")) 1 else 0)
+                        count(int(l["id"]), n)
+                    }
+                    else -> if (kind in ENTITY_KINDS || (kind == "eq" && line.contains("\"id\":")))
+                        ID.find(line)?.groupValues?.get(1)?.let { count(it.toIntOrNull() ?: throw Malformed("id"), 1) }
                 }
-                "p" -> { val l = obj(line); val t = tick(long(l["t"])); for (x in arr(l["d"])) { val r = arr(x); val name = str(at(r, 0)); row(name, t); if (r.size() >= 4) player(name, t, num(r[1]), num(r[2]), num(r[3])) } }
-                "e" -> { val l = obj(line); val t = tick(long(l["t"])); for (x in arr(l["d"])) { val r = arr(x); val id = int(at(r, 0)); count(id, 1); if (r.size() >= 4) mob(id, t, num(r[1]), num(r[2]), num(r[3])) } }
-                "pgone" -> { val l = obj(line); row(str(l["name"]), -(tick(long(l["t"])) + 1)) }
-                "cols" -> {
-                    val l = obj(line)
-                    var acc = 0L
-                    val ticks = arr(l["t"]).map { acc += long(it); tick(acc) }
-                    // Which of the line's ticks each mob (player) has a row in: each one once, in order -
-                    // so a mob's count is at most the lines there are, not however many times it is listed.
-                    fun inLines(a: JsonArray): List<Int> {
-                        var li = 0L
-                        return arr(at(a, 1)).mapIndexed { k, d ->
-                            val step = long(d)
-                            if (step < 0 || (k > 0 && step == 0L)) throw Malformed("line order")
-                            li += step
-                            if (li >= ticks.size) throw Malformed("line $li of ${ticks.size}")
-                            li.toInt()
-                        }
-                    }
-                    val byId = l.has("kd")
-                    var id = 0L
-                    // Each one's first three columns (x, y, z: every row has them).
-                    fun xyz(a: JsonArray, n: Int): List<List<Double?>> { val cols = arr(at(a, 3)); return (0..2).map { c -> if (c < cols.size()) nums(cols[c], n) else emptyList() } }
-                    if (l.has("flat")) {
-                        val of = l["of"]?.let(::str)
-                        for (f in flatRows(l, ticks.size)) {
-                            if (of == "e") {
-                                id = if (byId) id + long(f.key) else long(f.key)
-                                val mid = id.toInt().takeIf { i -> i.toLong() == id } ?: throw Malformed("id")
-                                count(mid, f.lines.size)
-                                f.lines.forEachIndexed { k, li -> mob(mid, ticks[li], f.x[k], f.y[k], f.z[k]) }
-                            } else if (of == "p") {
-                                val name = str(f.key)
-                                f.lines.forEachIndexed { k, li -> row(name, ticks[li]); player(name, ticks[li], f.x[k], f.y[k], f.z[k]) }
-                            }
-                        }
-                        continue
-                    }
-                    when (l["of"]?.let(::str)) {
-                        "e" -> for (t in arr(l["tr"])) arr(t).let {
-                            id = if (byId) id + long(at(it, 0)) else long(at(it, 0))
-                            val mid = id.toInt().takeIf { i -> i.toLong() == id } ?: throw Malformed("id")
-                            val lis = inLines(it); count(mid, lis.size)
-                            val (xs, ys, zs) = xyz(it, lis.size)
-                            lis.forEachIndexed { k, li -> mob(mid, ticks[li], xs.getOrNull(k), ys.getOrNull(k), zs.getOrNull(k)) }
-                        }
-                        "p" -> for (tr in arr(l["tr"])) {
-                            val a = arr(tr); val name = str(at(a, 0)); val lis = inLines(a)
-                            val (xs, ys, zs) = xyz(a, lis.size)
-                            lis.forEachIndexed { k, li -> row(name, ticks[li]); player(name, ticks[li], xs.getOrNull(k), ys.getOrNull(k), zs.getOrNull(k)) }
-                        }
-                    }
+            }
+        }
+        if (maxT < 0) maxT = 0
+        // A mob can't have more than about one line a tick: a count past the ticks the recording
+        // spans is made up, and capped there so it can't win every mob.
+        val span = if (minT > maxT) 0L else maxT - minT + 1
+        val counts = out.mapValues { (_, n) -> minOf(n.toLong(), span).toInt() }
+        val players = playerRanges()
+        val lives = mobLives()
+        addRelativeRows()
+        for (tr in mobs.values) tr.sort()
+        for (tr in playerAt.values) tr.sort()
+        return Sibling(self, startMs, counts, players, blocks.changes(), mobs, lives, playerAt, lerp)
+    }
+
+    /** A "cols" line: a stretch of mob (player) rows as columns, "flat" or by track. */
+    private fun cols(line: String) {
+        val l = obj(line)
+        var acc = 0L
+        val ticks = arr(l["t"]).map { acc += long(it); tick(acc) }
+        // Which of the line's ticks each mob (player) has a row in: each one once, in order -
+        // so a mob's count is at most the lines there are, not however many times it is listed.
+        fun inLines(a: JsonArray): List<Int> {
+            var li = 0L
+            return arr(at(a, 1)).mapIndexed { k, d ->
+                val step = long(d)
+                if (step < 0 || (k > 0 && step == 0L)) throw Malformed("line order")
+                li += step
+                if (li >= ticks.size) throw Malformed("line $li of ${ticks.size}")
+                li.toInt()
+            }
+        }
+        val byId = l.has("kd")
+        var id = 0L
+        // Each one's first three columns (x, y, z: every row has them).
+        fun xyz(a: JsonArray, n: Int): List<List<Double?>> { val cols = arr(at(a, 3)); return (0..2).map { c -> if (c < cols.size()) nums(cols[c], n) else emptyList() } }
+        if (l.has("flat")) {
+            val of = l["of"]?.let(::str)
+            for (f in flatRows(l, ticks.size)) {
+                if (of == "e") {
+                    id = if (byId) id + long(f.key) else long(f.key)
+                    val mid = id.toInt().takeIf { i -> i.toLong() == id } ?: throw Malformed("id")
+                    count(mid, f.lines.size)
+                    f.lines.forEachIndexed { k, li -> mob(mid, ticks[li], f.x[k], f.y[k], f.z[k]) }
+                } else if (of == "p") {
+                    val name = str(f.key)
+                    f.lines.forEachIndexed { k, li -> row(name, ticks[li]); player(name, ticks[li], f.x[k], f.y[k], f.z[k]) }
                 }
-                "grp" -> {
-                    // Mob events as columns (Stretch): each one's id, and its tick.
-                    val l = obj(line)
-                    val of = str(l["of"])
-                    val n = int(l["n"]).also { if (it !in 0..SIB_MAX_ROWS) throw Malformed("rows") }
-                    val c = l["c"] as? JsonObject ?: throw Malformed("columns")
-                    c["t"]?.let { col -> for (t in longs(col, n)) tick(t) }
-                    if (of in ENTITY_KINDS || of == "eq") c["id"]?.let { col -> for (id in longs(col, n)) count(id.toInt().takeIf { it.toLong() == id } ?: throw Malformed("id"), 1) }
-                    if (of == "pgone") {
-                        val ts = longs(c["t"] ?: throw Malformed("t"), n); val names = strs(c["name"] ?: throw Malformed("name"), n)
-                        for (k in ts.indices) names.getOrNull(k)?.let { row(it, -(tick(ts[k]) + 1)) }
-                    }
-                    // (arrows sent already stuck: "pj" rows marked "spawn", a spawn each - see Stretch.stuckArrows)
-                    if (of == "pj" && c["spawn"] != null) {
-                        val ts = nums(c["t"] ?: throw Malformed("t"), n); val ids = nums(c["id"] ?: throw Malformed("id"), n)
-                        val sp = nums(c["spawn"]!!, n).map { it == 1.0 }; val g = c["g"]?.let { nums(it, n) }
-                        val xs = c["x"]?.let { nums(it, n) }; val ys = c["y"]?.let { nums(it, n) }; val zs = c["z"]?.let { nums(it, n) }
-                        for (k in ts.indices) {
-                            if (sp.getOrNull(k) != true) continue
-                            val t = ts[k] ?: continue; val i = ids.getOrNull(k)?.toInt() ?: continue
-                            count(i, 1)
-                            spawns.getOrPut(i) { ArrayList() } += doubleArrayOf(t, g?.getOrNull(k) ?: -1.0, xs?.getOrNull(k) ?: Double.NaN, ys?.getOrNull(k) ?: Double.NaN, zs?.getOrNull(k) ?: Double.NaN, 0.0)
-                            types[(i.toLong() shl 32) or t.toLong()] = "minecraft:arrow"
-                            if (spawns.size > SIB_MAX_IDS) throw Malformed("too many mobs")
-                        }
-                    }
-                    // Lives: spawns (and how long, "life") and gone.
-                    if (of == "spawn" || of == "gone") {
-                        val ts = nums(c["t"] ?: throw Malformed("t"), n); val ids = nums(c["id"] ?: throw Malformed("id"), n)
-                        if (of == "gone") ts.indices.forEach { k -> val t = ts[k]?.toLong() ?: return@forEach; val i = ids.getOrNull(k)?.toInt() ?: return@forEach; gones.getOrPut(i) { ArrayList() } += t }
-                        else {
-                            val life = c["life"]?.let { nums(it, n) }; val back = c["b"]?.let { nums(it, n) }; val v = c["v"]?.let { present(it, n) }
-                            val xs = c["x"]?.let { nums(it, n) }; val ys = c["y"]?.let { nums(it, n) }; val zs = c["z"]?.let { nums(it, n) }
-                            val ty = c["type"]?.let { if (tab2) tabled(it, n, typeTable, if (valuesOk) values?.lists?.get("type") else null) else strs(it, n) }
-                            for (k in ts.indices) {
-                                val t = ts[k] ?: continue; val i = ids.getOrNull(k)?.toInt() ?: continue
-                                if (v?.getOrNull(k) == true) continue // (a projectile)
-                                spawns.getOrPut(i) { ArrayList() } += doubleArrayOf(t, life?.getOrNull(k) ?: -1.0, xs?.getOrNull(k) ?: Double.NaN, ys?.getOrNull(k) ?: Double.NaN, zs?.getOrNull(k) ?: Double.NaN, back?.getOrNull(k) ?: 0.0)
-                                ty?.getOrNull(k)?.let { types[(i.toLong() shl 32) or t.toLong()] = it }
-                                if (spawns.size > SIB_MAX_IDS) throw Malformed("too many mobs")
-                            }
-                        }
-                    }
-                }
-                "proj" -> {
-                    val l = obj(line)
-                    val n = 1 + (l["arcs"]?.let { arr(it).size() } ?: 0) + (if (l.has("s")) 1 else 0) + (if (l.has("g")) 1 else 0)
-                    count(int(l["id"]), n)
-                }
-                else -> if (kind in ENTITY_KINDS || (kind == "eq" && line.contains("\"id\":")))
-                    ID.find(line)?.groupValues?.get(1)?.let { count(it.toIntOrNull() ?: throw Malformed("id"), 1) }
+            }
+            return
+        }
+        when (l["of"]?.let(::str)) {
+            "e" -> for (t in arr(l["tr"])) arr(t).let {
+                id = if (byId) id + long(at(it, 0)) else long(at(it, 0))
+                val mid = id.toInt().takeIf { i -> i.toLong() == id } ?: throw Malformed("id")
+                val lis = inLines(it); count(mid, lis.size)
+                val (xs, ys, zs) = xyz(it, lis.size)
+                lis.forEachIndexed { k, li -> mob(mid, ticks[li], xs.getOrNull(k), ys.getOrNull(k), zs.getOrNull(k)) }
+            }
+            "p" -> for (tr in arr(l["tr"])) {
+                val a = arr(tr); val name = str(at(a, 0)); val lis = inLines(a)
+                val (xs, ys, zs) = xyz(a, lis.size)
+                lis.forEachIndexed { k, li -> row(name, ticks[li]); player(name, ticks[li], xs.getOrNull(k), ys.getOrNull(k), zs.getOrNull(k)) }
             }
         }
     }
-    if (maxT < 0) maxT = 0
-    // A mob can't have more than about one line a tick: a count past the ticks the recording
-    // spans is made up, and capped there so it can't win every mob.
-    val span = if (minT > maxT) 0L else maxT - minT + 1
-    val counts = out.mapValues { (_, n) -> minOf(n.toLong(), span).toInt() }
-    // When it had each player: from a row until their "pgone" (rows only come when something changed).
-    val players = seen.mapValues { (_, events) ->
-        val ranges = ArrayList<LongRange>()
-        var from: Long? = null
-        for (e in events.sortedBy { if (it < 0) -it - 1 else it }) {
-            if (e >= 0) { if (from == null) from = e }
-            else { val t = -e - 1; from?.let { ranges += it until t }; from = null }
+
+    /** A "grp" line: one kind of event as columns. */
+    private fun grp(line: String, values: Catalogue.Values?) {
+        // Mob events as columns (Stretch): each one's id, and its tick.
+        val l = obj(line)
+        val of = str(l["of"])
+        val n = int(l["n"]).also { if (it !in 0..SIB_MAX_ROWS) throw Malformed("rows") }
+        val c = l["c"] as? JsonObject ?: throw Malformed("columns")
+        c["t"]?.let { col -> for (t in longs(col, n)) tick(t) }
+        if (of in ENTITY_KINDS || of == "eq") c["id"]?.let { col -> for (id in longs(col, n)) count(id.toInt().takeIf { it.toLong() == id } ?: throw Malformed("id"), 1) }
+        if (of == "pgone") {
+            val ts = longs(c["t"] ?: throw Malformed("t"), n); val names = strs(c["name"] ?: throw Malformed("name"), n)
+            for (k in ts.indices) names.getOrNull(k)?.let { row(it, -(tick(ts[k]) + 1)) }
         }
-        from?.let { ranges += it..maxT }
-        ranges
-    }
-    // Each mob's lives: from a spawn till its "life" ran out, its gone or the next spawn.
-    val lives = HashMap<Int, List<SibLife>>()
-    for ((id, list) in spawns) {
-        val gs = gones[id]?.sorted() ?: emptyList()
-        var type: String? = null
-        lives[id] = list.sortedBy { it[0] }.let { ss -> ss.mapIndexed { k, s ->
-            val t = s[0].toLong()
-            type = types[(id.toLong() shl 32) or t] ?: if (s[5] > 0) type else null
-            val next = ss.getOrNull(k + 1)?.get(0)?.toLong() ?: Long.MAX_VALUE
-            val end = if (s[1] > 0) t + s[1].toLong() - 1 else gs.firstOrNull { it >= t && it <= next } ?: minOf(next, maxT)
-            SibLife(t, end, s[2], s[3], s[4], type)
-        } }
-    }
-    // Relative rows: from their life's spawn (to a fifth of a block, as MobPlan sends them).
-    if (relative.isNotEmpty()) {
-        val sorted = spawns.mapValues { (_, l) -> l.sortedBy { it[0] } }
-        for (r in relative) {
-            val s = sorted[r[0].toInt()]?.lastOrNull { it[0] <= r[1] } ?: continue
-            if (s[2].isNaN() || s[3].isNaN() || s[4].isNaN()) continue
-            mobs.getOrPut(r[0].toInt()) { Track() }.add(r[1].toLong(), r[2] + MobPlan.fifthOf(s[2]), r[3] + MobPlan.fifthOf(s[3]), r[4] + MobPlan.fifthOf(s[4]))
+        // (arrows sent already stuck: "pj" rows marked "spawn", a spawn each - see Stretch.stuckArrows)
+        if (of == "pj" && c["spawn"] != null) {
+            val ts = nums(c["t"] ?: throw Malformed("t"), n); val ids = nums(c["id"] ?: throw Malformed("id"), n)
+            val sp = nums(c["spawn"]!!, n).map { it == 1.0 }; val g = c["g"]?.let { nums(it, n) }
+            val xs = c["x"]?.let { nums(it, n) }; val ys = c["y"]?.let { nums(it, n) }; val zs = c["z"]?.let { nums(it, n) }
+            for (k in ts.indices) {
+                if (sp.getOrNull(k) != true) continue
+                val t = ts[k] ?: continue; val i = ids.getOrNull(k)?.toInt() ?: continue
+                count(i, 1)
+                spawns.getOrPut(i) { ArrayList() } += doubleArrayOf(t, g?.getOrNull(k) ?: -1.0, xs?.getOrNull(k) ?: Double.NaN, ys?.getOrNull(k) ?: Double.NaN, zs?.getOrNull(k) ?: Double.NaN, 0.0)
+                types[(i.toLong() shl 32) or t.toLong()] = "minecraft:arrow"
+                if (spawns.size > SIB_MAX_IDS) throw Malformed("too many mobs")
+            }
+        }
+        // Lives: spawns (and how long, "life") and gone.
+        if (of == "spawn" || of == "gone") {
+            val ts = nums(c["t"] ?: throw Malformed("t"), n); val ids = nums(c["id"] ?: throw Malformed("id"), n)
+            if (of == "gone") ts.indices.forEach { k -> val t = ts[k]?.toLong() ?: return@forEach; val i = ids.getOrNull(k)?.toInt() ?: return@forEach; gones.getOrPut(i) { ArrayList() } += t }
+            else {
+                val life = c["life"]?.let { nums(it, n) }; val back = c["b"]?.let { nums(it, n) }; val v = c["v"]?.let { present(it, n) }
+                val xs = c["x"]?.let { nums(it, n) }; val ys = c["y"]?.let { nums(it, n) }; val zs = c["z"]?.let { nums(it, n) }
+                val ty = c["type"]?.let { if (tab2) tabled(it, n, typeTable, if (valuesOk) values?.lists?.get("type") else null) else strs(it, n) }
+                for (k in ts.indices) {
+                    val t = ts[k] ?: continue; val i = ids.getOrNull(k)?.toInt() ?: continue
+                    if (v?.getOrNull(k) == true) continue // (a projectile)
+                    spawns.getOrPut(i) { ArrayList() } += doubleArrayOf(t, life?.getOrNull(k) ?: -1.0, xs?.getOrNull(k) ?: Double.NaN, ys?.getOrNull(k) ?: Double.NaN, zs?.getOrNull(k) ?: Double.NaN, back?.getOrNull(k) ?: 0.0)
+                    ty?.getOrNull(k)?.let { types[(i.toLong() shl 32) or t.toLong()] = it }
+                    if (spawns.size > SIB_MAX_IDS) throw Malformed("too many mobs")
+                }
+            }
         }
     }
-    for (tr in mobs.values) tr.sort()
-    for (tr in playerAt.values) tr.sort()
-    return Sibling(self, startMs, counts, players, blocks.changes(), mobs, lives, playerAt, lerp)
+
+    /** When it had each player: from a row until their "pgone" (rows only come when something changed). */
+    private fun playerRanges(): Map<String, List<LongRange>> {
+        val players = seen.mapValues { (_, events) ->
+            val ranges = ArrayList<LongRange>()
+            var from: Long? = null
+            for (e in events.sortedBy { if (it < 0) -it - 1 else it }) {
+                if (e >= 0) { if (from == null) from = e }
+                else { val t = -e - 1; from?.let { ranges += it until t }; from = null }
+            }
+            from?.let { ranges += it..maxT }
+            ranges
+        }
+        return players
+    }
+
+    /** Each mob's lives: from a spawn till its "life" ran out, its gone or the next spawn. */
+    private fun mobLives(): Map<Int, List<SibLife>> {
+        val lives = HashMap<Int, List<SibLife>>()
+        for ((id, list) in spawns) {
+            val gs = gones[id]?.sorted() ?: emptyList()
+            var type: String? = null
+            lives[id] = list.sortedBy { it[0] }.let { ss -> ss.mapIndexed { k, s ->
+                val t = s[0].toLong()
+                type = types[(id.toLong() shl 32) or t] ?: if (s[5] > 0) type else null
+                val next = ss.getOrNull(k + 1)?.get(0)?.toLong() ?: Long.MAX_VALUE
+                val end = if (s[1] > 0) t + s[1].toLong() - 1 else gs.firstOrNull { it >= t && it <= next } ?: minOf(next, maxT)
+                SibLife(t, end, s[2], s[3], s[4], type)
+            } }
+        }
+        return lives
+    }
+
+    /** Relative rows: from their life's spawn (to a fifth of a block, as MobPlan sends them). */
+    private fun addRelativeRows() {
+        if (relative.isNotEmpty()) {
+            val sorted = spawns.mapValues { (_, l) -> l.sortedBy { it[0] } }
+            for (r in relative) {
+                val s = sorted[r[0].toInt()]?.lastOrNull { it[0] <= r[1] } ?: continue
+                if (s[2].isNaN() || s[3].isNaN() || s[4].isNaN()) continue
+                mobs.getOrPut(r[0].toInt()) { Track() }.add(r[1].toLong(), r[2] + MobPlan.fifthOf(s[2]), r[3] + MobPlan.fifthOf(s[3]), r[4] + MobPlan.fifthOf(s[4]))
+            }
+        }
+    }
 }
 
 /** A number, or null. */

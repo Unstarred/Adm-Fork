@@ -134,6 +134,7 @@ object ADR : Module(
     private val runsDir get() = EngineerClient.mc.gameDirectory.toPath().resolve("config").resolve("adm").resolve("adr").resolve("runs")
     private val catDir get() = EngineerClient.mc.gameDirectory.toPath().resolve("config").resolve("adm").resolve("adr").resolve("catalogue")
 
+    /** A recording per world, and ADR Online's party tracking beside it. */
     init {
         on<LevelEvent.Load> {
             if (!tidied) { tidied = true; tidyRunsFolder(); checkUnlisted(); uploadMissing(auto = true) }
@@ -154,7 +155,10 @@ object ADR : Module(
         on<LevelEvent.Unload> {
             EngineerClient.safely("adr end") { session?.finish(); session = null }
         }
+    }
 
+    /** The recording's client ticks and frames, and what you do to blocks. */
+    init {
         on<TickEvent.End> {
             val s = session ?: return@on
             EngineerClient.safely("adr tick") { s.onTick(level) }
@@ -189,6 +193,10 @@ object ADR : Module(
         // Server ticks (Odin's, from the server's per-tick ping): the server's own clock, which falls
         // behind the client's 20 a second when the server lags (what split timers and tick timers use).
         on<TickEvent.Server> { EngineerClient.safely("adr server tick") { session?.onServerTick() } }
+    }
+
+    /** What the server sends, straight off the network: teleports, sounds, pickups, chat and chests. */
+    init {
         // Teleports the server puts you through (etherwarp, leaps, the Teleport Maze pads...).
         onReceive<ClientboundPlayerPositionPacket> {
             val player = EngineerClient.mc.player
@@ -235,6 +243,10 @@ object ADR : Module(
             val at = pos.immutable(); val open = b1
             EngineerClient.mc.execute { EngineerClient.safely("adr chest") { session?.onChestEvent(at, open) } }
         }
+    }
+
+    /** What the screen shows: the HUD as the server sends it, the room you're in, the containers you open. */
+    init {
         // The HUD as the server sends it (HudCapture): the action bar (also sent as overlay chat, above), titles and boss bars.
         onReceive<ClientboundSetActionBarTextPacket> { val c = text(); EngineerClient.mc.execute { EngineerClient.safely("adr action bar") { session?.let { it.hud.actionBar(it.currentTick, c) } } } }
         onReceive<ClientboundSetTitleTextPacket> { val c = text(); EngineerClient.mc.execute { EngineerClient.safely("adr title") { session?.let { it.hud.title(it.currentTick, false, c) } } } }

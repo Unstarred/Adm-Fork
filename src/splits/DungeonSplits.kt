@@ -252,124 +252,15 @@ object DungeonSplits : Module(
             serverTicks = 0
         }
 
-        // Odin's server tick: the server's own clock, which falls behind when it lags. Odin posts it from the network
-        // thread (Connection.channelRead0, on a ping packet, in 0.3.7 and 0.4.0), while everything it advances is the
-        // client thread's: so it is counted there, queued behind the packets that came before it. The lag sample keeps
-        // the time it arrived, so a slow frame on the client doesn't read as the server lagging.
-        on<TickEvent.Server> {
-            val arrived = System.currentTimeMillis()
-            EngineerClient.mc.execute {
-                serverTicks++
-                val now = serverTicks
-                EngineerClient.safely("sub splits server tick") { subs.onServerTick(); sampleLag(Stamp(arrived, now)) }
-                EngineerClient.safely("storm detail") {
-                    storm.onServerTick(now)
-                    // Show Crush Info: each 20-tick crush check from his lightning until he dies.
-                    val t = storm.phase(now)
-                    if (enabled && showCrushInfo.enabled && storm.checking && t != null && StormCrush.isCheck(t))
-                        crushView.check(now)?.let { (v, armed) -> storm.onCheck(now, v, armed) }
-                }
-            }
-        }
+        on<TickEvent.Server> { countServerTick() }
 
         // Chat straight off the network, before any mod can hide it — chat cleaners drop exactly
         // the terminal and gate lines the splits are timed from.
-        onReceive<ClientboundSystemChatPacket>(priority = 1000, ignoreCancelled = true) {
-            if (overlay) return@onReceive
-            val text = content.string.replace(CONTROL_CODES, "")
-            val at = now()
-            EngineerClient.mc.execute {
-                EngineerClient.safely("splits chat") {
-                    if (!DungeonUtils.inDungeons) return@safely
-                    // A P3 Sim practice: no splits (its own timer counts); its boss and terminal lines would start them again.
-                    if (P3Sim.inSim && Practice.active) return@safely
-                    tracker.onChat(text, at)
-                    moments.onChat(text, at)
-                    subs.onChat(text, at)
-                    blood.onChat(text, at)
-                    storm.onChat(text, at.tick, DungeonUtils.floor?.name == "M7")
-                    if (text == CORE_OPEN) core.onCoreOpen(at.tick)
-                    else if (text.startsWith(NECRON_LINE)) core.onNecron()
-                }
-            }
-        }
+        onReceive<ClientboundSystemChatPacket>(priority = 1000, ignoreCancelled = true) { onSystemChat() }
 
-        // A door falling: its 36 blocks turn to barrier as it starts, and those barriers to air
-        // when it is down. Nothing else in the rush does either 36 at a time.
-        on<BlockUpdateEvent> {
-            if (blood.active) {
-                if (updated.block == Blocks.BARRIER && old.block != Blocks.BARRIER) barriers += pos.x to pos.z
-                else if (old.block == Blocks.BARRIER && updated.isAir) cleared += pos.x to pos.z
-            }
-            // A terminal section's door: its ~228 barriers turn to air in the tick the section ends
-            // (its last completion and its gate both in). Seen whatever chat cleaners hide.
-            if (open(SplitTracker.TERMS) && old.block == Blocks.BARRIER && updated.isAir) {
-                val section = SECTION_DOORS.indexOfFirst { (x, z) -> pos.x in x && pos.z in z }
-                if (section >= 0) sectionDoor[section]++
-            }
-            // A Storm pillar stepping down (a pad read): its layers go through moving pistons (going back up, they don't).
-            if (storm.active && updated.block == Blocks.MOVING_PISTON && pos.y in StormCrush.FLOOR..StormCrush.TOP) {
-                StormCrush.PILLARS.firstOrNull { pos.x == it.columnX && pos.z == it.columnZ }?.let {
-                    storm.onPillarStep(it, serverTicks); crushView.onStep(it, serverTicks)
-                }
-            }
-            // Maxor's beacon turning to bedrock is his kill.
-            if (open(SplitTracker.MAXOR) && pos.x == 73 && pos.y == 221 && pos.z == 73 && updated.block == Blocks.BEDROCK) {
-                subs.onMaxorKilled(now())
-            }
-        }
+        on<BlockUpdateEvent> { onBlockUpdate() }
 
-        on<TickEvent.End> {
-            EngineerClient.safely("sim odin splits") { SimOdinSplits.tick() }
-            if (!DungeonUtils.inDungeons) return@on
-            EngineerClient.safely("split bests") { recordSplitBests() }
-            if (barriers.size >= DoorBlocks.DOOR_BLOCKS) door(barriers) { at, a, b -> blood.onDoorStart(at, a, b) }
-            if (cleared.size >= DoorBlocks.DOOR_BLOCKS) door(cleared) { at, a, b -> blood.onDoorDown(at, a, b) }
-            barriers.clear(); cleared.clear()
-            for (i in sectionDoor.indices) {
-                if (sectionDoor[i] >= SECTION_DOOR_BLOCKS) {
-                    subs.onSectionDoor(now(), i + 1)
-                }
-                sectionDoor[i] = 0
-            }
-
-            // Storm and Necron where the server last put them (not where they are drawn, 3 ticks behind).
-            if (open(SplitTracker.STORM)) bossWither(level, "Storm")?.positionCodec?.base?.let {
-                subs.onStormPosition(now(), it.x, it.y, it.z)
-                storm.onPosition(serverTicks, it.x, it.y, it.z)
-            }
-            if (open(SplitTracker.NECRON)) bossWither(level, "Necron")?.let { necron ->
-                necronId = necron.id
-                subs.onNecronPosition(now(), necron.positionCodec.base.distanceTo(NECRON_MID))
-            }
-
-            // The key is an armor stand named "Wither Key"; it appears where the last mob died.
-            if (blood.active) for (e in level.entitiesForRendering()) {
-                if (e !is ArmorStand || e.id in keysSeen) continue
-                val name = e.customName?.string ?: continue
-                if (KEY.containsMatchIn(name)) {
-                    keysSeen += e.id
-                    blood.onKeySpawned(now(), distanceTo(e))
-                }
-            }
-
-            // Goldor's leap ends when the last teammate is inside the core.
-            val inCore = if (subs.watchingCore || open(SplitTracker.GOLDOR)) everyoneInCore(level) else false
-            if (inCore == true) {
-                subs.onEveryoneInCore(now())
-                moments.onEveryoneInCore(now())
-            }
-            // The backup, only when the box can't tell (someone out of render distance): Goldor
-            // starting to move, which he does once everyone is in.
-            if (open(SplitTracker.GOLDOR) && moments.waitingForCore) watchGoldor(level, trusted = inCore == null) else goldorAt = null
-
-            // The Goldor sub split: watched from S4's start (or the core opening).
-            subs.s4Start?.let { core.onS4(it.tick) }
-            if (core.active) watchCore(level)
-
-            // The Watcher moving off his starting spot, once his first spawns are out.
-            if (open(SplitTracker.BLOOD) && moments.waitingForWatcher) watchWatcher(level)
-        }
+        on<TickEvent.End> { onTickEnd() }
 
         on<EntityEvent.Add> {
             val e = entity
@@ -399,6 +290,128 @@ object DungeonSplits : Module(
             if (Witherborn.isBoss(entity) && open(SplitTracker.MAXOR) && distanceTo(entity) <= 48) subs.onMaxorDead(now())
             watchedMobs.remove(entity.id)
         }
+    }
+
+    /**
+     * Odin's server tick: the server's own clock, which falls behind when it lags. Odin posts it from the network
+     * thread (Connection.channelRead0, on a ping packet, in 0.3.7 and 0.4.0), while everything it advances is the
+     * client thread's: so it is counted there, queued behind the packets that came before it. The lag sample keeps
+     * the time it arrived, so a slow frame on the client doesn't read as the server lagging.
+     */
+    private fun TickEvent.Server.countServerTick() {
+        val arrived = System.currentTimeMillis()
+        EngineerClient.mc.execute {
+            serverTicks++
+            val now = serverTicks
+            EngineerClient.safely("sub splits server tick") { subs.onServerTick(); sampleLag(Stamp(arrived, now)) }
+            EngineerClient.safely("storm detail") {
+                storm.onServerTick(now)
+                // Show Crush Info: each 20-tick crush check from his lightning until he dies.
+                val t = storm.phase(now)
+                if (enabled && showCrushInfo.enabled && storm.checking && t != null && StormCrush.isCheck(t))
+                    crushView.check(now)?.let { (v, armed) -> storm.onCheck(now, v, armed) }
+            }
+        }
+    }
+
+    /** A chat line in a dungeon, timed as it arrived and handed to the trackers on the client thread. */
+    private fun ClientboundSystemChatPacket.onSystemChat() {
+        if (overlay) return
+        val text = content.string.replace(CONTROL_CODES, "")
+        val at = now()
+        EngineerClient.mc.execute {
+            EngineerClient.safely("splits chat") {
+                if (!DungeonUtils.inDungeons) return@safely
+                // A P3 Sim practice: no splits (its own timer counts); its boss and terminal lines would start them again.
+                if (P3Sim.inSim && Practice.active) return@safely
+                tracker.onChat(text, at)
+                moments.onChat(text, at)
+                subs.onChat(text, at)
+                blood.onChat(text, at)
+                storm.onChat(text, at.tick, DungeonUtils.floor?.name == "M7")
+                if (text == CORE_OPEN) core.onCoreOpen(at.tick)
+                else if (text.startsWith(NECRON_LINE)) core.onNecron()
+            }
+        }
+    }
+
+    /** What a block changing shows: a door falling, a terminal section's door opening, a Storm pillar stepping down, Maxor's kill. */
+    private fun BlockUpdateEvent.onBlockUpdate() {
+        // A door falling: its 36 blocks turn to barrier as it starts, and those barriers to air
+        // when it is down. Nothing else in the rush does either 36 at a time.
+        if (blood.active) {
+            if (updated.block == Blocks.BARRIER && old.block != Blocks.BARRIER) barriers += pos.x to pos.z
+            else if (old.block == Blocks.BARRIER && updated.isAir) cleared += pos.x to pos.z
+        }
+        // A terminal section's door: its ~228 barriers turn to air in the tick the section ends
+        // (its last completion and its gate both in). Seen whatever chat cleaners hide.
+        if (open(SplitTracker.TERMS) && old.block == Blocks.BARRIER && updated.isAir) {
+            val section = SECTION_DOORS.indexOfFirst { (x, z) -> pos.x in x && pos.z in z }
+            if (section >= 0) sectionDoor[section]++
+        }
+        // A Storm pillar stepping down (a pad read): its layers go through moving pistons (going back up, they don't).
+        if (storm.active && updated.block == Blocks.MOVING_PISTON && pos.y in StormCrush.FLOOR..StormCrush.TOP) {
+            StormCrush.PILLARS.firstOrNull { pos.x == it.columnX && pos.z == it.columnZ }?.let {
+                storm.onPillarStep(it, serverTicks); crushView.onStep(it, serverTicks)
+            }
+        }
+        // Maxor's beacon turning to bedrock is his kill.
+        if (open(SplitTracker.MAXOR) && pos.x == 73 && pos.y == 221 && pos.z == 73 && updated.block == Blocks.BEDROCK) {
+            subs.onMaxorKilled(now())
+        }
+    }
+
+    /** Each client tick in a dungeon: the doors, the bosses where the server put them, the key, the core and the Watcher. */
+    private fun TickEvent.End.onTickEnd() {
+        EngineerClient.safely("sim odin splits") { SimOdinSplits.tick() }
+        if (!DungeonUtils.inDungeons) return
+        EngineerClient.safely("split bests") { recordSplitBests() }
+        if (barriers.size >= DoorBlocks.DOOR_BLOCKS) door(barriers) { at, a, b -> blood.onDoorStart(at, a, b) }
+        if (cleared.size >= DoorBlocks.DOOR_BLOCKS) door(cleared) { at, a, b -> blood.onDoorDown(at, a, b) }
+        barriers.clear(); cleared.clear()
+        for (i in sectionDoor.indices) {
+            if (sectionDoor[i] >= SECTION_DOOR_BLOCKS) {
+                subs.onSectionDoor(now(), i + 1)
+            }
+            sectionDoor[i] = 0
+        }
+
+        // Storm and Necron where the server last put them (not where they are drawn, 3 ticks behind).
+        if (open(SplitTracker.STORM)) bossWither(level, "Storm")?.positionCodec?.base?.let {
+            subs.onStormPosition(now(), it.x, it.y, it.z)
+            storm.onPosition(serverTicks, it.x, it.y, it.z)
+        }
+        if (open(SplitTracker.NECRON)) bossWither(level, "Necron")?.let { necron ->
+            necronId = necron.id
+            subs.onNecronPosition(now(), necron.positionCodec.base.distanceTo(NECRON_MID))
+        }
+
+        // The key is an armor stand named "Wither Key"; it appears where the last mob died.
+        if (blood.active) for (e in level.entitiesForRendering()) {
+            if (e !is ArmorStand || e.id in keysSeen) continue
+            val name = e.customName?.string ?: continue
+            if (KEY.containsMatchIn(name)) {
+                keysSeen += e.id
+                blood.onKeySpawned(now(), distanceTo(e))
+            }
+        }
+
+        // Goldor's leap ends when the last teammate is inside the core.
+        val inCore = if (subs.watchingCore || open(SplitTracker.GOLDOR)) everyoneInCore(level) else false
+        if (inCore == true) {
+            subs.onEveryoneInCore(now())
+            moments.onEveryoneInCore(now())
+        }
+        // The backup, only when the box can't tell (someone out of render distance): Goldor
+        // starting to move, which he does once everyone is in.
+        if (open(SplitTracker.GOLDOR) && moments.waitingForCore) watchGoldor(level, trusted = inCore == null) else goldorAt = null
+
+        // The Goldor sub split: watched from S4's start (or the core opening).
+        subs.s4Start?.let { core.onS4(it.tick) }
+        if (core.active) watchCore(level)
+
+        // The Watcher moving off his starting spot, once his first spawns are out.
+        if (open(SplitTracker.BLOOD) && moments.waitingForWatcher) watchWatcher(level)
     }
 
     /**
