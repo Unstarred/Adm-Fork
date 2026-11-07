@@ -12,6 +12,7 @@ import com.odtheking.odin.utils.skyblock.LocationUtils
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
 import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.client.multiplayer.ClientLevel
+import net.minecraft.client.player.LocalPlayer
 import net.minecraft.commands.arguments.blocks.BlockStateParser
 import net.minecraft.core.BlockPos
 import net.minecraft.core.component.DataComponents
@@ -656,11 +657,13 @@ class RunRecorder(
     }
 
     private val seenIds = HashSet<Int>()
+    /** The moves in this tick's "e" line so far: 0 at the top of [recordEntities], counted up by [recordMove]. */
+    private var movedCount = 0
 
     private fun recordEntities(level: ClientLevel) {
         seenIds.clear()
         val moved = StringBuilder()
-        var movedCount = 0
+        movedCount = 0
         val me = EngineerClient.mc.player
         // Mobs more than FAR_HALF blocks from you move on every other tick only (the viewer fills in
         // the one between): far off, 10 a second is plenty, and they are most of the moves.
@@ -680,44 +683,7 @@ class RunRecorder(
             // Mobs turn their heads apart from their bodies (the way they look at you).
             val headYaw = if (e is LivingEntity) e.yHeadRot else e.yRot
             if (t == null) {
-                // Arrows fly on the game's own physics, so their flight is the spawn and its velocity
-                // ("v", blocks a tick): the viewer works out the rest. Only when the arrow strays from
-                // that by more than a tenth of a block (a hit, a server correction) is there a new
-                // flight ("arc"); when it sticks it is an ordinary entity again - one move to where it
-                // stuck - and "gone" ends it.
-                // Wither skulls and fireballs fly the same way, on their own physics (see Tracked.fly).
-                val flight = when {
-                    name.isNotEmpty() -> NO_FLIGHT
-                    e is AbstractArrow -> if ((e as ArrowInGroundInvoker).`ec$isInGround`()) NO_FLIGHT else ARROW // (already stuck: an ordinary entity)
-                    e is AbstractHurtingProjectile -> POWERED
-                    else -> NO_FLIGHT
-                }
-                val tr = Tracked(q(e.x), q(e.y), q(e.z), deg(e.yRot), colored, deg(headYaw), flight)
-                tracked[id] = tr
-                if (e is AbstractHurtingProjectile && flight == POWERED) {
-                    tr.accel = Math.round(e.accelerationPower * 10000) / 10000.0
-                    // (the game's inertia: 0.95, a blue wither skull's 0.73)
-                    tr.inertia = if (e is WitherSkull && e.isDangerous) 0.73 else 0.95
-                }
-                if (flight != NO_FLIGHT) {
-                    // A projectile's spawn is its flight: where it is and how fast it goes. It has no
-                    // name, and which way it faces is its velocity.
-                    tr.launch(e.x, e.y, e.z, e.deltaMovement)
-                    emit("""{"k":"spawn","t":$tick,"id":$id,"type":${str(typeOf(e))}${tr.flight()}}""")
-                    continue
-                }
-                // Falling blocks carry which block they are, so the viewer can draw it.
-                val block = (e as? FallingBlockEntity)?.let { ",\"block\":" + str(BlockStateParser.serialize(it.blockState)) } ?: ""
-                // Dropped items say what they are (secret items: Decoys, Spirit Leaps...).
-                val item = (e as? ItemEntity)?.item?.let { ",\"item\":" + str(it.hoverName.string.replace(FORMAT_CODES, "")) + ",\"itemId\":" + str(vanillaId(it)) } ?: ""
-                // (no name: no "name" - the viewer takes it as "")
-                val named = if (name.isEmpty()) "" else ",\"name\":${str(name)}$c"
-                emit("""{"k":"spawn","t":$tick,"id":$id,"type":${str(typeOf(e))}$named,"x":${n(e.x)},"y":${n(e.y)},"z":${n(e.z)},"yaw":${w(e.yRot)}${if (e is LivingEntity) ",\"headYaw\":" + w(headYaw) else ""}${if (e is LivingEntity && e.isBaby) ",\"baby\":1" else ""}$block$item}""")
-                if (e is ArmorStand) {
-                    recordStand(e)
-                    tagOf(level, e)?.let { tg -> tags[id] = tg; emit("""{"k":"tag","t":$tick,"id":$id,"of":${tg.mob},"dx":${tg.dx},"dy":${tg.dy},"dz":${tg.dz}}""") }
-                }
-                if (e is ItemFrame) recordFrame(e)
+                recordSpawn(level, e, id, name, colored, c, headYaw)
                 continue
             }
             if (t.ballistic) {
@@ -741,28 +707,80 @@ class RunRecorder(
                 t.name = colored
                 emit("""{"k":"name","t":$tick,"id":$id,"name":${str(name)}$c}""")
             }
-            // Mobs at 1/100 of a block and whole degrees (finer is invisible), and only when that
-            // changes: a mob twitching less than that is not a move.
-            val qx = q(e.x); val qy = q(e.y); val qz = q(e.z); val qYaw = deg(e.yRot); val qHead = deg(headYaw)
-            // A name tag still in its place over its mob: nothing to write (the viewer follows the mob).
-            val tag = tags[id]
-            if (tag != null) {
-                val mob = level.getEntity(tag.mob)
-                if (mob != null && abs(mob.x + tag.dx - e.x) < 0.006 && abs(mob.y + tag.dy - e.y) < 0.006 && abs(mob.z + tag.dz - e.z) < 0.006) { t.x = qx; t.y = qy; t.z = qz; continue }
-                tags.remove(id)
-                emit("""{"k":"tag","t":$tick,"id":$id,"of":null}""")
-            }
-            if (oddTick && me != null && e.distanceToSqr(me) > FAR_HALF * FAR_HALF) continue
-            if (qx != t.x || qy != t.y || qz != t.z || qYaw != t.yaw || qHead != t.headYaw) {
-                t.x = qx; t.y = qy; t.z = qz; t.yaw = qYaw; t.headYaw = qHead
-                if (movedCount++ > 0) moved.append(',')
-                moved.append('[').append(id).append(',').append(m(e.x)).append(',').append(m(e.y)).append(',')
-                    .append(m(e.z)).append(',').append(qYaw.toInt())
-                if (e is LivingEntity) moved.append(',').append(qHead.toInt())
-                moved.append(']')
-            }
+            recordMove(level, e, t, id, headYaw, oddTick, me, moved)
         }
         if (movedCount > 0) emit("""{"k":"e","t":$tick,"d":[$moved]}""")
+        recordGone()
+    }
+
+    /** An entity seen for the first time: its "spawn" line (a projectile's is its flight), and its stand look, name tag and frame. */
+    private fun recordSpawn(level: ClientLevel, e: Entity, id: Int, name: String, colored: String, c: String, headYaw: Float) {
+        // Arrows fly on the game's own physics, so their flight is the spawn and its velocity
+        // ("v", blocks a tick): the viewer works out the rest. Only when the arrow strays from
+        // that by more than a tenth of a block (a hit, a server correction) is there a new
+        // flight ("arc"); when it sticks it is an ordinary entity again - one move to where it
+        // stuck - and "gone" ends it.
+        // Wither skulls and fireballs fly the same way, on their own physics (see Tracked.fly).
+        val flight = when {
+            name.isNotEmpty() -> NO_FLIGHT
+            e is AbstractArrow -> if ((e as ArrowInGroundInvoker).`ec$isInGround`()) NO_FLIGHT else ARROW // (already stuck: an ordinary entity)
+            e is AbstractHurtingProjectile -> POWERED
+            else -> NO_FLIGHT
+        }
+        val tr = Tracked(q(e.x), q(e.y), q(e.z), deg(e.yRot), colored, deg(headYaw), flight)
+        tracked[id] = tr
+        if (e is AbstractHurtingProjectile && flight == POWERED) {
+            tr.accel = Math.round(e.accelerationPower * 10000) / 10000.0
+            // (the game's inertia: 0.95, a blue wither skull's 0.73)
+            tr.inertia = if (e is WitherSkull && e.isDangerous) 0.73 else 0.95
+        }
+        if (flight != NO_FLIGHT) {
+            // A projectile's spawn is its flight: where it is and how fast it goes. It has no
+            // name, and which way it faces is its velocity.
+            tr.launch(e.x, e.y, e.z, e.deltaMovement)
+            emit("""{"k":"spawn","t":$tick,"id":$id,"type":${str(typeOf(e))}${tr.flight()}}""")
+            return
+        }
+        // Falling blocks carry which block they are, so the viewer can draw it.
+        val block = (e as? FallingBlockEntity)?.let { ",\"block\":" + str(BlockStateParser.serialize(it.blockState)) } ?: ""
+        // Dropped items say what they are (secret items: Decoys, Spirit Leaps...).
+        val item = (e as? ItemEntity)?.item?.let { ",\"item\":" + str(it.hoverName.string.replace(FORMAT_CODES, "")) + ",\"itemId\":" + str(vanillaId(it)) } ?: ""
+        // (no name: no "name" - the viewer takes it as "")
+        val named = if (name.isEmpty()) "" else ",\"name\":${str(name)}$c"
+        emit("""{"k":"spawn","t":$tick,"id":$id,"type":${str(typeOf(e))}$named,"x":${n(e.x)},"y":${n(e.y)},"z":${n(e.z)},"yaw":${w(e.yRot)}${if (e is LivingEntity) ",\"headYaw\":" + w(headYaw) else ""}${if (e is LivingEntity && e.isBaby) ",\"baby\":1" else ""}$block$item}""")
+        if (e is ArmorStand) {
+            recordStand(e)
+            tagOf(level, e)?.let { tg -> tags[id] = tg; emit("""{"k":"tag","t":$tick,"id":$id,"of":${tg.mob},"dx":${tg.dx},"dy":${tg.dy},"dz":${tg.dz}}""") }
+        }
+        if (e is ItemFrame) recordFrame(e)
+    }
+
+    /** A tracked entity's move this tick, as a row in [moved] (this tick's "e" line), when it moved enough to count. */
+    private fun recordMove(level: ClientLevel, e: Entity, t: Tracked, id: Int, headYaw: Float, oddTick: Boolean, me: LocalPlayer?, moved: StringBuilder) {
+        // Mobs at 1/100 of a block and whole degrees (finer is invisible), and only when that
+        // changes: a mob twitching less than that is not a move.
+        val qx = q(e.x); val qy = q(e.y); val qz = q(e.z); val qYaw = deg(e.yRot); val qHead = deg(headYaw)
+        // A name tag still in its place over its mob: nothing to write (the viewer follows the mob).
+        val tag = tags[id]
+        if (tag != null) {
+            val mob = level.getEntity(tag.mob)
+            if (mob != null && abs(mob.x + tag.dx - e.x) < 0.006 && abs(mob.y + tag.dy - e.y) < 0.006 && abs(mob.z + tag.dz - e.z) < 0.006) { t.x = qx; t.y = qy; t.z = qz; return }
+            tags.remove(id)
+            emit("""{"k":"tag","t":$tick,"id":$id,"of":null}""")
+        }
+        if (oddTick && me != null && e.distanceToSqr(me) > FAR_HALF * FAR_HALF) return
+        if (qx != t.x || qy != t.y || qz != t.z || qYaw != t.yaw || qHead != t.headYaw) {
+            t.x = qx; t.y = qy; t.z = qz; t.yaw = qYaw; t.headYaw = qHead
+            if (movedCount++ > 0) moved.append(',')
+            moved.append('[').append(id).append(',').append(m(e.x)).append(',').append(m(e.y)).append(',')
+                .append(m(e.z)).append(',').append(qYaw.toInt())
+            if (e is LivingEntity) moved.append(',').append(qHead.toInt())
+            moved.append(']')
+        }
+    }
+
+    /** The entities not seen this tick: forgotten, each with a "gone" line. */
+    private fun recordGone() {
         val gone = tracked.keys.filter { it !in seenIds }
         for (id in gone) {
             tracked.remove(id)

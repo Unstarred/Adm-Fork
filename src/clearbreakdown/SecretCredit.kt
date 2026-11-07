@@ -125,6 +125,11 @@ class SecretCredit(private val mergeMs: Long = 1000, private val exactMs: Long =
             for ((k, p) in eligible.withIndex()) give(i, p, shares[k].coerceAtMost(left.getValue(p)), true)
         }
 
+        return playerSecrets(apiTotals, credits)
+    }
+
+    /** Each player's credits room by room (one entry per name in [apiTotals]), and what their total has beyond the rooms. */
+    private fun playerSecrets(apiTotals: Map<String, Int?>, credits: List<Credit>): Map<String, PlayerSecrets> {
         return apiTotals.mapValues { (p, total) ->
             val rooms = LinkedHashMap<String, RoomSecrets>()
             for (c in credits.filter { it.player == p }.sortedBy { it.group }) {

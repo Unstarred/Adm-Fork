@@ -208,6 +208,11 @@ object UploadPacker {
 
     /** One pass over the run file: the summary the site lists it by (self, startMs, floor, party, ticks, cleared...) and what [pack] needs. */
     fun scan(file: Path, privateRun: Boolean): Scan {
+        return ScanReader().read(file, privateRun)
+    }
+
+    /** One [scan] under way: what the run file's lines so far have said. */
+    private class ScanReader {
         val summary = JsonObject()
         var ticks = 0
         var startTick: Int? = null
@@ -224,82 +229,89 @@ object UploadPacker {
         val mice = ArrayList<DoubleArray>() // time, x, y, mouse line, point
         var mouseLines = 0
         val blocks = BlockReader()
-        lines(Files.newInputStream(file)).use { r ->
-            for (line in r.lineSequence()) {
-                val kind = kindOf(line) ?: continue
-                val head = HEAD.find(line)
-                val t = head?.groupValues?.get(2)?.toInt()
-                if (t != null && t > ticks && kind !in WORLD) ticks = t
-                if (kind in WORLD) world += line
-                blocks.read(kind, line)
-                when (kind) {
-                    "meta" -> JsonParser.parseString(line).asJsonObject.let {
-                        summary.add("self", it["self"]); summary.add("startMs", it["startMs"])
-                        self = it["self"]?.asString ?: ""; startMs = it["startMs"]?.asLong ?: 0L
+
+        fun read(file: Path, privateRun: Boolean): Scan {
+            lines(Files.newInputStream(file)).use { r ->
+                for (line in r.lineSequence()) {
+                    val kind = kindOf(line) ?: continue
+                    val head = HEAD.find(line)
+                    val t = head?.groupValues?.get(2)?.toInt()
+                    if (t != null && t > ticks && kind !in WORLD) ticks = t
+                    if (kind in WORLD) world += line
+                    blocks.read(kind, line)
+                    when (kind) {
+                        "meta" -> JsonParser.parseString(line).asJsonObject.let {
+                            summary.add("self", it["self"]); summary.add("startMs", it["startMs"])
+                            self = it["self"]?.asString ?: ""; startMs = it["startMs"]?.asLong ?: 0L
+                        }
+                        "cam" -> {
+                            val d = JsonParser.parseString(line).asJsonObject.getAsJsonArray("d")
+                            d.forEachIndexed { k, f -> val a = f.asJsonArray; frames += doubleArrayOf(t!! - 1 + a[0].asDouble, a[1].asDouble, a[2].asDouble, camLines.toDouble(), k.toDouble()) }
+                            camLines++
+                        }
+                        "mouse" -> {
+                            val d = runCatching { JsonParser.parseString(line).asJsonObject.getAsJsonArray("d") }.getOrNull()
+                            d?.forEachIndexed { k, f -> val a = f.asJsonArray; mice += doubleArrayOf(t!! - 1 + a[0].asDouble, a[1].asDouble, a[2].asDouble, mouseLines.toDouble(), k.toDouble()) }
+                            mouseLines++
+                        }
+                        "floor" -> summary.add("floor", JsonParser.parseString(line).asJsonObject["floor"])
+                        "party" -> summary.add("party", JsonParser.parseString(line).asJsonObject["m"])
+                        "rooms" -> if (line.length > (layout?.length ?: -1)) layout = line
+                        "chat" -> {
+                            val l = JsonParser.parseString(line).asJsonObject
+                            val m = l["m"]?.asString ?: continue
+                            if (startTick == null && m.startsWith(RUN_START)) startTick = t ?: 0
+                            else if (RUN_END.containsMatchIn(m)) endTick = t ?: 0
+                        }
                     }
-                    "cam" -> {
-                        val d = JsonParser.parseString(line).asJsonObject.getAsJsonArray("d")
-                        d.forEachIndexed { k, f -> val a = f.asJsonArray; frames += doubleArrayOf(t!! - 1 + a[0].asDouble, a[1].asDouble, a[2].asDouble, camLines.toDouble(), k.toDouble()) }
-                        camLines++
-                    }
-                    "mouse" -> {
-                        val d = runCatching { JsonParser.parseString(line).asJsonObject.getAsJsonArray("d") }.getOrNull()
-                        d?.forEachIndexed { k, f -> val a = f.asJsonArray; mice += doubleArrayOf(t!! - 1 + a[0].asDouble, a[1].asDouble, a[2].asDouble, mouseLines.toDouble(), k.toDouble()) }
-                        mouseLines++
-                    }
-                    "floor" -> summary.add("floor", JsonParser.parseString(line).asJsonObject["floor"])
-                    "party" -> summary.add("party", JsonParser.parseString(line).asJsonObject["m"])
-                    "rooms" -> if (line.length > (layout?.length ?: -1)) layout = line
-                    "chat" -> {
-                        val l = JsonParser.parseString(line).asJsonObject
-                        val m = l["m"]?.asString ?: continue
-                        if (startTick == null && m.startsWith(RUN_START)) startTick = t ?: 0
-                        else if (RUN_END.containsMatchIn(m)) endTick = t ?: 0
+                    countEvents(kind, line, t)
+                }
+            }
+            if (!summary.has("floor")) summary.addProperty("floor", "")
+            if (!summary.has("party")) summary.add("party", JsonArray())
+            summary.addProperty("ticks", ticks)
+            // Whether it is a whole run (Mort's map to "☠ Defeated") and how long it took — worked out
+            // here so the server doesn't have to unpack the recording, which a big run can't afford on
+            // its CPU budget (Cloudflare error 1102).
+            val start = startTick; val end = endTick
+            val cleared = start != null && end != null && end > start
+            summary.addProperty("cleared", if (cleared) 1 else 0)
+            if (privateRun) summary.addProperty("private", 1)
+            if (cleared) summary.addProperty("timeMs", (end!! - start!!) * 50L)
+            return Scan(summary, layout?.replaceFirst(""""k":"rooms"""", """"k":"roomsAll""""), world, counts, projs, self, startMs, thinCamera(frames, camLines), camTimes(frames), blocks.changes(), thinMouse(mice, mouseLines))
+        }
+
+        /** Each mob's events (for leaving out what a party member's upload has), and projectiles. */
+        private fun countEvents(kind: String, line: String, t: Int?) {
+            if (kind == "e") {
+                var mine: JsonArray? = null
+                for (m in ROW_ID.findAll(line)) {
+                    val id = m.groupValues[1].toInt()
+                    counts.merge(id, 1, Int::plus)
+                    if (id in flying) {
+                        val rows = mine ?: JsonParser.parseString(line).asJsonObject.getAsJsonArray("d").also { mine = it }
+                        val row = rows.first { it.asJsonArray[0].asInt == id }.asJsonArray
+                        val p = projs.getValue(id)
+                        val at = JsonArray().apply { add(t!! - p.t0); for (i in 1 until row.size()) add(row[i]) }
+                        if (p.stuck == null) p.stuck = at else if (p.moves.size() < MAX_MOVES) p.moves.add(at) else p.foldable = false
                     }
                 }
-                // Each mob's events (for leaving out what a party member's upload has), and projectiles.
-                if (kind == "e") {
-                    var mine: JsonArray? = null
-                    for (m in ROW_ID.findAll(line)) {
-                        val id = m.groupValues[1].toInt()
-                        counts.merge(id, 1, Int::plus)
-                        if (id in flying) {
-                            val rows = mine ?: JsonParser.parseString(line).asJsonObject.getAsJsonArray("d").also { mine = it }
-                            val row = rows.first { it.asJsonArray[0].asInt == id }.asJsonArray
-                            val p = projs.getValue(id)
-                            val at = JsonArray().apply { add(t!! - p.t0); for (i in 1 until row.size()) add(row[i]) }
-                            if (p.stuck == null) p.stuck = at else if (p.moves.size() < MAX_MOVES) p.moves.add(at) else p.foldable = false
-                        }
+            } else if (kind in ENTITY_KINDS || kind == "tag" || (kind == "eq" && line.contains("\"id\":"))) {
+                val id = ID.find(line)?.groupValues?.get(1)?.toInt() ?: return
+                if (kind != "tag") counts.merge(id, 1, Int::plus)
+                when {
+                    kind == "spawn" && line.contains("\"v\":[") -> { projs[id] = Proj(JsonParser.parseString(line).asJsonObject); flying += id }
+                    id !in flying -> {}
+                    kind == "arc" -> projs.getValue(id).let { p ->
+                        val l = JsonParser.parseString(line).asJsonObject
+                        val v = l.getAsJsonArray("v")
+                        p.arcs.add(JsonArray().apply { add(t!! - p.t0); add(l["x"]); add(l["y"]); add(l["z"]); v.forEach(::add) })
                     }
-                } else if (kind in ENTITY_KINDS || kind == "tag" || (kind == "eq" && line.contains("\"id\":"))) {
-                    val id = ID.find(line)?.groupValues?.get(1)?.toInt() ?: continue
-                    if (kind != "tag") counts.merge(id, 1, Int::plus)
-                    when {
-                        kind == "spawn" && line.contains("\"v\":[") -> { projs[id] = Proj(JsonParser.parseString(line).asJsonObject); flying += id }
-                        id !in flying -> {}
-                        kind == "arc" -> projs.getValue(id).let { p ->
-                            val l = JsonParser.parseString(line).asJsonObject
-                            val v = l.getAsJsonArray("v")
-                            p.arcs.add(JsonArray().apply { add(t!! - p.t0); add(l["x"]); add(l["y"]); add(l["z"]); v.forEach(::add) })
-                        }
-                        kind == "gone" -> { projs.getValue(id).gone = t; flying -= id }
-                        else -> projs.getValue(id).foldable = false
-                    }
+                    kind == "gone" -> { projs.getValue(id).gone = t; flying -= id }
+                    else -> projs.getValue(id).foldable = false
                 }
             }
         }
-        if (!summary.has("floor")) summary.addProperty("floor", "")
-        if (!summary.has("party")) summary.add("party", JsonArray())
-        summary.addProperty("ticks", ticks)
-        // Whether it is a whole run (Mort's map to "☠ Defeated") and how long it took — worked out
-        // here so the server doesn't have to unpack the recording, which a big run can't afford on
-        // its CPU budget (Cloudflare error 1102).
-        val start = startTick; val end = endTick
-        val cleared = start != null && end != null && end > start
-        summary.addProperty("cleared", if (cleared) 1 else 0)
-        if (privateRun) summary.addProperty("private", 1)
-        if (cleared) summary.addProperty("timeMs", (end!! - start!!) * 50L)
-        return Scan(summary, layout?.replaceFirst(""""k":"rooms"""", """"k":"roomsAll""""), world, counts, projs, self, startMs, thinCamera(frames, camLines), camTimes(frames), blocks.changes(), thinMouse(mice, mouseLines))
     }
 
     /** The frames thinCamera kept (it marks them, f[5]): their times as the viewer reads them (partial ticks in tenths). */

@@ -112,6 +112,7 @@ object ClearBreakdown : Module(
         return DungeonScan.tiles[tx + tz * 6].room
     }
 
+    /** The world and the floor starting, the run's chat lines, and the client tick. */
     init {
         on<LevelEvent.Load> { EngineerClient.safely("clear breakdown reset") { reset(); closeSync() } }
         // Odin posts this one (and checkmarks) from the network thread: over to the client thread.
@@ -125,8 +126,10 @@ object ClearBreakdown : Module(
         }
 
         on<TickEvent.End> { EngineerClient.safely("clear breakdown tick") { tick() } }
+    }
 
-        // Secrets seen happening (Sightings), off the same packets ADR records them from.
+    /** Secrets seen happening (Sightings), off the same packets ADR records them from. */
+    init {
         onReceive<ClientboundTakeItemEntityPacket> {
             val item = itemId; val by = playerId
             mc.execute { EngineerClient.safely("clear breakdown pickup") { Sightings.onPickup(item, by) } }
@@ -144,7 +147,10 @@ object ClearBreakdown : Module(
         }
         on<BlockInteractEvent> { EngineerClient.safely("clear breakdown click") { Sightings.onClick(pos) } }
         on<BlockUpdateEvent> { EngineerClient.safely("clear breakdown block") { Sightings.onBlockChange(pos, updated) } }
+    }
 
+    /** The rooms' checkmarks and secret counts (Odin's map, the action bar, OdinSync), and the party's sightings through ADR Online. */
+    init {
         on<CheckmarkUpdateEvent> {
             val key = roomKey(room); val name = roomName(room); val counts = room.type !in NOT_CLEARS
             val mark = when (checkmark) {

@@ -299,15 +299,8 @@ class RoomPack internal constructor(
                     DoorSlot(s.get("tile").asTile() ?: return@mapNotNull null, (s.str("side") ?: return@mapNotNull null).firstOrNull() ?: return@mapNotNull null,
                         s.bool("open") ?: false, s.obj("seal")?.let { parseSeal(it) })
                 },
-                blockEntities = o.arr("blockEntities").objects().mapNotNull { b ->
-                    val x = b.int("x") ?: return@mapNotNull null; val y = b.int("y") ?: return@mapNotNull null; val z = b.int("z") ?: return@mapNotNull null
-                    RoomBlockEntity(Pos(x, y, z), b.str("type") ?: "other", b.int("tex"), b.arr("text")?.strings(), b.bool("marker") ?: false, b.str("src"))
-                },
-                secrets = o.arr("secrets").objects().mapNotNull { s ->
-                    val x = s.int("x") ?: return@mapNotNull null; val y = s.int("y") ?: return@mapNotNull null; val z = s.int("z") ?: return@mapNotNull null
-                    RoomSecret(s.str("id") ?: "s?", s.str("type") ?: "chest", s.str("bucket"), Pos(x, y, z), s.str("facing"),
-                        s.get("lever").asPos(), s.get("alt").asPosList(), s.bool("baked") ?: false, s.str("src"))
-                },
+                blockEntities = parseBlockEntities(o),
+                secrets = parseSecrets(o),
                 levers = o.arr("levers").objects().mapNotNull { l -> RoomLever(l.get("pos").asPos() ?: return@mapNotNull null, l.get("opens").asPosList()) },
                 crypts = o.arr("crypts")?.map { it.asPosList() }.orEmpty(),
                 superboomWalls = o.arr("superboomWalls")?.map { it.asPosList() }.orEmpty(),
@@ -315,12 +308,7 @@ class RoomPack internal constructor(
                 crushers = o.arr("crushers").objects().map { c ->
                     RoomCrusher(c.str("id") ?: "crusher", c.arr("slab").ints(), c.str("axis"), c.int("sign") ?: 1, c.int("sweep") ?: 0, c.str("material"))
                 },
-                tripwires = o.arr("tripwires")?.mapNotNull { t ->
-                    val a = t.asArr() ?: return@mapNotNull null
-                    if (a.size() < 3) return@mapNotNull null
-                    RoomTripwire(Pos(a[0].asIntOrNull() ?: return@mapNotNull null, a[1].asIntOrNull() ?: return@mapNotNull null, a[2].asIntOrNull() ?: return@mapNotNull null),
-                        a.getOrNull(3).asStr())
-                }.orEmpty(),
+                tripwires = parseTripwires(o),
                 puzzle = o.obj("puzzle")?.let { p ->
                     RoomPuzzle(p.str("kind") ?: "unknown", p.obj("anchors")?.entrySet()?.associate { (k, v) -> k to anchorList(v) }.orEmpty())
                 },
@@ -334,6 +322,27 @@ class RoomPack internal constructor(
                 clear = o.str("clear"),
             )
         }
+
+        /** FORMAT-rooms 7.4: the design's block entities, each one without an x, y or z left out. */
+        private fun parseBlockEntities(o: JsonObject) = o.arr("blockEntities").objects().mapNotNull { b ->
+            val x = b.int("x") ?: return@mapNotNull null; val y = b.int("y") ?: return@mapNotNull null; val z = b.int("z") ?: return@mapNotNull null
+            RoomBlockEntity(Pos(x, y, z), b.str("type") ?: "other", b.int("tex"), b.arr("text")?.strings(), b.bool("marker") ?: false, b.str("src"))
+        }
+
+        /** FORMAT-rooms 7.5: the design's secrets, each one without an x, y or z left out. */
+        private fun parseSecrets(o: JsonObject) = o.arr("secrets").objects().mapNotNull { s ->
+            val x = s.int("x") ?: return@mapNotNull null; val y = s.int("y") ?: return@mapNotNull null; val z = s.int("z") ?: return@mapNotNull null
+            RoomSecret(s.str("id") ?: "s?", s.str("type") ?: "chest", s.str("bucket"), Pos(x, y, z), s.str("facing"),
+                s.get("lever").asPos(), s.get("alt").asPosList(), s.bool("baked") ?: false, s.str("src"))
+        }
+
+        /** The design's tripwire hooks, `[x, y, z, facing]` each; one without a whole position is left out. */
+        private fun parseTripwires(o: JsonObject) = o.arr("tripwires")?.mapNotNull { t ->
+            val a = t.asArr() ?: return@mapNotNull null
+            if (a.size() < 3) return@mapNotNull null
+            RoomTripwire(Pos(a[0].asIntOrNull() ?: return@mapNotNull null, a[1].asIntOrNull() ?: return@mapNotNull null, a[2].asIntOrNull() ?: return@mapNotNull null),
+                a.getOrNull(3).asStr())
+        }.orEmpty()
 
         /** An anchor is one `[x,y,z]` or a list of them. */
         private fun anchorList(v: JsonElement): List<Pos> {

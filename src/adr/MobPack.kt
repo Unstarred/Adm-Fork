@@ -230,6 +230,11 @@ internal class MobPlan private constructor(
          * (projectiles folded into their "proj" line).
          */
         fun read(lines: Sequence<String>, skip: (Int) -> Boolean): MobPlan {
+            return PlanReader(skip).read(lines)
+        }
+
+        /** One [read] under way: what the run's lines so far have said about its mobs and players. */
+        private class PlanReader(private val skip: (Int) -> Boolean) {
             var farHalf = false
             val players = HashMap<String, MutableList<DoubleArray>>()
             val lives = HashMap<Int, MutableList<Life>>()
@@ -242,79 +247,85 @@ internal class MobPlan private constructor(
             val looks = HashMap<Int, String>() // id -> its last spawn's fields but place and name
             val bridged = HashSet<Long>(); val bridgedGones = HashSet<Long>()
             val kindRe = Regex(""""k":"(\w+)"""")
-            for (line in lines) {
-                val kind = kindRe.find(line.take(24))?.groupValues?.get(1) ?: continue
-                if (kind != "spawn" && kind != "gone" && kind != "e" && kind != "stand" && kind != "eq" && kind != "name" && kind != "p" && kind != "meta") continue
-                val l = runCatching { JsonParser.parseString(line).asJsonObject }.getOrNull() ?: continue
-                if (kind == "meta") { farHalf = (l["farHalf"]?.asInt ?: 0) > 0; continue }
-                val t = l["t"]?.asInt ?: continue
-                when (kind) {
-                    "p" -> for (d in l.getAsJsonArray("d") ?: continue) {
-                        val r = d.asJsonArray
-                        if (r.size() < 4 || !r[1].isJsonPrimitive) continue
-                        players.getOrPut(r[0].asString) { ArrayList() } += doubleArrayOf(t.toDouble(), r[1].asDouble, r[2].asDouble, r[3].asDouble)
-                    }
-                    "e" -> for (d in l.getAsJsonArray("d") ?: continue) {
-                        val r = d.asJsonArray
-                        val id = r[0].asInt
-                        val life = current[id] ?: continue
-                        life.rows += doubleArrayOf(t.toDouble(), r[1].asDouble, r[2].asDouble, r[3].asDouble, r[4].asDouble, if (r.size() > 5) r[5].asDouble else Double.NaN)
-                    }
-                    "spawn" -> {
-                        val id = l["id"]?.asInt ?: continue
-                        if (skip(id)) continue
-                        current[id]?.let { if (it.gone == null) it.gone = t }
-                        val list = lives.getOrPut(id) { ArrayList() }
-                        val type = l["type"]?.asString ?: ""
-                        val look = JsonObject().apply { for ((k, v) in l.entrySet()) if (k !in NOT_LOOK) add(k, v) }.toString()
-                        // Back in range looking as it went: the same life on (the viewer has it
-                        // stay where it was last seen meanwhile), the spot it's back at a move.
-                        val prev = list.lastOrNull()
-                        val pg = prev?.gone
-                        if (prev != null && pg != null && pg < t && current[id] == null && !prev.proj && !l.has("v") && prev.type == type && looks[id] == look) {
-                            bridged += key(id, t); bridgedGones += key(id, pg)
-                            prev.gone = null; current[id] = prev
-                            prev.rows += doubleArrayOf(t.toDouble(), l["x"]?.asDouble ?: 0.0, l["y"]?.asDouble ?: 0.0, l["z"]?.asDouble ?: 0.0, l["yaw"]?.asDouble ?: 0.0, l["headYaw"]?.asDouble ?: Double.NaN)
-                            if (!(l["name"]?.asString.isNullOrEmpty() && l["c"]?.asString.isNullOrEmpty())) { prev.named = true; if (type == STAND) shows += id }
-                            continue
+
+            fun read(lines: Sequence<String>): MobPlan {
+                for (line in lines) {
+                    val kind = kindRe.find(line.take(24))?.groupValues?.get(1) ?: continue
+                    if (kind != "spawn" && kind != "gone" && kind != "e" && kind != "stand" && kind != "eq" && kind != "name" && kind != "p" && kind != "meta") continue
+                    val l = runCatching { JsonParser.parseString(line).asJsonObject }.getOrNull() ?: continue
+                    if (kind == "meta") { farHalf = (l["farHalf"]?.asInt ?: 0) > 0; continue }
+                    val t = l["t"]?.asInt ?: continue
+                    when (kind) {
+                        "p" -> for (d in l.getAsJsonArray("d") ?: continue) {
+                            val r = d.asJsonArray
+                            if (r.size() < 4 || !r[1].isJsonPrimitive) continue
+                            players.getOrPut(r[0].asString) { ArrayList() } += doubleArrayOf(t.toDouble(), r[1].asDouble, r[2].asDouble, r[3].asDouble)
                         }
-                        looks[id] = look
-                        val life = Life(id, list.size, t, null, type, l.has("v"))
-                        life.at = doubleArrayOf(l["x"]?.asDouble ?: 0.0, l["y"]?.asDouble ?: 0.0, l["z"]?.asDouble ?: 0.0)
-                        list += life; current[id] = life
-                        spawnTicks.getOrPut(id) { HashSet() } += t
-                        if (!(l["name"]?.asString.isNullOrEmpty() && l["c"]?.asString.isNullOrEmpty())) { life.named = true; if (type == STAND) shows += id }
-                    }
-                    "gone" -> {
-                        val id = l["id"]?.asInt ?: continue
-                        val life = current.remove(id) ?: continue
-                        life.gone = t
-                    }
-                    "stand" -> {
-                        val id = l["id"]?.asInt ?: continue
-                        val f = l["f"]?.asInt ?: 0
-                        stands[id] = (stands[id] ?: true) && (f and INVISIBLE) != 0
-                    }
-                    "eq" -> {
-                        val id = l["id"]?.takeIf { !it.isJsonNull }?.asInt ?: continue
-                        val worn = l.getAsJsonArray("eq")?.any { it is JsonPrimitive && it.asString.isNotEmpty() } == true
-                        if (worn || !l["headTex"]?.takeIf { !it.isJsonNull }?.asString.isNullOrEmpty()) { shows += id; wornIds += id }
-                        if ((l.getAsJsonArray("eq")?.firstOrNull() as? JsonPrimitive)?.asString == "minecraft:player_head") heldHead += id
-                    }
-                    "name" -> {
-                        val id = l["id"]?.asInt ?: continue
-                        if (!(l["name"]?.asString.isNullOrEmpty() && l["c"]?.asString.isNullOrEmpty())) { shows += id; current[id]?.named = true }
+                        "e" -> for (d in l.getAsJsonArray("d") ?: continue) {
+                            val r = d.asJsonArray
+                            val id = r[0].asInt
+                            val life = current[id] ?: continue
+                            life.rows += doubleArrayOf(t.toDouble(), r[1].asDouble, r[2].asDouble, r[3].asDouble, r[4].asDouble, if (r.size() > 5) r[5].asDouble else Double.NaN)
+                        }
+                        "spawn" -> spawn(l, t)
+                        "gone" -> {
+                            val id = l["id"]?.asInt ?: continue
+                            val life = current.remove(id) ?: continue
+                            life.gone = t
+                        }
+                        "stand" -> {
+                            val id = l["id"]?.asInt ?: continue
+                            val f = l["f"]?.asInt ?: 0
+                            stands[id] = (stands[id] ?: true) && (f and INVISIBLE) != 0
+                        }
+                        "eq" -> {
+                            val id = l["id"]?.takeIf { !it.isJsonNull }?.asInt ?: continue
+                            val worn = l.getAsJsonArray("eq")?.any { it is JsonPrimitive && it.asString.isNotEmpty() } == true
+                            if (worn || !l["headTex"]?.takeIf { !it.isJsonNull }?.asString.isNullOrEmpty()) { shows += id; wornIds += id }
+                            if ((l.getAsJsonArray("eq")?.firstOrNull() as? JsonPrimitive)?.asString == "minecraft:player_head") heldHead += id
+                        }
+                        "name" -> {
+                            val id = l["id"]?.asInt ?: continue
+                            if (!(l["name"]?.asString.isNullOrEmpty() && l["c"]?.asString.isNullOrEmpty())) { shows += id; current[id]?.named = true }
+                        }
                     }
                 }
+                for (list in lives.values) for (life in list) {
+                    val g = life.gone ?: continue
+                    life.folded = !life.proj && spawnTicks[life.id]?.contains(g) != true
+                }
+                val nothing = lives.filter { (id, list) -> list.all { HIDDEN.containsMatchIn(it.type) } || (list.all { it.type == STAND } && stands[id] == true && id !in shows) }.keys
+                val named = HashSet<Int>().apply { for ((id, list) in lives) if (list.any { it.named }) add(id) }
+                val pets = heldHead.filter { id -> id !in named && lives[id]?.all { it.type == STAND } == true }.toSet()
+                return MobPlan(nothing, lives, farHalf, players, wornIds, pets, bridged, bridgedGones)
             }
-            for (list in lives.values) for (life in list) {
-                val g = life.gone ?: continue
-                life.folded = !life.proj && spawnTicks[life.id]?.contains(g) != true
+
+            /** A spawn: the next life of its mob, or the life before going on where it came back looking as it went. */
+            private fun spawn(l: JsonObject, t: Int) {
+                val id = l["id"]?.asInt ?: return
+                if (skip(id)) return
+                current[id]?.let { if (it.gone == null) it.gone = t }
+                val list = lives.getOrPut(id) { ArrayList() }
+                val type = l["type"]?.asString ?: ""
+                val look = JsonObject().apply { for ((k, v) in l.entrySet()) if (k !in NOT_LOOK) add(k, v) }.toString()
+                // Back in range looking as it went: the same life on (the viewer has it
+                // stay where it was last seen meanwhile), the spot it's back at a move.
+                val prev = list.lastOrNull()
+                val pg = prev?.gone
+                if (prev != null && pg != null && pg < t && current[id] == null && !prev.proj && !l.has("v") && prev.type == type && looks[id] == look) {
+                    bridged += key(id, t); bridgedGones += key(id, pg)
+                    prev.gone = null; current[id] = prev
+                    prev.rows += doubleArrayOf(t.toDouble(), l["x"]?.asDouble ?: 0.0, l["y"]?.asDouble ?: 0.0, l["z"]?.asDouble ?: 0.0, l["yaw"]?.asDouble ?: 0.0, l["headYaw"]?.asDouble ?: Double.NaN)
+                    if (!(l["name"]?.asString.isNullOrEmpty() && l["c"]?.asString.isNullOrEmpty())) { prev.named = true; if (type == STAND) shows += id }
+                    return
+                }
+                looks[id] = look
+                val life = Life(id, list.size, t, null, type, l.has("v"))
+                life.at = doubleArrayOf(l["x"]?.asDouble ?: 0.0, l["y"]?.asDouble ?: 0.0, l["z"]?.asDouble ?: 0.0)
+                list += life; current[id] = life
+                spawnTicks.getOrPut(id) { HashSet() } += t
+                if (!(l["name"]?.asString.isNullOrEmpty() && l["c"]?.asString.isNullOrEmpty())) { life.named = true; if (type == STAND) shows += id }
             }
-            val nothing = lives.filter { (id, list) -> list.all { HIDDEN.containsMatchIn(it.type) } || (list.all { it.type == STAND } && stands[id] == true && id !in shows) }.keys
-            val named = HashSet<Int>().apply { for ((id, list) in lives) if (list.any { it.named }) add(id) }
-            val pets = heldHead.filter { id -> id !in named && lives[id]?.all { it.type == STAND } == true }.toSet()
-            return MobPlan(nothing, lives, farHalf, players, wornIds, pets, bridged, bridgedGones)
         }
     }
 }
@@ -376,6 +387,11 @@ internal class MobWriter(private val plan: MobPlan, private val dropped: (MobPla
         if (kind == "gone" && plan.isBridgedGone(id, t!!)) return
         val life = plan.lifeAt(id, t!!)
         if (life == null || dropped(life)) return
+        putLifeLine(kind, line, l, id, t, life, out)
+    }
+
+    /** A gone, stand look, gear or name line in a life this upload has: left out where it changes nothing the viewer has. */
+    private fun putLifeLine(kind: String?, line: String, l: JsonObject, id: Int, t: Int, life: MobPlan.Life, out: (String) -> Unit) {
         val st = now[id]
         when (kind) {
             "gone" -> {

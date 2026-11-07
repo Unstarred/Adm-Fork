@@ -101,35 +101,14 @@ class PartyState(private val self: () -> String) {
             ensureIn(); changed()
             return false
         }
-        JOINED_OTHER.matchEntire(t)?.let { m ->
-            val n = m.groupValues[1]
-            if (!inParty) {
-                // Someone joining a party you didn't know you had: you invited them, so it's yours -
-                // unless it wasn't known at all, then who leads isn't.
-                if (known) { add(self(), Role.LEADER) } else { ensureIn(); unsure("$n joined a party that wasn't known") }
-            }
-            add(n)
-            return false
-        }
+        JOINED_OTHER.matchEntire(t)?.let { m -> joinedOther(m); return false }
         LEFT.matchEntire(t)?.let { remove(it.groupValues[1]); return false }
         REMOVED.matchEntire(t)?.let { remove(it.groupValues[1]); return false }
         REMOVED_DC.matchEntire(t)?.let { remove(it.groupValues[1]); return false }
         KICKED_OFFLINE.matchEntire(t)?.let { m -> for (n in names(m.groupValues[1])) remove(n); return false }
         if (NOT_IN_PARTY.matches(t) || YOU_LEFT.matches(t) || YOU_KICKED.matches(t) || DISBANDED.matches(t) || DISBANDED_BY.matches(t)) { clear(); return false }
-        TRANSFER_BY.matchEntire(t)?.let { m ->
-            if (!inParty) unsure("a transfer in a party that wasn't known")
-            ensureIn()
-            setLeader(m.groupValues[1])
-            add(m.groupValues[2], Role.MOD) // the old leader stays on as a moderator
-            return false
-        }
-        TRANSFER_LEFT.matchEntire(t)?.let { m ->
-            if (!inParty) unsure("a transfer in a party that wasn't known")
-            ensureIn()
-            members.remove(m.groupValues[2].lowercase())
-            setLeader(m.groupValues[1])
-            return false
-        }
+        TRANSFER_BY.matchEntire(t)?.let { m -> transferBy(m); return false }
+        TRANSFER_LEFT.matchEntire(t)?.let { m -> transferLeft(m); return false }
         PROMOTED.matchEntire(t)?.let { m ->
             ensureKnownIn("a promotion")
             if (m.groupValues[3] == "Leader") { setLeader(m.groupValues[2]); add(m.groupValues[1], Role.MOD) }
@@ -142,50 +121,85 @@ class PartyState(private val self: () -> String) {
             members[m.groupValues[2].lowercase()]?.let { it.role = Role.MEMBER; changed() } ?: add(m.groupValues[2])
             return false
         }
-        INVITED.matchEntire(t)?.let { m ->
-            val by = m.groupValues[1]
-            if (by.equals(self(), true)) {
-                // Inviting from no party makes one, led by you (just you until someone joins).
-                if (!inParty && known) { add(self(), Role.LEADER); return false }
-                if (!inParty) { ensureIn(); unsure("an invite from a party that wasn't known") }
-            } else if (!members.containsKey(by.lowercase())) {
-                ensureKnownIn("an invite from someone not known to be in the party")
-                add(by)
-            }
-            return false
-        }
+        INVITED.matchEntire(t)?.let { m -> invited(m); return false }
         LEADER_DC.matchEntire(t)?.let { m -> ensureKnownIn("the leader disconnecting"); setLeader(m.groupValues[1]); members[m.groupValues[1].lowercase()]?.online = false; changed(); return false }
         LEADER_BACK.matchEntire(t)?.let { m -> ensureKnownIn("the leader rejoining"); setLeader(m.groupValues[1]); return false }
-        MEMBER_DC.matchEntire(t)?.let { m ->
-            ensureKnownIn("someone disconnecting")
-            if (!members.containsKey(m.groupValues[1].lowercase())) { add(m.groupValues[1]); unsure("${m.groupValues[1]} disconnected, but wasn't known to be in the party") }
-            members[m.groupValues[1].lowercase()]?.online = false
-            changed()
-            return false
-        }
+        MEMBER_DC.matchEntire(t)?.let { m -> memberDc(m); return false }
         SUMMONED.matchEntire(t)?.let { m -> leaderEvidence(m.groupValues[1]); return false }
         ALL_INVITE.matchEntire(t)?.let { m -> leaderEvidence(m.groupValues[1]); return false }
-        PF_JOINED.matchEntire(t)?.let { m ->
-            val n = m.groupValues[1]
-            if (n.equals(self(), true)) {
-                // You joined someone's Party Finder group: in their party, but nothing says who's there.
-                members.clear(); ensureIn(); known = true; doubt = "joined a Party Finder group"; changed()
-            } else {
-                if (!inParty) { if (known) add(self(), Role.LEADER) else { ensureIn(); unsure("$n joined a party that wasn't known") } }
-                add(n)
-            }
-            return false
-        }
-        PARTY_CHAT.matchEntire(t)?.let { m ->
-            val n = m.groupValues[1]
-            if (!members.containsKey(n.lowercase())) {
-                ensureIn()
-                if (!n.equals(self(), true)) add(n)
-                unsure("party chat from $n, who wasn't known to be in the party")
-            } else members[n.lowercase()]?.let { if (!it.online) { it.online = true; changed() } }
-            return false
-        }
+        PF_JOINED.matchEntire(t)?.let { m -> pfJoined(m); return false }
+        PARTY_CHAT.matchEntire(t)?.let { m -> partyChat(m); return false }
         return false
+    }
+
+    /** "X joined the party.": X is in it, and so are you (in a party that may not have been known). */
+    private fun joinedOther(m: MatchResult) {
+        val n = m.groupValues[1]
+        if (!inParty) {
+            // Someone joining a party you didn't know you had: you invited them, so it's yours -
+            // unless it wasn't known at all, then who leads isn't.
+            if (known) { add(self(), Role.LEADER) } else { ensureIn(); unsure("$n joined a party that wasn't known") }
+        }
+        add(n)
+    }
+
+    /** "The party was transferred to X by Y": X leads, and Y stays on. */
+    private fun transferBy(m: MatchResult) {
+        if (!inParty) unsure("a transfer in a party that wasn't known")
+        ensureIn()
+        setLeader(m.groupValues[1])
+        add(m.groupValues[2], Role.MOD) // the old leader stays on as a moderator
+    }
+
+    /** "The party was transferred to X because Y left": X leads, and Y is gone. */
+    private fun transferLeft(m: MatchResult) {
+        if (!inParty) unsure("a transfer in a party that wasn't known")
+        ensureIn()
+        members.remove(m.groupValues[2].lowercase())
+        setLeader(m.groupValues[1])
+    }
+
+    /** An invite: yours from no party makes one led by you; someone else's says they're in it. */
+    private fun invited(m: MatchResult) {
+        val by = m.groupValues[1]
+        if (by.equals(self(), true)) {
+            // Inviting from no party makes one, led by you (just you until someone joins).
+            if (!inParty && known) { add(self(), Role.LEADER); return }
+            if (!inParty) { ensureIn(); unsure("an invite from a party that wasn't known") }
+        } else if (!members.containsKey(by.lowercase())) {
+            ensureKnownIn("an invite from someone not known to be in the party")
+            add(by)
+        }
+    }
+
+    /** "X has disconnected, they have ... to rejoin": X is in the party, offline. */
+    private fun memberDc(m: MatchResult) {
+        ensureKnownIn("someone disconnecting")
+        if (!members.containsKey(m.groupValues[1].lowercase())) { add(m.groupValues[1]); unsure("${m.groupValues[1]} disconnected, but wasn't known to be in the party") }
+        members[m.groupValues[1].lowercase()]?.online = false
+        changed()
+    }
+
+    /** "Party Finder > X joined the dungeon group!": you in someone's group, or X in yours. */
+    private fun pfJoined(m: MatchResult) {
+        val n = m.groupValues[1]
+        if (n.equals(self(), true)) {
+            // You joined someone's Party Finder group: in their party, but nothing says who's there.
+            members.clear(); ensureIn(); known = true; doubt = "joined a Party Finder group"; changed()
+        } else {
+            if (!inParty) { if (known) add(self(), Role.LEADER) else { ensureIn(); unsure("$n joined a party that wasn't known") } }
+            add(n)
+        }
+    }
+
+    /** "Party > X: ...": X is in the party, and online. */
+    private fun partyChat(m: MatchResult) {
+        val n = m.groupValues[1]
+        if (!members.containsKey(n.lowercase())) {
+            ensureIn()
+            if (!n.equals(self(), true)) add(n)
+            unsure("party chat from $n, who wasn't known to be in the party")
+        } else members[n.lowercase()]?.let { if (!it.online) { it.online = true; changed() } }
     }
 
     /** Something only a party has happened: if no party was known, there is one (and who's in it isn't). */
