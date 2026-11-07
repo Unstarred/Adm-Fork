@@ -2,20 +2,26 @@ package com.engineerclient.p3sim
 
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass
 import net.minecraft.core.particles.ParticleTypes
+import net.minecraft.network.protocol.game.ClientboundHurtAnimationPacket
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.sounds.SoundEvents
 import net.minecraft.sounds.SoundSource
+import net.minecraft.world.entity.Entity
 import net.minecraft.world.entity.EntityTypes
 import net.minecraft.world.entity.LivingEntity
 import net.minecraft.world.entity.animal.sheep.Sheep
+import net.minecraft.world.entity.boss.wither.WitherBoss
 import net.minecraft.world.entity.decoration.ArmorStand
 import net.minecraft.world.entity.decoration.Mannequin
+import net.minecraft.world.entity.player.Player
 import net.minecraft.world.level.ClipContext
+import net.minecraft.world.level.Level
 import net.minecraft.world.phys.AABB
 import net.minecraft.world.phys.HitResult
 import net.minecraft.world.phys.Vec3
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.random.Random
 
 /**
  * The Mage's two in the sim (playing as Mage), as measured on Hypixel:
@@ -50,10 +56,10 @@ object Mage {
     private var readyNoted by perPlayer { true }
 
     /** A sheep that can't push you, be pushed or be aimed at. */
-    class GhostSheep(level: net.minecraft.world.level.Level) : Sheep(EntityTypes.SHEEP, level) {
+    class GhostSheep(level: Level) : Sheep(EntityTypes.SHEEP, level) {
         override fun isPickable() = false
         override fun isPushable() = false
-        override fun canBeCollidedWith(other: net.minecraft.world.entity.Entity?) = false
+        override fun canBeCollidedWith(other: Entity?) = false
         override fun pushEntities() {}
     }
 
@@ -102,7 +108,7 @@ object Mage {
     private fun firstMob(from: Vec3, to: Vec3, p: ServerPlayer): Pair<LivingEntity, Vec3>? {
         val box = AABB(from, to).inflate(1.0)
         return Sim.level.getEntitiesOfClass(LivingEntity::class.java, box) {
-            it !== p && it.isAlive && it !is net.minecraft.world.entity.player.Player && it !is Mannequin && it !is ArmorStand && it !is Sheep && !it.isInvisible
+            it !== p && it.isAlive && it !is Player && it !is Mannequin && it !is ArmorStand && it !is Sheep && !it.isInvisible
         }.mapNotNull { e -> e.boundingBox.inflate(0.3).clip(from, to).orElse(null)?.let { e to it } }.minByOrNull { it.second.distanceToSqr(from) }
     }
 
@@ -126,10 +132,10 @@ object Mage {
         // P2: a beam at Storm frees him from a pin.
         (Fight.phase as? P2Storm)?.beam()
         mob?.first?.let { e ->
-            p.connection.send(net.minecraft.network.protocol.game.ClientboundHurtAnimationPacket(e))
+            p.connection.send(ClientboundHurtAnimationPacket(e))
             // Hypixel's hit sound: the victim's hurt sound at your feet, a tick later.
             Fight.later(1, "beam hit") {
-                val s = if (e is net.minecraft.world.entity.boss.wither.WitherBoss) SoundEvents.WITHER_HURT else SoundEvents.GENERIC_HURT
+                val s = if (e is WitherBoss) SoundEvents.WITHER_HURT else SoundEvents.GENERIC_HURT
                 Sim.sound(s, 1f, 1f, p.position(), SoundSource.HOSTILE)
             }
         }
@@ -180,7 +186,7 @@ object Mage {
             e.snapTo(at.x, at.y, at.z, Math.toDegrees(Math.atan2(-v.x, v.z)).toFloat(), 0f)
             if (stop != null || now - f.at >= SHEEP_LIFE) {
                 f.boomAt = now
-                Sim.sound(SoundEvents.GENERIC_EXPLODE, 1f, 0.8f + kotlin.random.Random.nextFloat() * 0.18f, at, SoundSource.MASTER)
+                Sim.sound(SoundEvents.GENERIC_EXPLODE, 1f, 0.8f + Random.nextFloat() * 0.18f, at, SoundSource.MASTER)
                 Sim.level.sendParticles(ParticleTypes.EXPLOSION, at.x, at.y + 0.5, at.z, 1, 0.0, 0.0, 0.0, 0.0)
                 if (mob != null) Sim.chat("§7Your Guided Sheep hit §c1 §7enemy for §c0 §7damage.")
                 // Like Explosive Shot: a blast within 2 blocks of a gate blows it.

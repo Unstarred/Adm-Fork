@@ -3,6 +3,10 @@ package com.engineerclient.p3sim
 import com.engineerclient.EngineerClient
 import com.engineerclient.EngineerClient.mc
 import com.engineerclient.index
+import com.engineerclient.misc.OdinMasksUsed
+import com.engineerclient.misc.OdinTickTimers
+import com.engineerclient.practice.TermInfo
+import com.engineerclient.splits.DungeonSplits
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
@@ -10,16 +14,22 @@ import com.google.gson.JsonParser
 import com.google.gson.JsonPrimitive
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.NumberSetting
+import com.odtheking.odin.features.ModuleManager
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking
+import net.minecraft.client.Minecraft
 import net.minecraft.network.RegistryFriendlyByteBuf
 import net.minecraft.network.codec.StreamCodec
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload
 import net.minecraft.resources.Identifier
 import net.minecraft.server.level.ServerPlayer
+import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -222,7 +232,7 @@ object Players {
         hostClassSeen = c
         // At once (this thread reads it next), saved on the client's.
         P3Sim.classS.index = Party.CLASSES.indexOf(c).coerceAtLeast(0)
-        mc.execute { com.odtheking.odin.features.ModuleManager.saveConfigurations() }
+        mc.execute { ModuleManager.saveConfigurations() }
     }
 
     /** Server tick: the host picked a class in their menu that a joiner has: they swap. */
@@ -383,7 +393,7 @@ object PartyServer {
         val o = runCatching { JsonParser.parseString(data).asJsonObject }.getOrNull() ?: return
         mc.execute {
             PartySettings.apply(PartySettings.SHARED, o)
-            com.odtheking.odin.features.ModuleManager.saveConfigurations()
+            ModuleManager.saveConfigurations()
         }
         val what = o.keySet().joinToString(", ")
         if (what.isNotEmpty()) Sim.everyone { Sim.note("§f${p.gameProfile.name}§7 changed: $what") }
@@ -520,7 +530,7 @@ object PartyClient {
         SimNet.onClient("set") { data ->
             PartySettings.apply(PartySettings.PERSONAL, JsonParser.parseString(data).asJsonObject)
             lastProfile = null
-            com.odtheking.odin.features.ModuleManager.saveConfigurations()
+            ModuleManager.saveConfigurations()
         }
         SimNet.onClient("roster") { data ->
             val o = JsonParser.parseString(data).asJsonObject
@@ -548,13 +558,13 @@ object PartyClient {
         EngineerClient.safely("p3sim own settings restore") {
             if (!ownFile.exists()) return@safely
             runCatching { PartySettings.apply(PartySettings.SHARED, JsonParser.parseString(ownFile.readText()).asJsonObject) }
-            com.odtheking.odin.features.ModuleManager.saveConfigurations()
+            ModuleManager.saveConfigurations()
             ownFile.delete()
         }
     }
 
     /** A joiner's own shared settings while they're in a party (the party's are in their config meanwhile). */
-    private val ownFile get() = java.io.File(mc.gameDirectory, "config/adm/p3sim-own-settings.json")
+    private val ownFile get() = File(mc.gameDirectory, "config/adm/p3sim-own-settings.json")
     private fun keepOwn(o: JsonObject) = EngineerClient.safely("p3sim own settings keep") { ownFile.parentFile.mkdirs(); ownFile.writeText(o.toString()) }
 
     /** What the fight does on your game: the splits, Odin's timers and solvers, Term Info. */
@@ -564,20 +574,20 @@ object PartyClient {
         when (o.get("fx")?.asString) {
             "splitsStart" -> {
                 val split = o.get("split")?.asString ?: return
-                EngineerClient.safely("p3sim splits") { com.engineerclient.splits.DungeonSplits.simStart(split, n) }
+                EngineerClient.safely("p3sim splits") { DungeonSplits.simStart(split, n) }
                 EngineerClient.safely("p3sim arrows device") { Fight.resetArrowsDevice() }
             }
             "splitsStop" -> {
-                EngineerClient.safely("p3sim splits stop") { com.engineerclient.splits.DungeonSplits.simStop() }
+                EngineerClient.safely("p3sim splits stop") { DungeonSplits.simStop() }
                 // Stop and practice starts too: Odin's i4 solver forgets the blocks it marked hit.
                 EngineerClient.safely("p3sim arrows device") { Fight.resetArrowsDevice() }
-                EngineerClient.safely("p3sim tick timers stop") { com.engineerclient.misc.OdinTickTimers.stopAll() }
+                EngineerClient.safely("p3sim tick timers stop") { OdinTickTimers.stopAll() }
             }
-            "masksReset" -> EngineerClient.safely("p3sim masks") { com.engineerclient.misc.OdinMasksUsed.resetTimers() }
+            "masksReset" -> EngineerClient.safely("p3sim masks") { OdinMasksUsed.resetTimers() }
             "arrowsReset" -> EngineerClient.safely("p3sim arrows device") { Fight.resetArrowsDevice() }
-            "termStart" -> EngineerClient.safely("p3sim term info") { com.engineerclient.practice.TermInfo.simStart(n) }
-            "termClear" -> EngineerClient.safely("p3sim term info") { com.engineerclient.practice.TermInfo.simClearTime() }
-            "sectionTime" -> EngineerClient.safely("p3sim term info") { com.engineerclient.practice.TermInfo.simSectionTime(n) }
+            "termStart" -> EngineerClient.safely("p3sim term info") { TermInfo.simStart(n) }
+            "termClear" -> EngineerClient.safely("p3sim term info") { TermInfo.simClearTime() }
+            "sectionTime" -> EngineerClient.safely("p3sim term info") { TermInfo.simSectionTime(n) }
         }
     }
 
@@ -631,7 +641,7 @@ object PartyClient {
         if (gotShared) ownShared?.let {
             PartySettings.apply(PartySettings.SHARED, it)
             // Saved as theirs again (the party's were saved while in it), and the crash copy is no longer needed.
-            EngineerClient.safely("p3sim own settings back") { com.odtheking.odin.features.ModuleManager.saveConfigurations() }
+            EngineerClient.safely("p3sim own settings back") { ModuleManager.saveConfigurations() }
             ownFile.delete()
         }
         if (helloSent && !P3Sim.localSim) P3Plan.leaveParty()
@@ -649,7 +659,7 @@ object PlayerFiles {
     const val LOADOUTS = "p3sim-loadouts.json"
     val NAMES = listOf(HOTBAR, LOADOUTS)
 
-    private fun file(name: String) = java.io.File(net.minecraft.client.Minecraft.getInstance().gameDirectory, "config/adm/$name")
+    private fun file(name: String) = File(Minecraft.getInstance().gameDirectory, "config/adm/$name")
 
     fun readLocal(name: String): String? = runCatching { file(name).takeIf { it.exists() }?.readText() }.getOrNull()
 
@@ -664,21 +674,21 @@ object PlayerFiles {
     private val setAside = HashSet<String>()
 
     /** [f] couldn't be read: copied to `<name>.corrupt` (once a session), so the save that follows doesn't lose it. */
-    fun setAside(f: java.io.File) {
+    fun setAside(f: File) {
         if (!f.exists() || !setAside.add(f.path)) return
-        runCatching { f.copyTo(java.io.File(f.path + ".corrupt"), overwrite = true) }
+        runCatching { f.copyTo(File(f.path + ".corrupt"), overwrite = true) }
             .onSuccess { EngineerClient.logger.warn("[ec] p3sim: ${f.name} couldn't be read, kept as ${it.name}") }
     }
 
     /** Written beside and moved over [f], so a crash mid-write never leaves half a file. */
-    fun writeAtomic(f: java.io.File, text: String) {
+    fun writeAtomic(f: File, text: String) {
         f.parentFile.mkdirs()
-        val tmp = java.io.File(f.path + ".tmp")
+        val tmp = File(f.path + ".tmp")
         tmp.writeText(text)
         try {
-            java.nio.file.Files.move(tmp.toPath(), f.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
-        } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
-            java.nio.file.Files.move(tmp.toPath(), f.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.REPLACE_EXISTING)
         }
     }
 

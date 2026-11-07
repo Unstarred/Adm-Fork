@@ -4,7 +4,10 @@ import com.engineerclient.dungeonpack.pack.PackFormatException
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.RandomAccessFile
+import java.nio.file.Path
+import java.util.Arrays
 import java.util.zip.CRC32
+import java.util.zip.DataFormatException
 import java.util.zip.Inflater
 
 /**
@@ -88,7 +91,7 @@ object RoomBlobs {
                 out.write(buf, 0, n)
             }
             return out.toByteArray()
-        } catch (e: java.util.zip.DataFormatException) {
+        } catch (e: DataFormatException) {
             throw PackFormatException("the blob is not a zlib stream: ${e.message}", e)
         } finally {
             inf.end()
@@ -112,7 +115,7 @@ object RoomBlobs {
             if (run < 1) throw PackFormatException("run length $run")
             if (pal >= palette.size) throw PackFormatException("palette index $pal of ${palette.size}")
             if (run > cells.size - i) throw PackFormatException("runs cover more than $cellCount cells")
-            java.util.Arrays.fill(cells, i, i + run, pal.toShort())
+            Arrays.fill(cells, i, i + run, pal.toShort())
             i += run
         }
         return RoomVolume(w, d, h, y0, palette, cells)
@@ -188,7 +191,7 @@ interface BlobSource : Closeable {
 }
 
 /** [BlobSource] over `rooms.blocks.bin`. Thread-safe: reads are serialised. */
-class FileBlobSource(path: java.nio.file.Path) : BlobSource {
+class FileBlobSource(path: Path) : BlobSource {
     private val file = RandomAccessFile(path.toFile(), "r")
     override val size: Long = file.length()
     @Synchronized override fun read(off: Long, len: Int): ByteArray {

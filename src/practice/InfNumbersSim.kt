@@ -9,6 +9,7 @@ import net.minecraft.world.inventory.Slot
 import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.Items
 import java.util.Locale
+import java.util.Random
 
 /**
  * /termsim inf: a numbers terminal that never ends and has no numbers. Odin's solver shows the
@@ -27,7 +28,7 @@ object InfNumbersSim : TermSimGUI(TerminalTypes.NUMBERS.termName, TerminalTypes.
     private const val SHOWN = 4
     private const val FRESH = 6
 
-    private val rng = java.util.Random()
+    private val rng = Random()
     /** The highlighted cells, next first. */
     @JvmStatic val queue = ArrayList<Int>()
     /** What's left of the bag, next first. */

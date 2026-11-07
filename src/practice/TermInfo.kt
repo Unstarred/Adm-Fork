@@ -1,6 +1,12 @@
 package com.engineerclient.practice
 
+import com.engineerclient.EngineerClient
 import com.engineerclient.EngineerClient.mc
+import com.engineerclient.p3sim.Fight
+import com.engineerclient.p3sim.GoldorPhase
+import com.engineerclient.p3sim.P3Sim
+import com.engineerclient.p3sim.Practice
+import com.engineerclient.p3sim.Station
 import com.odtheking.odin.events.LevelEvent
 import com.odtheking.odin.events.TickEvent
 import com.odtheking.odin.events.core.EventBus
@@ -9,7 +15,12 @@ import com.odtheking.odin.events.core.onReceive
 import com.odtheking.odin.utils.Colors
 import com.odtheking.odin.utils.render.text
 import net.minecraft.client.gui.GuiGraphicsExtractor
+import net.minecraft.network.protocol.Packet
+import net.minecraft.network.protocol.game.ClientboundBundlePacket
+import net.minecraft.network.protocol.game.ClientboundOpenScreenPacket
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket
+import java.util.Collections
+import java.util.IdentityHashMap
 import java.util.Locale
 
 /**
@@ -42,7 +53,7 @@ object TermInfo {
 
     /** The last section's time while it's up ([seconds] after it's done), else null. None in a P3 Sim practice (its Practice Time HUD is the clock). */
     fun sectionTime(seconds: Double): String? {
-        if (com.engineerclient.p3sim.P3Sim.inSim && com.engineerclient.p3sim.Practice.active) return null
+        if (P3Sim.inSim && Practice.active) return null
         val (text, at) = shownTime ?: return null
         return text.takeIf { System.currentTimeMillis() - at <= seconds * 1000 }
     }
@@ -73,7 +84,7 @@ object TermInfo {
     @Volatile private var sectionStart = 0
     @Volatile private var shownTime: Pair<String, Long>? = null
 
-    private fun current() = simSection() ?: if (com.engineerclient.p3sim.P3Sim.localSim) null else sections.getOrNull(active)
+    private fun current() = simSection() ?: if (P3Sim.localSim) null else sections.getOrNull(active)
 
     /** The section being done (1-4), or null outside P3 (Coffee Client's Role Times). */
     fun sectionNumber(): Int? = current()?.number
@@ -87,15 +98,15 @@ object TermInfo {
      * in someone else's (a party) it goes by the chat, as on Hypixel, from the start the sim sends ([simStart]).
      */
     private fun simSection(): Section? {
-        if (!com.engineerclient.p3sim.P3Sim.localSim) return null
-        val g = com.engineerclient.p3sim.Fight.phase as? com.engineerclient.p3sim.GoldorPhase ?: return null
+        if (!P3Sim.localSim) return null
+        val g = Fight.phase as? GoldorPhase ?: return null
         val n = g.section.takeIf { it in 1..4 } ?: return null
         val st = g.stations.filter { it.section == n }
-        val kind = com.engineerclient.p3sim.Station.Kind.TERMINAL
+        val kind = Station.Kind.TERMINAL
         return Section(st.count { it.kind == kind }, n).apply {
             termsDone = st.count { it.kind == kind && it.done }
-            leversDone = st.count { it.kind == com.engineerclient.p3sim.Station.Kind.LEVER && it.done }
-            deviceDone = st.any { it.kind == com.engineerclient.p3sim.Station.Kind.DEVICE && it.done }
+            leversDone = st.count { it.kind == Station.Kind.LEVER && it.done }
+            deviceDone = st.any { it.kind == Station.Kind.DEVICE && it.done }
             gateDestroyed = n == 4 || g.gateIsDown(n)
         }
     }
@@ -148,7 +159,7 @@ object TermInfo {
      */
     @JvmStatic
     fun simSectionTime(ticks: Int) {
-        if (com.engineerclient.p3sim.P3Sim.inSim && !com.engineerclient.p3sim.Practice.active)
+        if (P3Sim.inSim && !Practice.active)
             shownTime = "§5${String.format(Locale.ROOT, "%.2f", ticks / 20.0)}" to System.currentTimeMillis()
     }
 
@@ -162,8 +173,8 @@ object TermInfo {
      * [onTaskChat] moves [active] on. Your own sim: its own section, none during a practice's start timer.
      */
     fun liveSection(): Int {
-        if (com.engineerclient.p3sim.P3Sim.localSim) {
-            val g = com.engineerclient.p3sim.Fight.phase as? com.engineerclient.p3sim.GoldorPhase ?: return 0
+        if (P3Sim.localSim) {
+            val g = Fight.phase as? GoldorPhase ?: return 0
             if (g.isHolding) return 0
             return simSection()?.number ?: 0
         }
@@ -213,7 +224,7 @@ object TermInfo {
 
         if (cur.termsDone >= cur.terms && cur.leversDone >= 2 && cur.deviceDone && cur.gateDestroyed) {
             // In P3 Sim the sim times the sections itself ([simSectionTime]).
-            if (!com.engineerclient.p3sim.P3Sim.inSim) shownTime = "§5${String.format(Locale.ROOT, "%.2f", (serverTicks - sectionStart) / 20.0)}" to System.currentTimeMillis()
+            if (!P3Sim.inSim) shownTime = "§5${String.format(Locale.ROOT, "%.2f", (serverTicks - sectionStart) / 20.0)}" to System.currentTimeMillis()
             sectionStart = serverTicks
             active++
             if (active == 3) Recore.s3Done()
@@ -228,14 +239,14 @@ object TermInfo {
      * opened here by hand.
      */
     @JvmStatic
-    fun tap(packet: net.minecraft.network.protocol.Packet<*>) {
-        com.engineerclient.EngineerClient.safely("term info tap") {
+    fun tap(packet: Packet<*>) {
+        EngineerClient.safely("term info tap") {
             when (packet) {
                 is ClientboundSystemChatPacket -> take(packet)
-                is net.minecraft.network.protocol.game.ClientboundOpenScreenPacket -> TerminalHitboxes.opened(packet.title.string)
-                is net.minecraft.network.protocol.game.ClientboundBundlePacket -> packet.subPackets().forEach {
+                is ClientboundOpenScreenPacket -> TerminalHitboxes.opened(packet.title.string)
+                is ClientboundBundlePacket -> packet.subPackets().forEach {
                     if (it is ClientboundSystemChatPacket) take(it)
-                    else if (it is net.minecraft.network.protocol.game.ClientboundOpenScreenPacket) TerminalHitboxes.opened(it.title.string)
+                    else if (it is ClientboundOpenScreenPacket) TerminalHitboxes.opened(it.title.string)
                 }
                 else -> {}
             }
@@ -243,7 +254,7 @@ object TermInfo {
     }
 
     /** Chat packets already read, by identity: [tap] and Odin's event can both deliver one. */
-    private val seenChat: MutableSet<ClientboundSystemChatPacket> = java.util.Collections.newSetFromMap(java.util.IdentityHashMap())
+    private val seenChat: MutableSet<ClientboundSystemChatPacket> = Collections.newSetFromMap(IdentityHashMap())
     private val seenChatOrder = ArrayDeque<ClientboundSystemChatPacket>()
 
     private fun take(p: ClientboundSystemChatPacket) {
@@ -255,7 +266,7 @@ object TermInfo {
         }
         // On the game thread, in the order they came, ahead of the game's own handling of each.
         val msg = p.content().string.replace(CONTROL_CODES, "")
-        mc.execute { com.engineerclient.EngineerClient.safely("term info chat") { onChat(msg) } }
+        mc.execute { EngineerClient.safely("term info chat") { onChat(msg) } }
     }
 
     private fun onChat(msg: String) {
@@ -280,7 +291,7 @@ object TermInfo {
 
         // The second path to [take] ([tap] is the first): only what reaches Odin's hook.
         onReceive<ClientboundSystemChatPacket>(priority = 1000, ignoreCancelled = true) { take(this) }
-        onReceive<net.minecraft.network.protocol.game.ClientboundOpenScreenPacket>(priority = 1000, ignoreCancelled = true) { TerminalHitboxes.opened(title.string) }
+        onReceive<ClientboundOpenScreenPacket>(priority = 1000, ignoreCancelled = true) { TerminalHitboxes.opened(title.string) }
         EventBus.subscribe(this)
     }
 

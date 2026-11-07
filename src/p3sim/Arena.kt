@@ -4,6 +4,7 @@ import com.engineerclient.EngineerClient
 import net.minecraft.commands.arguments.blocks.BlockStateParser
 import net.minecraft.core.BlockPos
 import net.minecraft.core.registries.BuiltInRegistries
+import net.minecraft.server.level.ServerLevel
 import net.minecraft.world.level.block.Block
 import net.minecraft.world.level.block.Blocks
 import net.minecraft.world.level.block.state.BlockState
@@ -102,7 +103,7 @@ object Arena {
     }
 
     /** Puts [pos] back to the arena's start state (with the client told, no neighbour updates). */
-    fun restore(level: net.minecraft.server.level.ServerLevel, pos: BlockPos) {
+    fun restore(level: ServerLevel, pos: BlockPos) {
         val s = data.get(pos.x, pos.y, pos.z)
         if (level.getBlockState(pos) != s) { level.setBlock(pos, s, FLAGS); ArenaFixes.reskull(level, pos) }
     }
@@ -111,7 +112,7 @@ object Arena {
      * Every block of the arena as built: the whole arena compared, chunk section by section, and any block that
      * differs put back (whatever changed it, in this game or a saved one). Returns how many were.
      */
-    fun resync(level: net.minecraft.server.level.ServerLevel): Int {
+    fun resync(level: ServerLevel): Int {
         val a = data
         var fixed = 0
         for (cx in (a.x0 shr 4)..((a.x0 + a.w - 1) shr 4)) for (cz in (a.z0 shr 4)..((a.z0 + a.d - 1) shr 4)) {
@@ -135,7 +136,7 @@ object Arena {
         return fixed
     }
 
-    fun set(level: net.minecraft.server.level.ServerLevel, pos: BlockPos, state: BlockState) {
+    fun set(level: ServerLevel, pos: BlockPos, state: BlockState) {
         if (level.getBlockState(pos) != state) level.setBlock(pos, state, FLAGS)
     }
 

@@ -1,5 +1,7 @@
 package com.engineerclient.p3sim
 
+import java.util.Locale
+import java.util.UUID
 import kotlin.math.ceil
 import kotlin.random.Random
 
@@ -92,15 +94,15 @@ object ImplosionRules {
         h.maxX >= box[0] && h.minX <= box[3] && h.maxY >= box[1] && h.minY <= box[4] && h.maxZ >= box[2] && h.minZ <= box[5]
 
     /** One mob the selection looks at. */
-    class Candidate(val id: java.util.UUID, val hitbox: Hitbox, val alive: Boolean, val untargetable: Boolean)
+    class Candidate(val id: UUID, val hitbox: Hitbox, val alive: Boolean, val untargetable: Boolean)
 
     /** The ids a cast in [box] reaches: alive, touching, and not untargetable (a sleeping Fels cannot be hit). */
-    fun select(box: DoubleArray, mobs: Collection<Candidate>): List<java.util.UUID> =
+    fun select(box: DoubleArray, mobs: Collection<Candidate>): List<UUID> =
         mobs.filter { it.alive && !it.untargetable && touches(it.hitbox, box) }.map { it.id }
 
     /** Hypixel's chat line for a cast: `Your Implosion hit N enemy/enemies for X damage.`, X with a thousands comma and one decimal, no ".0". */
     fun line(count: Int, total: Double): String {
-        val shown = "%,.1f".format(java.util.Locale.ROOT, total).removeSuffix(".0")
+        val shown = "%,.1f".format(Locale.ROOT, total).removeSuffix(".0")
         return "§7Your Implosion hit §r§c$count §r§7${if (count == 1) "enemy" else "enemies"} for §r§c$shown §r§7damage."
     }
 }

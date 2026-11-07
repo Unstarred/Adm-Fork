@@ -1,5 +1,6 @@
 package com.engineerclient.splits
 
+import java.util.Arrays
 import kotlin.math.hypot
 
 /**
@@ -58,7 +59,7 @@ class SubSplitTracker {
     val s4Start: Stamp? get() = starts[T_S4]
 
     fun reset() {
-        java.util.Arrays.fill(starts, null)
+        Arrays.fill(starts, null)
         current = -1; ticks = 0; lightning = null; bloodMobs = 0
         gateBlown = false; gateWaiting = false; watchingCore = false
     }

@@ -26,6 +26,38 @@ import net.minecraft.client.Minecraft
 import net.minecraft.network.chat.Component
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import com.engineerclient.adr.OnlineLink
+import com.engineerclient.clearbreakdown.ClearBreakdown
+import com.engineerclient.debug.MemReport
+import com.engineerclient.lcm.LcmMapInfo
+import com.engineerclient.lcm.LcmStyle
+import com.engineerclient.mappred.OdinMapPrediction
+import com.engineerclient.misc.HealthMana
+import com.engineerclient.misc.I4Complete
+import com.engineerclient.misc.LaunchStats
+import com.engineerclient.misc.LcmMeleeWarning
+import com.engineerclient.misc.LeapOrder
+import com.engineerclient.misc.OdinClickLimit
+import com.engineerclient.misc.OdinHighlightLook
+import com.engineerclient.misc.OdinMasksUsed
+import com.engineerclient.misc.OdinTickTimers
+import com.engineerclient.misc.Timers
+import com.engineerclient.misc.Witherborn
+import com.engineerclient.p3sim.P3Sim
+import com.engineerclient.practice.InfNumbersSim
+import com.engineerclient.practice.OdinSimonSays
+import com.engineerclient.practice.OdinTermTimes
+import com.engineerclient.practice.Recore
+import com.engineerclient.practice.TermInfo
+import com.engineerclient.practice.TerminalHitboxes
+import com.engineerclient.practice.TermsimExtras
+import com.engineerclient.tpmaze.TeamTpMaze
+import com.odtheking.odin.clickgui.ClickGUI
+import com.odtheking.odin.clickgui.settings.impl.SelectorSetting
+import com.odtheking.odin.utils.sendCommand
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents
+import org.lwjgl.sdl.SDLHints
+import org.lwjgl.sdl.SDLVideo
 
 object EngineerClient : ClientModInitializer {
 
@@ -67,8 +99,8 @@ object EngineerClient : ClientModInitializer {
         val h = mc.window.handle()
         if (h == 0L) return
         // 26.3 windows are SDL3: auto-minimize is a hint, read at every focus loss.
-        org.lwjgl.sdl.SDLHints.SDL_SetHint(org.lwjgl.sdl.SDLHints.SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0")
-        if ((org.lwjgl.sdl.SDLVideo.SDL_GetWindowFlags(h) and org.lwjgl.sdl.SDLVideo.SDL_WINDOW_MINIMIZED) != 0L) org.lwjgl.sdl.SDLVideo.SDL_RestoreWindow(h)
+        SDLHints.SDL_SetHint(SDLHints.SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0")
+        if ((SDLVideo.SDL_GetWindowFlags(h) and SDLVideo.SDL_WINDOW_MINIMIZED) != 0L) SDLVideo.SDL_RestoreWindow(h)
         windowKept = true
     }
 
@@ -78,10 +110,10 @@ object EngineerClient : ClientModInitializer {
      */
     val MODULES: List<com.odtheking.odin.features.Module> by lazy {
         listOf(
-            PovPreviews, com.engineerclient.p3sim.P3Sim, ADR, SimonSaysPractice, BrWaypoints2, AgroSphere, DungeonSplits, com.engineerclient.practice.Recore,
-            com.engineerclient.clearbreakdown.ClearBreakdown,
-            RandomStuff, com.engineerclient.misc.HealthMana, com.engineerclient.misc.Timers, com.engineerclient.misc.LcmMeleeWarning,
-            com.engineerclient.practice.TerminalHitboxes,
+            PovPreviews, P3Sim, ADR, SimonSaysPractice, BrWaypoints2, AgroSphere, DungeonSplits, Recore,
+            ClearBreakdown,
+            RandomStuff, HealthMana, Timers, LcmMeleeWarning,
+            TerminalHitboxes,
         )
     }
 
@@ -89,7 +121,7 @@ object EngineerClient : ClientModInitializer {
         try { ConfigMigration.rename(mc.gameDirectory.toPath()) } catch (t: Throwable) { logger.warn("[ec] moving Engineer Client's settings to ADM failed", t) }
         try { ConfigMigration.run(mc.gameDirectory.toPath().resolve("config").resolve("odin")) } catch (t: Throwable) { logger.warn("[ec] module settings migration failed", t) }
         val firstRun = EcConfig.load()
-        net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN.register { _, _, _ -> EcConfig.migrateRoleBindings() }
+        ClientPlayConnectionEvents.JOIN.register { _, _, _ -> EcConfig.migrateRoleBindings() }
 
         // Register our own module into Odin's module system: own ClickGUI panel
         // ("Engineer Client"), own config file (config/odin/addons/adm.json), own event
@@ -99,34 +131,34 @@ object EngineerClient : ClientModInitializer {
         // Additions to Odin's own modules (e.g. the Engineer Splits look on Odin's Splits) go in
         // before anything saves the configs, which would drop saved values for settings that don't
         // exist yet.
-        safely("ss solver") { com.engineerclient.practice.OdinSimonSays.install() }
-        safely("masks used") { com.engineerclient.misc.OdinMasksUsed.install() }
-        safely("tick timers") { com.engineerclient.misc.OdinTickTimers.install() }
-        safely("highlight look") { com.engineerclient.misc.OdinHighlightLook.install() }
+        safely("ss solver") { OdinSimonSays.install() }
+        safely("masks used") { OdinMasksUsed.install() }
+        safely("tick timers") { OdinTickTimers.install() }
+        safely("highlight look") { OdinHighlightLook.install() }
         safely("splits look") { OdinSplitsLook.install() }
-        safely("sub splits tracking") { com.engineerclient.splits.DungeonSplits.install() }
-        safely("term info") { com.engineerclient.practice.TermInfo.init() }
-        safely("terminal hitboxes settings") { com.engineerclient.practice.TerminalHitboxes.adoptTermInfoSettings() }
+        safely("sub splits tracking") { DungeonSplits.install() }
+        safely("term info") { TermInfo.init() }
+        safely("terminal hitboxes settings") { TerminalHitboxes.adoptTermInfoSettings() }
         // Room Prediction and LCM Style (with LCM Colors): settings on Odin's own Dungeon Map, and Map Info's LCM Style
         // (from Ascent Client, same names, so saved values carry over); Odin's configs are read again so they apply
         // (reading never writes the file).
-        safely("lcm style") { com.engineerclient.lcm.LcmStyle.install() }
-        safely("lcm map info") { com.engineerclient.lcm.LcmMapInfo.install() }
-        safely("map prediction") { com.engineerclient.mappred.OdinMapPrediction.install() }
+        safely("lcm style") { LcmStyle.install() }
+        safely("lcm map info") { LcmMapInfo.install() }
+        safely("map prediction") { OdinMapPrediction.install() }
         // Team TP Maze: settings on Odin's Puzzle Solvers (its TP Maze), the party's shared maze map over Odin's websocket.
-        safely("team tp maze") { com.engineerclient.tpmaze.TeamTpMaze.install() }
+        safely("team tp maze") { TeamTpMaze.install() }
         safely("map configs") { ModuleManager.loadConfigurations() }
-        safely("hover terms") { com.engineerclient.practice.TermsimExtras.install() }
-        safely("click limit") { com.engineerclient.misc.OdinClickLimit.install() }
-        safely("odin term times") { com.engineerclient.practice.OdinTermTimes.install() }
-        runCatching { com.engineerclient.misc.LaunchStats.install() }
-        safely("leap order") { com.engineerclient.misc.LeapOrder.install() }
-        safely("p3sim") { com.engineerclient.p3sim.P3Sim.init() }
+        safely("hover terms") { TermsimExtras.install() }
+        safely("click limit") { OdinClickLimit.install() }
+        safely("odin term times") { OdinTermTimes.install() }
+        runCatching { LaunchStats.install() }
+        safely("leap order") { LeapOrder.install() }
+        safely("p3sim") { P3Sim.init() }
 
         // Modules default OFF and only ModuleConfig.load() toggles saved state — on a
         // fresh install nothing has saved state yet, so turn these on once.
         if (firstRun) {
-            for (m in listOf(AgroSphere, com.engineerclient.practice.Recore, com.engineerclient.p3sim.P3Sim, RandomStuff, com.engineerclient.misc.HealthMana, com.engineerclient.misc.Timers, ADR, SimonSaysPractice)) if (!m.enabled) m.toggle()
+            for (m in listOf(AgroSphere, Recore, P3Sim, RandomStuff, HealthMana, Timers, ADR, SimonSaysPractice)) if (!m.enabled) m.toggle()
             ModuleManager.saveConfigurations()
         }
 
@@ -142,8 +174,8 @@ object EngineerClient : ClientModInitializer {
         }
 
         DeadPlayers.register()
-        com.engineerclient.misc.Witherborn.register()
-        com.engineerclient.misc.I4Complete.register()
+        Witherborn.register()
+        I4Complete.register()
         EcLog.open(mc.gameDirectory.toPath(), listOf(
             "adm ${FabricLoader.getInstance().getModContainer("adm").map { it.metadata.version.friendlyString }.orElse("?")}" +
                 "  odin ${FabricLoader.getInstance().getModContainer("odin").map { it.metadata.version.friendlyString }.orElse("?")}",
@@ -212,17 +244,17 @@ object EngineerClient : ClientModInitializer {
             // /adr: the link to all your uploaded runs, private ones included.
             // /adr online: ADR Online in your browser, signed in.
             for (name in listOf("adr", "ADR")) dispatcher.register(literal(name).executes { ADR.myRunsLink(); 1 }
-                .then(literal("online").executes { com.engineerclient.adr.OnlineLink.openPage(); 1 }))
+                .then(literal("online").executes { OnlineLink.openPage(); 1 }))
             // /edt: #EndDungeonsToxicity in party chat.
-            dispatcher.register(literal("edt").executes { mc.schedule { com.odtheking.odin.utils.sendCommand("pc #EndDungeonsToxicity") }; 1 })
+            dispatcher.register(literal("edt").executes { mc.schedule { sendCommand("pc #EndDungeonsToxicity") }; 1 })
             // /termsim inf: next to Odin's /termsim (Brigadier merges the trees; the literal wins over its arguments).
-            dispatcher.register(literal("termsim").then(literal("inf").executes { mc.schedule { com.engineerclient.practice.InfNumbersSim.open(0L) }; 1 }))
+            dispatcher.register(literal("termsim").then(literal("inf").executes { mc.schedule { InfNumbersSim.open(0L) }; 1 }))
             // /adm on its own: Odin's settings menu, as its /od opens it; /adm help lists the rest.
             // Same tree under every alias (Brigadier literals are case-sensitive). Built fresh per
             // name — a bare redirect would not run the root executes on the alias itself.
             for (name in COMMANDS) dispatcher.register(
                 literal(name)
-                    .executes { mc.schedule { mc.setScreenAndShow(com.odtheking.odin.clickgui.ClickGUI) }; 1 }
+                    .executes { mc.schedule { mc.setScreenAndShow(ClickGUI) }; 1 }
                     .then(literal("help").executes { ctx ->
                         HELP.forEach { ctx.source.sendFeedback(Component.literal(it)) }
                         1
@@ -242,7 +274,7 @@ object EngineerClient : ClientModInitializer {
                                 1
                             })))
                     .then(literal("memreport").executes {
-                        com.engineerclient.debug.MemReport.write { line -> msg(line) }
+                        MemReport.write { line -> msg(line) }
                         1
                     })
             )
@@ -251,6 +283,6 @@ object EngineerClient : ClientModInitializer {
 }
 
 /** A selector's place in its option list (Odin's selectors hold the enum constant); setting it wraps around. */
-var <E : Enum<E>> com.odtheking.odin.clickgui.settings.impl.SelectorSetting<E>.index: Int
+var <E : Enum<E>> SelectorSetting<E>.index: Int
     get() = options.indexOf(value)
     set(i) { value = options[Math.floorMod(i, options.size)] }

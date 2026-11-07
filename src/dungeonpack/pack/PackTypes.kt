@@ -1,5 +1,6 @@
 package com.engineerclient.dungeonpack.pack
 
+import net.fabricmc.loader.api.FabricLoader
 import java.nio.file.Path
 
 /*
@@ -71,7 +72,7 @@ object PackFiles {
      * The packs folder of the running game. Reads the Fabric loader's game directory; only call this where the game
      * is running (tests pass a folder to the loaders directly).
      */
-    fun defaultDir(): Path = dirFor(net.fabricmc.loader.api.FabricLoader.getInstance().gameDir)
+    fun defaultDir(): Path = dirFor(FabricLoader.getInstance().gameDir)
 }
 
 /** Thrown inside the pack decoders for a malformed file; the loaders catch it and turn it into a [PackReport] line. */

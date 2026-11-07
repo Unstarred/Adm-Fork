@@ -3,21 +3,23 @@ package com.engineerclient.p3sim
 import com.engineerclient.EngineerClient
 import com.engineerclient.EngineerClient.mc
 import com.engineerclient.index
+import com.mojang.blaze3d.platform.InputConstants
+import com.odtheking.odin.clickgui.settings.impl.NumberSetting
 import com.odtheking.odin.features.ModuleManager
-import net.minecraft.world.phys.Vec3
+import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.AbstractSliderButton
 import net.minecraft.client.gui.components.Button
-import net.minecraft.client.gui.components.StringWidget
 import net.minecraft.client.gui.components.EditBox
+import net.minecraft.client.gui.components.StringWidget
 import net.minecraft.client.gui.components.Tooltip
 import net.minecraft.client.gui.layouts.FrameLayout
 import net.minecraft.client.gui.layouts.LayoutElement
 import net.minecraft.client.gui.layouts.LinearLayout
 import net.minecraft.client.gui.screens.Screen
-import com.mojang.blaze3d.platform.InputConstants
 import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.client.input.MouseButtonInfo
 import net.minecraft.network.chat.Component
+import net.minecraft.world.phys.Vec3
 import java.util.Locale
 
 /**
@@ -391,7 +393,7 @@ class SimRestartScreen : Screen(Component.literal(P3Sim.FULL_NAME)) {
     }
 
     /** A luck setting ([s]: Terminal Luck, SS Luck), -100 to 100% in fives. */
-    private inner class LuckSlider(w: Int, private val name: String = "Luck", private val s: com.odtheking.odin.clickgui.settings.impl.NumberSetting<*> = P3Sim.termLuckS) :
+    private inner class LuckSlider(w: Int, private val name: String = "Luck", private val s: NumberSetting<*> = P3Sim.termLuckS) :
         AbstractSliderButton(0, 0, w, 20, Component.empty(), (s.value.toDouble() / 100 + 1) / 2) {
         init {
             updateMessage()
@@ -399,7 +401,7 @@ class SimRestartScreen : Screen(Component.literal(P3Sim.FULL_NAME)) {
         }
         private fun luck() = Math.round(value * 40).toInt() * 5 - 100
         override fun updateMessage() { message = Component.literal("$name: ${if (luck() < 0) "§c" else ""}${luck()}%") }
-        override fun applyValue() { @Suppress("UNCHECKED_CAST") (s as com.odtheking.odin.clickgui.settings.impl.NumberSetting<Int>).value = luck(); ModuleManager.saveConfigurations() }
+        override fun applyValue() { @Suppress("UNCHECKED_CAST") (s as NumberSetting<Int>).value = luck(); ModuleManager.saveConfigurations() }
     }
 
     /** Practice's start timer, 0 to 5 s in tenths. */
@@ -615,7 +617,7 @@ class SimRestartScreen : Screen(Component.literal(P3Sim.FULL_NAME)) {
             return
         }
         // Hosting and joining are the beta's only (ADM shows the party only if one is going).
-        if (!com.engineerclient.EngineerClient.BETA) return
+        if (!EngineerClient.BETA) return
         addRenderableWidget(Button.builder(Component.literal("Host Party")) { P3Party.host(); rebuildWidgets() }
             .tooltip(tip("Friends join your sim: you get a 4-letter code to send them.")).bounds(x, y, PARTY_W, 20).build())
         y += ROW
@@ -688,9 +690,9 @@ class SimRestartScreen : Screen(Component.literal(P3Sim.FULL_NAME)) {
             EngineerClient.logger.info("[ec] p3sim menu click: button ${event.button()} on ${message.string}")
             if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT) right() else left()
         }
-        override fun extractContents(g: net.minecraft.client.gui.GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partial: Float) {
+        override fun extractContents(g: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partial: Float) {
             extractDefaultSprite(g)
-            extractDefaultLabel(g.textRendererForWidget(this, net.minecraft.client.gui.GuiGraphicsExtractor.HoveredTextEffects.NONE))
+            extractDefaultLabel(g.textRendererForWidget(this, GuiGraphicsExtractor.HoveredTextEffects.NONE))
         }
     }
 

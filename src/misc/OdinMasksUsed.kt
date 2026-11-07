@@ -1,5 +1,8 @@
 package com.engineerclient.misc
 
+import com.engineerclient.EngineerClient
+import com.engineerclient.p3sim.P3Sim
+import com.engineerclient.p3sim.PartyClient
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.DropdownSetting
@@ -36,7 +39,7 @@ object OdinMasksUsed {
      */
     @JvmStatic
     fun shows(index: Int, setting: Boolean): Boolean = setting && (!onlyUsed.value || used[index]) &&
-        !(com.engineerclient.p3sim.P3Sim.inSim && com.engineerclient.p3sim.PartyClient.phase.isEmpty())
+        !(P3Sim.inSim && PartyClient.phase.isEmpty())
 
     /**
      * P3 Sim restarted its masks and Phoenix (Masks.reset, every start): Odin's timers go back to ready as well, and
@@ -45,7 +48,7 @@ object OdinMasksUsed {
      */
     fun resetTimers() {
         used.fill(false)
-        com.engineerclient.EngineerClient.safely("odin invincibility reset") {
+        EngineerClient.safely("odin invincibility reset") {
             val type = Class.forName("com.odtheking.odin.features.impl.dungeon.InvincibilityTimer\$InvincibilityType")
             val reset = type.getMethod("reset").apply { isAccessible = true }
             type.enumConstants.forEach { reset.invoke(it) }

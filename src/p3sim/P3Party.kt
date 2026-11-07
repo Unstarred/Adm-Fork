@@ -3,6 +3,7 @@ package com.engineerclient.p3sim
 import com.engineerclient.EngineerClient
 import com.google.gson.JsonParser
 import net.fabricmc.loader.api.FabricLoader
+import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.ConnectScreen
 import net.minecraft.client.gui.screens.TitleScreen
 import net.minecraft.client.multiplayer.ServerData
@@ -19,6 +20,7 @@ import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.WebSocket
 import java.nio.ByteBuffer
+import java.time.Duration
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionStage
 import java.util.concurrent.ConcurrentHashMap
@@ -44,7 +46,7 @@ object P3Party {
     @JvmStatic @Volatile var loopbackOnly = false
         private set
 
-    private val mc get() = net.minecraft.client.Minecraft.getInstance()
+    private val mc get() = Minecraft.getInstance()
 
     /**
      * EngineerClient's version, without the build part or the channel (the relay matches host and joiner on it):
@@ -54,7 +56,7 @@ object P3Party {
         FabricLoader.getInstance().getModContainer("adm").map { it.metadata.version.friendlyString }.orElse("?").substringBefore('+').substringBefore('-')
     }
 
-    private val http: HttpClient by lazy { HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(10)).build() }
+    private val http: HttpClient by lazy { HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build() }
 
     // ------------------------------------------------------------------ hosting
 

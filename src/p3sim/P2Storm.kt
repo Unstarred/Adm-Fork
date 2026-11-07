@@ -4,6 +4,7 @@ import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass
 import net.minecraft.core.BlockPos
 import net.minecraft.sounds.SoundEvent
 import net.minecraft.sounds.SoundEvents
+import net.minecraft.sounds.SoundSource
 import net.minecraft.world.phys.AABB
 import net.minecraft.world.phys.Vec3
 import kotlin.math.cos
@@ -337,7 +338,7 @@ class P2Storm : Fight.Phase("P2") {
     }
 
     /** piston.extend / .contract (10, 0.49) at the pillar's west edge, z + 2, the layer that changed. */
-    private fun piston(pl: Pillar, s: SoundEvent, y: Int) = Sim.sound(s, 3f, 1f, Vec3(pl.minX + 0.5, y + 0.5, pl.minZ + 2.5), net.minecraft.sounds.SoundSource.BLOCKS)
+    private fun piston(pl: Pillar, s: SoundEvent, y: Int) = Sim.sound(s, 3f, 1f, Vec3(pl.minX + 0.5, y + 0.5, pl.minZ + 2.5), SoundSource.BLOCKS)
 
     /** Every footprint column polished diorite: Hypixel never puts the plain diorite edges back. */
     private fun layer(pl: Pillar, y: Int, solid: Boolean) {

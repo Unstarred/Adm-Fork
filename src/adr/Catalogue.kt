@@ -1,12 +1,22 @@
 package com.engineerclient.adr
 
+import com.google.gson.JsonArray
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import com.google.gson.JsonPrimitive
 import com.google.gson.stream.JsonReader
 import com.google.gson.stream.JsonToken
-import org.tukaani.xz.XZInputStream
 import org.slf4j.LoggerFactory
+import org.tukaani.xz.LZMA2InputStream
+import org.tukaani.xz.XZInputStream
+import java.io.ByteArrayInputStream
+import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.lang.ref.SoftReference
+import java.math.BigDecimal
+import java.nio.ByteBuffer
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -25,7 +35,7 @@ class Catalogue(val blocks: Blocks?, val values: Values? = null, val skulls: Sku
     }
 
     /** Values that come over and over (gear, head skins, names, poses, types), per field: each one's number, by [canon]. */
-    class Values(val version: Int, val fields: Map<String, Map<String, Int>>, val lists: Map<String, List<com.google.gson.JsonElement>> = emptyMap())
+    class Values(val version: Int, val fields: Map<String, Map<String, Int>>, val lists: Map<String, List<JsonElement>> = emptyMap())
 
     /** Heads placed in the world: each spot's number by "space|a,y,b|skin" (in its frame, [Templates.Frame]). */
     class Skulls(val version: Int, val id: Map<String, Int>)
@@ -108,9 +118,9 @@ class Catalogue(val blocks: Blocks?, val values: Values? = null, val skulls: Sku
 
         /** A values catalogue: {"fields": {field: [value...]}}. */
         fun readValues(input: InputStream, version: Int): Values {
-            val o = com.google.gson.JsonParser.parseReader(InputStreamReader(Capped(input, MAX_TEXT), Charsets.UTF_8)).asJsonObject
+            val o = JsonParser.parseReader(InputStreamReader(Capped(input, MAX_TEXT), Charsets.UTF_8)).asJsonObject
             val fields = HashMap<String, Map<String, Int>>()
-            val lists = HashMap<String, List<com.google.gson.JsonElement>>()
+            val lists = HashMap<String, List<JsonElement>>()
             for ((f, list) in o.getAsJsonObject("fields").entrySet()) {
                 val m = HashMap<String, Int>()
                 list.asJsonArray.forEachIndexed { i, v -> if (!v.isJsonNull) m.putIfAbsent(canon(v), i) } // (blank: one taken out)
@@ -124,11 +134,11 @@ class Catalogue(val blocks: Blocks?, val values: Values? = null, val skulls: Sku
         fun readDict(input: InputStream, version: Int): Dict {
             val all = Capped(input, MAX_BYTES.toLong()).readAllBytes()
             if (all.size < 9 || String(all, 0, 4, Charsets.US_ASCII) != "ADRD") throw IllegalStateException("not a dictionary")
-            val len = java.nio.ByteBuffer.wrap(all, 4, 4).int
+            val len = ByteBuffer.wrap(all, 4, 4).int
             if (len !in 1..DICT_TEXT) throw IllegalStateException("dictionary of $len")
             val packed = all.copyOfRange(8, all.size)
             // (the chunks, then the end of them, read as LZMA2)
-            val text = org.tukaani.xz.LZMA2InputStream(java.io.ByteArrayInputStream(packed + 0.toByte()), DICT_WINDOW).use { Capped(it, len.toLong() + 1).readAllBytes() }
+            val text = LZMA2InputStream(ByteArrayInputStream(packed + 0.toByte()), DICT_WINDOW).use { Capped(it, len.toLong() + 1).readAllBytes() }
             if (text.size != len) throw IllegalStateException("dictionary text ${text.size} of $len")
             return Dict(version, text, packed)
         }
@@ -137,7 +147,7 @@ class Catalogue(val blocks: Blocks?, val values: Values? = null, val skulls: Sku
 
         /** A skulls catalogue: {"tex": [skin...], "spots": [[space, a, y, b, skin number]...]}. */
         fun readSkulls(input: InputStream, version: Int): Skulls {
-            val o = com.google.gson.JsonParser.parseReader(InputStreamReader(Capped(input, MAX_TEXT), Charsets.UTF_8)).asJsonObject
+            val o = JsonParser.parseReader(InputStreamReader(Capped(input, MAX_TEXT), Charsets.UTF_8)).asJsonObject
             val tex = o.getAsJsonArray("tex").map { it.asString }
             val id = HashMap<String, Int>()
             o.getAsJsonArray("spots").forEachIndexed { i, e ->
@@ -150,10 +160,10 @@ class Catalogue(val blocks: Blocks?, val values: Values? = null, val skulls: Sku
         fun skullKey(space: String, a: Int, y: Int, b: Int, tex: String) = "$space|$a,$y,$b|$tex"
 
         /** A value as the same text whichever way it was written (-10.0 and -10 alike, as the viewer has them). */
-        fun canon(e: com.google.gson.JsonElement): String = when {
-            e is com.google.gson.JsonArray -> e.joinToString(",", "[", "]") { canon(it) }
-            e is com.google.gson.JsonPrimitive && e.isNumber -> runCatching { java.math.BigDecimal(e.asString).stripTrailingZeros().toPlainString() }.getOrDefault(e.asString).let { if (it == "-0") "0" else it }
-            e is com.google.gson.JsonObject -> e.entrySet().joinToString(",", "{", "}") { com.google.gson.JsonPrimitive(it.key).toString() + ":" + canon(it.value) }
+        fun canon(e: JsonElement): String = when {
+            e is JsonArray -> e.joinToString(",", "[", "]") { canon(it) }
+            e is JsonPrimitive && e.isNumber -> runCatching { BigDecimal(e.asString).stripTrailingZeros().toPlainString() }.getOrDefault(e.asString).let { if (it == "-0") "0" else it }
+            e is JsonObject -> e.entrySet().joinToString(",", "{", "}") { JsonPrimitive(it.key).toString() + ":" + canon(it.value) }
             else -> e.toString()
         }
 
@@ -177,9 +187,9 @@ class Catalogue(val blocks: Blocks?, val values: Values? = null, val skulls: Sku
 
     /** At most [max] bytes of [input]; past that it fails. */
     private class Capped(private val input: InputStream, private var max: Long) : InputStream() {
-        override fun read(): Int = if (max-- <= 0) throw java.io.IOException("too big") else input.read()
+        override fun read(): Int = if (max-- <= 0) throw IOException("too big") else input.read()
         override fun read(b: ByteArray, off: Int, len: Int): Int {
-            if (max <= 0) throw java.io.IOException("too big")
+            if (max <= 0) throw IOException("too big")
             val n = input.read(b, off, minOf(len.toLong(), max).toInt())
             if (n > 0) max -= n
             return n

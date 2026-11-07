@@ -1,16 +1,18 @@
 package com.engineerclient.p3sim
 
-import net.minecraft.world.entity.EntityTypes
-import com.engineerclient.index
 import com.engineerclient.EngineerClient
+import com.engineerclient.index
 import com.google.gson.JsonParser
 import net.minecraft.core.BlockPos
 import net.minecraft.core.particles.ParticleTypes
 import net.minecraft.server.level.ServerLevel
+import net.minecraft.server.level.ServerPlayer
 import net.minecraft.sounds.SoundEvents
+import net.minecraft.sounds.SoundSource
 import net.minecraft.world.damagesource.DamageSource
 import net.minecraft.world.entity.Entity
 import net.minecraft.world.entity.EntityType
+import net.minecraft.world.entity.EntityTypes
 import net.minecraft.world.entity.LightningBolt
 import net.minecraft.world.entity.item.PrimedTnt
 import net.minecraft.world.entity.projectile.hurtingprojectile.LargeFireball
@@ -18,11 +20,13 @@ import net.minecraft.world.entity.projectile.hurtingprojectile.WitherSkull
 import net.minecraft.world.level.block.state.BlockState
 import net.minecraft.world.phys.HitResult
 import net.minecraft.world.phys.Vec3
+import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.round
 import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.random.Random
 
 // ====================================================================== P4
@@ -245,7 +249,7 @@ class P4Necron(val fromP3: Boolean = false) : Fight.Phase("P4") {
     private fun stats(first: Boolean) = Sim.forEachPlayer { p -> stats(first, p) }
 
     /** [p]'s copy: their own class's experience and damage. */
-    private fun stats(first: Boolean, p: net.minecraft.server.level.ServerPlayer) {
+    private fun stats(first: Boolean, p: ServerPlayer) {
         val bar = "§a§l" + "▬".repeat(64)
         val classes = CLASSES.split(",")
         val mine = classes[Party.CLASSES.indexOf(Players.classOf(p)).coerceIn(0, 4)]
@@ -281,7 +285,7 @@ class P4Necron(val fromP3: Boolean = false) : Fight.Phase("P4") {
     private val cataXp = Random.nextDouble(46_500.0, 50_000.0)
     private val bits = if (Random.nextDouble() < 0.72) Random.nextInt(45, 80) else 0
 
-    private fun xp(v: Double) = "%,.1f".format(java.util.Locale.US, v).removeSuffix(".0")
+    private fun xp(v: Double) = "%,.1f".format(Locale.US, v).removeSuffix(".0")
 
     /** Hypixel's centring: a §f, then spaces to put the text's middle at 160 px (4 px a space). */
     private fun centre(text: String): String {
@@ -313,7 +317,7 @@ class P4Necron(val fromP3: Boolean = false) : Fight.Phase("P4") {
             if (result.type == HitResult.Type.BLOCK) {
                 val l = level() as ServerLevel
                 l.sendParticles(ParticleTypes.EXPLOSION, x, y, z, 1, 0.0, 0.0, 0.0, 0.0)
-                l.playSound(null, x, y, z, SoundEvents.GENERIC_EXPLODE.value(), net.minecraft.sounds.SoundSource.BLOCKS, 4f, Random.nextInt(38, 52) / 63f)
+                l.playSound(null, x, y, z, SoundEvents.GENERIC_EXPLODE.value(), SoundSource.BLOCKS, 4f, Random.nextInt(38, 52) / 63f)
             }
             discard()
         }
@@ -393,7 +397,7 @@ class P4Necron(val fromP3: Boolean = false) : Fight.Phase("P4") {
             while (next < frames.size && frames[next].first <= t) { Blocks.set(frames[next].second, frames[next].third); next++ }
             while (nextBolt < bolts.size && bolts[nextBolt] <= t) {
                 nextBolt++
-                val a = Random.nextDouble(Math.PI * 2); val r = 12 * kotlin.math.sqrt(Random.nextDouble())
+                val a = Random.nextDouble(Math.PI * 2); val r = 12 * sqrt(Random.nextDouble())
                 val bolt = LightningBolt(EntityTypes.LIGHTNING_BOLT, Sim.level)
                 bolt.setVisualOnly(true)
                 bolt.snapTo(centre.x + r * cos(a), 63.0, centre.z + r * sin(a), 0f, 0f)

@@ -1,23 +1,27 @@
 package com.engineerclient.p3sim
 
-import net.minecraft.world.entity.EntityTypes
+import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass
 import net.minecraft.core.BlockPos
 import net.minecraft.core.component.DataComponents
 import net.minecraft.nbt.CompoundTag
 import net.minecraft.network.chat.Component
+import net.minecraft.network.protocol.game.ClientboundBossEventPacket
 import net.minecraft.network.protocol.game.ClientboundSetHeldSlotPacket
+import net.minecraft.server.level.ServerBossEvent
+import net.minecraft.server.level.ServerPlayer
+import net.minecraft.world.BossEvent
 import net.minecraft.world.entity.Entity
 import net.minecraft.world.entity.EntityType
+import net.minecraft.world.entity.EntityTypes
 import net.minecraft.world.entity.boss.enderdragon.EndCrystal
 import net.minecraft.world.entity.boss.wither.WitherBoss
 import net.minecraft.world.entity.decoration.ArmorStand
-import net.minecraft.server.level.ServerBossEvent
-import net.minecraft.world.BossEvent
 import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.Items
 import net.minecraft.world.item.component.CustomData
-import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass
+import net.minecraft.world.level.Level
 import net.minecraft.world.phys.Vec3
+import java.util.UUID
 import kotlin.math.min
 import kotlin.random.Random
 import net.minecraft.world.level.block.Blocks as B
@@ -138,7 +142,7 @@ class BossWither(val name: String, at: Vec3, inv: Int = 1, armoured: Boolean = t
  * A boss's wither. The sim world is peaceful (no mobs of its own), and vanilla deletes every wither in a peaceful
  * world each tick; this one stays. With no AI it never charges up, shoots or breaks blocks.
  */
-class SimWither(level: net.minecraft.world.level.Level) : WitherBoss(EntityTypes.WITHER, level) {
+class SimWither(level: Level) : WitherBoss(EntityTypes.WITHER, level) {
     override fun checkDespawn() {}
 }
 
@@ -150,7 +154,7 @@ object BossBar {
     private var bar: ServerBossEvent? = null
 
     fun show(name: String, progress: Float = 1f) {
-        val b = bar ?: ServerBossEvent(java.util.UUID.randomUUID(), Sim.legacy(name),
+        val b = bar ?: ServerBossEvent(UUID.randomUUID(), Sim.legacy(name),
             BossEvent.BossBarColor.RED, BossEvent.BossBarOverlay.PROGRESS).also { bar = it }
         b.name = Sim.legacy(name)
         b.progress = progress.coerceIn(0f, 1f)
@@ -160,7 +164,7 @@ object BossBar {
     }
 
     /** A player who just came in sees the bar too. */
-    fun showTo(p: net.minecraft.server.level.ServerPlayer) { bar?.let { if (p !in it.players) it.addPlayer(p) } }
+    fun showTo(p: ServerPlayer) { bar?.let { if (p !in it.players) it.addPlayer(p) } }
 
     fun progress(f: Float) { bar?.progress = f.coerceIn(0f, 1f) }
 
@@ -168,9 +172,9 @@ object BossBar {
     fun resend() {
         val b = bar ?: return
         for (p in b.players) {
-            p.connection.send(net.minecraft.network.protocol.game.ClientboundBossEventPacket.createUpdateNamePacket(b))
-            p.connection.send(net.minecraft.network.protocol.game.ClientboundBossEventPacket.createUpdateStylePacket(b))
-            p.connection.send(net.minecraft.network.protocol.game.ClientboundBossEventPacket.createUpdateProgressPacket(b))
+            p.connection.send(ClientboundBossEventPacket.createUpdateNamePacket(b))
+            p.connection.send(ClientboundBossEventPacket.createUpdateStylePacket(b))
+            p.connection.send(ClientboundBossEventPacket.createUpdateProgressPacket(b))
         }
     }
     val progress: Float get() = bar?.progress ?: 0f
@@ -651,7 +655,7 @@ class P1Maxor : Fight.Phase("P1") {
     }
 
     /** [p] left the party: a crystal they carried is back on its stand, as if never taken. */
-    fun playerLeft(p: net.minecraft.server.level.ServerPlayer) = Sim.asPlayer(p) {
+    fun playerLeft(p: ServerPlayer) = Sim.asPlayer(p) {
         val had = carrying
         if (had <= 0) return@asPlayer
         carrying = 0

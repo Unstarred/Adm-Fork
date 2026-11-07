@@ -4,6 +4,7 @@ import com.engineerclient.EngineerClient
 import com.google.gson.GsonBuilder
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.world.item.ItemStack
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -50,7 +51,7 @@ object HotbarLayout {
     /** This game's file changed (the sim's server saved a joiner's): read it again. */
     fun forgetLocal() { cache.remove("") }
     /** A joiner's files arrived (or they left): read theirs again, and nothing of theirs from before (a class picked for them till then). */
-    fun forget(id: java.util.UUID) { cache.remove(id.toString()); live.remove(id.toString()); given.remove(id.toString()) }
+    fun forget(id: UUID) { cache.remove(id.toString()); live.remove(id.toString()); given.remove(id.toString()) }
 
     private fun saved(): Saved = cache[owner()] ?: run {
         val s = runCatching { PlayerFiles.read(PlayerFiles.HOTBAR)?.let { gson.fromJson(it, Saved::class.java) } }

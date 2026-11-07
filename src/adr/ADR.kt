@@ -1,6 +1,10 @@
 package com.engineerclient.adr
 
 import com.engineerclient.EngineerClient
+import com.engineerclient.mixin.ContainerScreenAccessor
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.odtheking.odin.clickgui.settings.impl.ActionSetting
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.NumberSetting
@@ -15,37 +19,37 @@ import com.odtheking.odin.events.core.on
 import com.odtheking.odin.events.core.onReceive
 import com.odtheking.odin.features.Category
 import com.odtheking.odin.features.Module
+import com.odtheking.odin.features.ModuleManager
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents
 import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents
-import com.engineerclient.mixin.ContainerScreenAccessor
-import net.minecraft.core.registries.BuiltInRegistries
-import net.minecraft.world.inventory.InventoryMenu
 import net.minecraft.ChatFormatting
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
+import net.minecraft.core.BlockPos
+import net.minecraft.core.registries.BuiltInRegistries
+import net.minecraft.network.chat.ClickEvent
 import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.FormattedText
+import net.minecraft.network.chat.HoverEvent
 import net.minecraft.network.chat.Style
 import net.minecraft.network.chat.TextColor
 import net.minecraft.network.protocol.game.ClientboundBlockEventPacket
-import net.minecraft.network.protocol.game.ClientboundSystemChatPacket
-import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket
-import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket
-import net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket
-import net.minecraft.network.protocol.game.ClientboundClearTitlesPacket
 import net.minecraft.network.protocol.game.ClientboundBossEventPacket
+import net.minecraft.network.protocol.game.ClientboundClearTitlesPacket
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket
+import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket
+import net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket
+import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket
 import net.minecraft.network.protocol.game.ClientboundSoundPacket
+import net.minecraft.network.protocol.game.ClientboundSystemChatPacket
 import net.minecraft.network.protocol.game.ClientboundTakeItemEntityPacket
-import net.minecraft.world.entity.PositionMoveRotation
 import net.minecraft.sounds.SoundEvents
-import net.minecraft.core.BlockPos
+import net.minecraft.world.BossEvent
+import net.minecraft.world.entity.PositionMoveRotation
+import net.minecraft.world.inventory.InventoryMenu
 import net.minecraft.world.level.block.Blocks
-import java.util.Optional
-import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
-import com.google.gson.JsonArray
-import com.google.gson.JsonObject
-import com.google.gson.JsonParser
 import java.io.BufferedReader
+import java.io.IOException
 import java.io.InputStreamReader
 import java.net.URI
 import java.net.http.HttpClient
@@ -53,8 +57,15 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
+import java.security.SecureRandom
 import java.time.Duration
+import java.util.Locale
+import java.util.Optional
+import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
 
 /**
  * ADR: records everything about a dungeon run, from instance load to leaving, so it can be
@@ -85,9 +96,9 @@ object ADR : Module(
 
     internal fun token(): String {
         if (ownerToken.length < 32) {
-            val r = java.security.SecureRandom()
+            val r = SecureRandom()
             ownerToken = (1..32).joinToString("") { "0123456789abcdef"[r.nextInt(16)].toString() }
-            com.odtheking.odin.features.ModuleManager.saveConfigurations()
+            ModuleManager.saveConfigurations()
         }
         return ownerToken
     }
@@ -296,7 +307,7 @@ object ADR : Module(
 
     private fun colorCode(color: TextColor): String {
         val legacy = ChatFormatting.entries.firstOrNull { TextColor.fromLegacyFormat(it)?.value == color.value }
-        return if (legacy != null) legacy.toString() else "§#" + String.format(java.util.Locale.ROOT, "%06x", color.value and 0xFFFFFF)
+        return if (legacy != null) legacy.toString() else "§#" + String.format(Locale.ROOT, "%06x", color.value and 0xFFFFFF)
     }
 
     /**
@@ -320,7 +331,7 @@ object ADR : Module(
                     if (wait > 0) Thread.sleep(wait)
                     try {
                         id = send(file, scan, sibling); break
-                    } catch (e: java.io.IOException) {
+                    } catch (e: IOException) {
                         if (i == 2) throw e
                         EngineerClient.logger.warn("[ec] adr upload try ${i + 1} failed, trying again: $e")
                     } catch (e: Refused) {
@@ -392,8 +403,8 @@ object ADR : Module(
             got.body().use { s ->
                 if (got.statusCode() != 200) return null
                 // (the request's timeout is only until the headers: one sent a byte a minute isn't waited out)
-                val bytes = java.util.concurrent.CompletableFuture.supplyAsync({ s.readNBytes(SIBLING_MAX + 1) }, { Thread.ofVirtual().start(it) })
-                    .get(2, java.util.concurrent.TimeUnit.MINUTES)
+                val bytes = CompletableFuture.supplyAsync({ s.readNBytes(SIBLING_MAX + 1) }, { Thread.ofVirtual().start(it) })
+                    .get(2, TimeUnit.MINUTES)
                 if (bytes.size > SIBLING_MAX) { EngineerClient.logger.warn("[ec] adr: a party member's upload is over ${SIBLING_MAX shr 20} MB, nothing left out"); return null }
                 bytes
             }
@@ -488,7 +499,7 @@ object ADR : Module(
         var lines = 0
         var floor = "unknown"
         var meta = false
-        java.util.zip.GZIPOutputStream(Files.newOutputStream(temp)).bufferedWriter(Charsets.UTF_8).use { w ->
+        GZIPOutputStream(Files.newOutputStream(temp)).bufferedWriter(Charsets.UTF_8).use { w ->
             try {
                 BufferedReader(InputStreamReader(GZIPInputStream(Files.newInputStream(part)), Charsets.UTF_8)).use { r ->
                     while (true) {
@@ -498,7 +509,7 @@ object ADR : Module(
                         w.write(line); w.newLine(); lines++
                     }
                 }
-            } catch (_: java.io.IOException) {
+            } catch (_: IOException) {
                 // (where the crash cut it off)
             }
         }
@@ -517,8 +528,8 @@ object ADR : Module(
             val url = "https://$SITE/adr/?mine=$token"
             EngineerClient.msg(Component.literal("§7ADR: ").append(
                 Component.literal("§b§nyour runs").withStyle { s ->
-                    s.withClickEvent(net.minecraft.network.chat.ClickEvent.OpenUrl(URI.create(url)))
-                        .withHoverEvent(net.minecraft.network.chat.HoverEvent.ShowText(Component.literal("§7$url")))
+                    s.withClickEvent(ClickEvent.OpenUrl(URI.create(url)))
+                        .withHoverEvent(HoverEvent.ShowText(Component.literal("§7$url")))
                 }
             ).append(Component.literal(" §8(unlisted ones too - keep this link to yourself)")))
         }
@@ -544,7 +555,7 @@ object ADR : Module(
                     EngineerClient.msg("§7ADR: an update had switched §fUnlisted Runs§7 on - it's off again, as you had it${if (n > 0) ", and your $n runs since are listed again" else ""}.")
                 }
                 unlistedChecked = true
-                com.odtheking.odin.features.ModuleManager.saveConfigurations()
+                ModuleManager.saveConfigurations()
             } catch (t: Throwable) {
                 EngineerClient.logger.warn("[ec] adr: unlisted check failed", t)
             }
@@ -639,9 +650,9 @@ object ADR : Module(
 
 /** A boss bar packet into the recording (HudCapture.bossBar). */
 private class BossBars(private val s: RunRecorder) : ClientboundBossEventPacket.Handler {
-    override fun add(id: java.util.UUID, name: Component, progress: Float, color: net.minecraft.world.BossEvent.BossBarColor, overlay: net.minecraft.world.BossEvent.BossBarOverlay, darkenScreen: Boolean, playMusic: Boolean, createWorldFog: Boolean) =
+    override fun add(id: UUID, name: Component, progress: Float, color: BossEvent.BossBarColor, overlay: BossEvent.BossBarOverlay, darkenScreen: Boolean, playMusic: Boolean, createWorldFog: Boolean) =
         s.hud.bossBar(s.currentTick, id, name, progress, false)
-    override fun remove(id: java.util.UUID) = s.hud.bossBar(s.currentTick, id, null, null, true)
-    override fun updateProgress(id: java.util.UUID, progress: Float) = s.hud.bossBar(s.currentTick, id, null, progress, false)
-    override fun updateName(id: java.util.UUID, name: Component) = s.hud.bossBar(s.currentTick, id, name, null, false)
+    override fun remove(id: UUID) = s.hud.bossBar(s.currentTick, id, null, null, true)
+    override fun updateProgress(id: UUID, progress: Float) = s.hud.bossBar(s.currentTick, id, null, progress, false)
+    override fun updateName(id: UUID, name: Component) = s.hud.bossBar(s.currentTick, id, name, null, false)
 }

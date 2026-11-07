@@ -1,13 +1,20 @@
 package com.engineerclient.splits
 
+import com.engineerclient.DeadPlayers
 import com.engineerclient.EngineerClient
 import com.engineerclient.misc.Witherborn
+import com.engineerclient.p3sim.P3Sim
+import com.engineerclient.p3sim.Practice
+import com.engineerclient.p3sim.StormEnd
+import com.engineerclient.practice.Recore
+import com.engineerclient.storm.StormCrush
+import com.engineerclient.storm.StormCrushView
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.ColorSetting
 import com.odtheking.odin.clickgui.settings.impl.NumberSetting
-import com.odtheking.odin.clickgui.settings.impl.StringSetting
 import com.odtheking.odin.clickgui.settings.impl.SelectorSetting
+import com.odtheking.odin.clickgui.settings.impl.StringSetting
 import com.odtheking.odin.events.BlockUpdateEvent
 import com.odtheking.odin.events.EntityEvent
 import com.odtheking.odin.events.LevelEvent
@@ -18,24 +25,31 @@ import com.odtheking.odin.events.core.on
 import com.odtheking.odin.events.core.onReceive
 import com.odtheking.odin.features.Category
 import com.odtheking.odin.features.Module
-import com.odtheking.odin.utils.Color
-import com.engineerclient.storm.StormCrush
-import com.engineerclient.storm.StormCrushView
+import com.odtheking.odin.features.ModuleManager
 import com.odtheking.odin.features.impl.dungeon.map.DungeonScan
 import com.odtheking.odin.features.impl.dungeon.map.tile.RoomType
+import com.odtheking.odin.utils.Color
 import com.odtheking.odin.utils.Colors
 import com.odtheking.odin.utils.render.text
+import com.odtheking.odin.utils.sendCommand
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
 import com.odtheking.odin.utils.texture
-import com.odtheking.odin.utils.sendCommand
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
 import net.minecraft.client.gui.GuiGraphicsExtractor
+import net.minecraft.client.multiplayer.ClientLevel
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket
+import net.minecraft.world.entity.Entity
+import net.minecraft.world.entity.EquipmentSlot
+import net.minecraft.world.entity.LivingEntity
 import net.minecraft.world.entity.boss.enderdragon.EndCrystal
 import net.minecraft.world.entity.boss.wither.WitherBoss
 import net.minecraft.world.entity.decoration.ArmorStand
 import net.minecraft.world.entity.item.PrimedTnt
+import net.minecraft.world.entity.monster.zombie.Zombie
 import net.minecraft.world.entity.player.Player
 import net.minecraft.world.level.block.Blocks
+import net.minecraft.world.phys.Vec3
+import java.util.Base64
 
 /**
  * The BR (blood rush) and Goldor sub-split HUDs, plus the run tracking behind the Engineer Splits look (the splits
@@ -151,7 +165,7 @@ object DungeonSplits : Module(
     )
 
     /** Goldor, where the server last put him and on which tick, for his setting off after the core opens. */
-    private var coreGoldor: Triple<Int, net.minecraft.world.phys.Vec3, Int>? = null
+    private var coreGoldor: Triple<Int, Vec3, Int>? = null
 
     // What the world shows, watched only while it can matter.
     private val barriers = mutableListOf<Pair<Int, Int>>()
@@ -195,7 +209,7 @@ object DungeonSplits : Module(
             val storm = SimOdinSplits.odinName(SplitTracker.STORM)
             if (storm != null) {
                 val whole = SimOdinSplits.target(storm).takeIf { it > 0 } ?: SplitPace.ref(SplitTracker.STORM)?.ms ?: 41_300L
-                SimOdinSplits.start(storm, (whole - com.engineerclient.p3sim.StormEnd.LEAD * 50L).coerceAtLeast(0L))
+                SimOdinSplits.start(storm, (whole - StormEnd.LEAD * 50L).coerceAtLeast(0L))
             }
         } else SimOdinSplits.odinName(label)?.let { SimOdinSplits.start(it, headClock.ms) }
         if (termsDone > 0) {
@@ -221,8 +235,8 @@ object DungeonSplits : Module(
      * runs with Sub Splits off too: subscribed while either wants it, with nothing drawn.
      */
     fun install() {
-        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register {
-            val want = enabled || com.engineerclient.practice.Recore.let { it.enabled && it.pasteLast }
+        ClientTickEvents.END_CLIENT_TICK.register {
+            val want = enabled || Recore.let { it.enabled && it.pasteLast }
             val on = this in EventBus.activeSubscribers
             if (want && !on) EventBus.subscribe(this) else if (!want && on) EventBus.unsubscribe(this)
         }
@@ -263,7 +277,7 @@ object DungeonSplits : Module(
                 EngineerClient.safely("splits chat") {
                     if (!DungeonUtils.inDungeons) return@safely
                     // A P3 Sim practice: no splits (its own timer counts); its boss and terminal lines would start them again.
-                    if (com.engineerclient.p3sim.P3Sim.inSim && com.engineerclient.p3sim.Practice.active) return@safely
+                    if (P3Sim.inSim && Practice.active) return@safely
                     tracker.onChat(text, at)
                     moments.onChat(text, at)
                     subs.onChat(text, at)
@@ -388,9 +402,9 @@ object DungeonSplits : Module(
      * everyone you can see is in, which the box can't decide. The box reaches down to the core's
      * floor, since players stand as low as y 64 during the fight.
      */
-    private fun everyoneInCore(level: net.minecraft.client.multiplayer.ClientLevel): Boolean? {
+    private fun everyoneInCore(level: ClientLevel): Boolean? {
         // The dead count as in: a ghost can be anywhere (DeadPlayers has them before the tab list does).
-        val alive = DungeonUtils.dungeonTeammates.filter { !com.engineerclient.DeadPlayers.isDead(it) }
+        val alive = DungeonUtils.dungeonTeammates.filter { !DeadPlayers.isDead(it) }
         if (alive.isEmpty()) return false
         var unseen = false
         for (mate in alive) {
@@ -410,7 +424,7 @@ object DungeonSplits : Module(
      * [GOLDOR_GO] a tick, timed from the step's start. A jump of blocks at once is him coming into
      * view, not moving.
      */
-    private fun watchCore(level: net.minecraft.client.multiplayer.ClientLevel) {
+    private fun watchCore(level: ClientLevel) {
         if (core.look(serverTicks)) {
             val me = mc.player
             val alive = aliveNames()
@@ -422,8 +436,8 @@ object DungeonSplits : Module(
                 core.observe(mate.name, at?.let { inCoreBox(it.x, it.y, it.z) }, serverTicks)
             }
             // Dying after S4's start counts as getting in, at the death (DeadPlayers has it before the tab list).
-            for (mate in DungeonUtils.dungeonTeammates) if (com.engineerclient.DeadPlayers.isDead(mate)) core.onDeath(mate.name, serverTicks)
-            me?.name?.string?.let { if (com.engineerclient.DeadPlayers.isDead(it)) core.onDeath(it, serverTicks) }
+            for (mate in DungeonUtils.dungeonTeammates) if (DeadPlayers.isDead(mate)) core.onDeath(mate.name, serverTicks)
+            me?.name?.string?.let { if (DeadPlayers.isDead(it)) core.onDeath(it, serverTicks) }
             pasteLastIn()
         }
         if (core.openTick == null || core.goldorMoved != null) return
@@ -445,7 +459,7 @@ object DungeonSplits : Module(
      * singleplayer (the P3 Sim).
      */
     private fun pasteLastIn() {
-        if (!com.engineerclient.practice.Recore.let { it.enabled && it.pasteLast } || core.pasted || mc.hasSingleplayerServer() || com.engineerclient.p3sim.P3Sim.inSim) return
+        if (!Recore.let { it.enabled && it.pasteLast } || core.pasted || mc.hasSingleplayerServer() || P3Sim.inSim) return
         val me = mc.player?.name?.string ?: return
         val mates = DungeonUtils.dungeonTeammates.filter { it.name != me }
         if (mates.size != 4 || mates.any { it.isDead }) return
@@ -518,7 +532,7 @@ object DungeonSplits : Module(
     private val NECRON_GONE = 20
 
     /** A boss's wither: the one nearest the name tag carrying [name], or nearest you without one. */
-    private fun bossWither(level: net.minecraft.client.multiplayer.ClientLevel, name: String): WitherBoss? {
+    private fun bossWither(level: ClientLevel, name: String): WitherBoss? {
         val withers = level.entitiesForRendering().filterIsInstance<WitherBoss>().filter { Witherborn.isBoss(it) }
         val tag = level.entitiesForRendering().firstOrNull { it is ArmorStand && it.customName?.string?.contains(name) == true }
         val anchor = tag ?: mc.player ?: return null
@@ -526,7 +540,7 @@ object DungeonSplits : Module(
     }
 
     /** Goldor and where he waits once the core opens. */
-    private var goldorAt: Pair<Int, net.minecraft.world.phys.Vec3>? = null
+    private var goldorAt: Pair<Int, Vec3>? = null
     private var goldorMoved = false
 
     /**
@@ -536,7 +550,7 @@ object DungeonSplits : Module(
      * recorded run. Only his first move counts. A jump of blocks at once is him coming into view,
      * not moving, and starts the watch again.
      */
-    private fun watchGoldor(level: net.minecraft.client.multiplayer.ClientLevel, trusted: Boolean) {
+    private fun watchGoldor(level: ClientLevel, trusted: Boolean) {
         if (goldorMoved) return
         val at = goldorAt
         if (at == null) { bossWither(level, "Goldor")?.let { goldorAt = it.id to it.position() }; return }
@@ -583,7 +597,7 @@ object DungeonSplits : Module(
     /** A door is ~228 barriers going at once; nothing else in P3 clears this many there. */
     private const val SECTION_DOOR_BLOCKS = 100
     private val sectionDoor = IntArray(3)
-    private val NECRON_MID = net.minecraft.world.phys.Vec3(54.0, 66.0, 76.0)
+    private val NECRON_MID = Vec3(54.0, 66.0, 76.0)
     /** Blocks a tick: faster is Goldor setting off for the core (he creeps at ~0.05, goes at ~0.65). */
     private const val GOLDOR_GO = 0.25
     private const val CORE_OPEN = "The Core entrance is opening!"
@@ -591,7 +605,7 @@ object DungeonSplits : Module(
     private val KEY = Regex("""(?:Wither|Blood) Key""")
 
     /** The Watcher: his id and where he was last tick. */
-    private var watcherAt: Pair<Int, net.minecraft.world.phys.Vec3>? = null
+    private var watcherAt: Pair<Int, Vec3>? = null
 
     /**
      * The Watcher's move, the way Devonian times it: once his dialog is over ("Let's see how you
@@ -600,11 +614,11 @@ object DungeonSplits : Module(
      * depending on the camp, so there is nothing to count it from: without him in view it stays
      * blank. He is the zombie in one of his skins (Odin's Blood Camp list).
      */
-    private fun watchWatcher(level: net.minecraft.client.multiplayer.ClientLevel) {
+    private fun watchWatcher(level: ClientLevel) {
         val handle = moments.watcherHandle ?: return
         val prev = watcherAt
         val e = (prev?.let { level.getEntity(it.first) }
-            ?: level.entitiesForRendering().firstOrNull { it is net.minecraft.world.entity.monster.zombie.Zombie && isWatcherHead(it) })
+            ?: level.entitiesForRendering().firstOrNull { it is Zombie && isWatcherHead(it) })
         if (e == null) { watcherAt = null; return }
         watcherAt = e.id to e.position()
         if (prev == null || prev.first != e.id || serverTicks - handle.tick < 45) return
@@ -616,14 +630,14 @@ object DungeonSplits : Module(
 
     private val WATCHER_SKINS = listOf("5662b6fb4b8b", "2739d7f4e66a", "bf6e1e7ed365", "4cec40008e1c", "b37dd18b5983", "f5f0d78fe38d", "51967db5e319", "9fd61e8055f6", "e5c1dc47a04c")
 
-    private fun isWatcherHead(e: net.minecraft.world.entity.Entity): Boolean {
-        val head = (e as? net.minecraft.world.entity.LivingEntity)?.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.HEAD) ?: return false
+    private fun isWatcherHead(e: Entity): Boolean {
+        val head = (e as? LivingEntity)?.getItemBySlot(EquipmentSlot.HEAD) ?: return false
         val tex = head.texture ?: return false
-        val decoded = runCatching { String(java.util.Base64.getDecoder().decode(tex)) }.getOrNull() ?: return false
+        val decoded = runCatching { String(Base64.getDecoder().decode(tex)) }.getOrNull() ?: return false
         return WATCHER_SKINS.any { it in decoded }
     }
 
-    private fun distanceTo(e: net.minecraft.world.entity.Entity): Double = mc.player?.distanceTo(e)?.toDouble() ?: 0.0
+    private fun distanceTo(e: Entity): Double = mc.player?.distanceTo(e)?.toDouble() ?: 0.0
 
     /** The blood rush HUD's lines, at its detail level; none in the boss with Hide In Boss on. */
     private fun bloodLines(): List<String> {
@@ -696,7 +710,7 @@ object DungeonSplits : Module(
      * Times this run can be kept as bests and recents. Not in the P3 Sim, also checked directly:
      * a world load there (a respawn) resets [realRun] while its back-filled times are still up.
      */
-    private val keepsTimes get() = realRun && !com.engineerclient.p3sim.P3Sim.inSim
+    private val keepsTimes get() = realRun && !P3Sim.inSim
 
     /**
      * Each split as it ends, as a best for its floor (F7, M7) when it is one - every split, the
@@ -796,7 +810,7 @@ object DungeonSplits : Module(
         while (list.size > RECENT) list.removeAt(0)
         val text = all.entries.sortedBy { it.key }.joinToString(",") { (k, v) -> k + "=" + v.joinToString("|") { "${it.ms}:${it.ticks}" } }
         when (floor) { "F7" -> recentF7 = text; "M7" -> recentM7 = text; else -> return }
-        com.odtheking.odin.features.ModuleManager.saveConfigurations()
+        ModuleManager.saveConfigurations()
     }
 
     /**
@@ -827,7 +841,7 @@ object DungeonSplits : Module(
     private fun saveBests(floor: String?, bests: Map<String, Long>) {
         val text = SubSplitGrades.formatBests(bests)
         when (floor) { "F7" -> bestsF7 = text; "M7" -> bestsM7 = text; else -> return }
-        com.odtheking.odin.features.ModuleManager.saveConfigurations()
+        ModuleManager.saveConfigurations()
     }
 
     private fun draw(gfx: GuiGraphicsExtractor, lines: List<String>): Pair<Int, Int> {

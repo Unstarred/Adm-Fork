@@ -1,5 +1,8 @@
 package com.engineerclient.splits
 
+import java.util.Locale
+import kotlin.math.abs
+
 /**
  * The blood rush, room by room, rebuilt every frame so the room being run counts up live.
  *
@@ -258,7 +261,7 @@ class BloodRunDetail {
         out += "§8· start: ${r.startFrom}"
         out += if (r.doorFell != null) "§8· door down: seen (its blocks)" else "§8· door down: not seen - too far away; key time counts from the start"
         out += when {
-            r.keySeenAt != null -> "§8· key dropped: seen " + String.format(java.util.Locale.ROOT, "%.0f blocks", r.keySeenAt!!) + " away"
+            r.keySeenAt != null -> "§8· key dropped: seen " + String.format(Locale.ROOT, "%.0f blocks", r.keySeenAt!!) + " away"
             r.keyPicked != null -> "§8· key dropped: not seen (out of render distance) - put at the pickup line"
             else -> "§8· key dropped: not yet"
         }
@@ -267,7 +270,7 @@ class BloodRunDetail {
         if (r.name == UNNAMED) out += "§8· name: unknown - its door was never seen"
         span(r.start, r.doorOpened)?.let { (ms, ticks) ->
             val lag = ms - ticks * 50
-            if (kotlin.math.abs(lag) >= 100) out += "§8· lag: server " + SplitFormat.seconds(kotlin.math.abs(lag)) + (if (lag > 0) " behind" else " ahead") + " real time"
+            if (abs(lag) >= 100) out += "§8· lag: server " + SplitFormat.seconds(abs(lag)) + (if (lag > 0) " behind" else " ahead") + " real time"
         }
         return out
     }

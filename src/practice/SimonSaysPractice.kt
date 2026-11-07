@@ -3,6 +3,7 @@ package com.engineerclient.practice
 import com.engineerclient.EngineerClient
 import com.engineerclient.EngineerClient.mc
 import com.engineerclient.mixin.MinecraftAccessor
+import com.mojang.blaze3d.platform.InputConstants
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.KeybindSetting
@@ -10,40 +11,58 @@ import com.odtheking.odin.clickgui.settings.impl.NumberSetting
 import com.odtheking.odin.events.BlockInteractEvent
 import com.odtheking.odin.events.BlockUpdateEvent
 import com.odtheking.odin.events.LevelEvent
-import com.odtheking.odin.features.impl.boss.SimonSays
-import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
-import com.odtheking.odin.utils.skyblock.dungeon.M7Phases
-import net.minecraft.world.level.block.state.properties.BlockStateProperties
 import com.odtheking.odin.events.RenderExtractEvent
+import com.odtheking.odin.events.TickEvent
+import com.odtheking.odin.events.core.on
+import com.odtheking.odin.events.core.onReceive
+import com.odtheking.odin.features.Category
+import com.odtheking.odin.features.Module
+import com.odtheking.odin.features.impl.boss.SimonSays
 import com.odtheking.odin.utils.Color.Companion.withAlpha
 import com.odtheking.odin.utils.Colors
 import com.odtheking.odin.utils.playSoundSettings
 import com.odtheking.odin.utils.render.BoxStyle
 import com.odtheking.odin.utils.render.drawStyledBox
-import net.minecraft.world.phys.AABB
-import net.minecraft.world.phys.Vec3
-import com.odtheking.odin.events.TickEvent
-import com.odtheking.odin.events.core.on
-import com.odtheking.odin.events.core.onReceive
-import net.minecraft.network.protocol.game.ClientboundSystemChatPacket
-import com.odtheking.odin.features.Category
-import com.odtheking.odin.features.Module
+import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
+import com.odtheking.odin.utils.skyblock.dungeon.M7Phases
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext
 import net.minecraft.client.multiplayer.ClientLevel
+import net.minecraft.client.renderer.block.MovingBlockRenderState
+import net.minecraft.client.renderer.blockentity.state.BlockEntityRenderState
+import net.minecraft.client.renderer.rendertype.RenderTypes
 import net.minecraft.commands.arguments.blocks.BlockStateParser
 import net.minecraft.core.BlockPos
 import net.minecraft.core.Direction
 import net.minecraft.core.registries.BuiltInRegistries
+import net.minecraft.network.chat.Component
+import net.minecraft.network.protocol.game.ClientboundSystemChatPacket
 import net.minecraft.sounds.SoundEvents
 import net.minecraft.sounds.SoundSource
+import net.minecraft.util.ARGB
+import net.minecraft.util.LightCoordsUtil
+import net.minecraft.util.Mth
 import net.minecraft.world.InteractionHand
+import net.minecraft.world.entity.player.Player
+import net.minecraft.world.level.EmptyBlockGetter
+import net.minecraft.world.level.LightLayer
 import net.minecraft.world.level.block.Block
 import net.minecraft.world.level.block.Blocks
 import net.minecraft.world.level.block.ButtonBlock
 import net.minecraft.world.level.block.Rotation
+import net.minecraft.world.level.block.WallSignBlock
+import net.minecraft.world.level.block.entity.SignBlockEntity
+import net.minecraft.world.level.block.entity.SignText
+import net.minecraft.world.level.block.entity.SignTextSlot
 import net.minecraft.world.level.block.state.BlockState
+import net.minecraft.world.level.block.state.properties.BlockStateProperties
+import net.minecraft.world.phys.AABB
 import net.minecraft.world.phys.BlockHitResult
-import com.mojang.blaze3d.platform.InputConstants
+import net.minecraft.world.phys.EntityHitResult
+import net.minecraft.world.phys.Vec3
+import net.minecraft.world.phys.shapes.VoxelShape
+import org.joml.Matrix4f
 import java.util.Locale
+import java.util.Random
 
 /**
  * SS Practice: F7's first device, Simon Says, summoned in front of you with a keybind (press it
@@ -125,7 +144,7 @@ object SimonSaysPractice : Module(
         /** The device's blocks, by world position, turned to face you: drawn, never set in the world. Air: none. */
         val blocks = LinkedHashMap<BlockPos, BlockState>()
         /** The signs' block entities (in no world's list: only for drawing them). */
-        val signs = LinkedHashMap<BlockPos, net.minecraft.world.level.block.entity.SignBlockEntity>()
+        val signs = LinkedHashMap<BlockPos, SignBlockEntity>()
         /** Where the device takes its light from: the spot you stood on to summon it, at head height. */
         val lightPos: BlockPos = origin.above()
         fun setWorld(pos: BlockPos, state: BlockState) {
@@ -225,7 +244,7 @@ object SimonSaysPractice : Module(
      */
     private fun showTick(j: Int) = if (instantShow) 0 else Math.round(8 * j / showSpeed).toInt()
 
-    private val rng = java.util.Random()
+    private val rng = Random()
     private val buttonUp = BooleanArray(16)
     private val downUntil = LongArray(16)
     private var firstLight = 0L
@@ -322,10 +341,10 @@ object SimonSaysPractice : Module(
      * is the whole face of its block (16x16) at a button's depth (2 px, 1 pressed), against the
      * block it's on.
      */
-    private fun shapeOf(pos: BlockPos, state: BlockState): net.minecraft.world.phys.shapes.VoxelShape =
-        fullBlockShape(state, pos) ?: state.getShape(net.minecraft.world.level.EmptyBlockGetter.INSTANCE, pos)
+    private fun shapeOf(pos: BlockPos, state: BlockState): VoxelShape =
+        fullBlockShape(state, pos) ?: state.getShape(EmptyBlockGetter.INSTANCE, pos)
 
-    private fun fullBlockShape(state: BlockState, pos: BlockPos): net.minecraft.world.phys.shapes.VoxelShape? {
+    private fun fullBlockShape(state: BlockState, pos: BlockPos): VoxelShape? {
         if (!fullBlock || state.block !is ButtonBlock || pos !in gridCells) return null
         val d = if (state.getValue(ButtonBlock.POWERED)) 1.0 else 2.0
         return when (state.getValue(BlockStateProperties.HORIZONTAL_FACING)) {
@@ -445,15 +464,15 @@ object SimonSaysPractice : Module(
     /** A wall sign on the [side] (north: left, south: right) of the wool block [button] is on. */
     private fun sign(p: Placement, button: BlockPos, line1: String, line2: String, side: Direction = Direction.NORTH) {
         val real = button.east().relative(side)
-        p.set(real, Blocks.OAK_WALL_SIGN.defaultBlockState().setValue(net.minecraft.world.level.block.WallSignBlock.FACING, side))
+        p.set(real, Blocks.OAK_WALL_SIGN.defaultBlockState().setValue(WallSignBlock.FACING, side))
         val pos = p.at(real)
-        val be = net.minecraft.world.level.block.entity.SignBlockEntity(pos, p.blocks[pos] ?: return)
+        val be = SignBlockEntity(pos, p.blocks[pos] ?: return)
         // Its level is only read for drawing (the renderer skips one without); it isn't added to it.
         be.setLevel(p.level)
         p.signs[pos] = be
-        be.setText(net.minecraft.world.level.block.entity.SignText.EMPTY.asMutable()
-            .setLine(1, net.minecraft.network.chat.Component.literal(line1))
-            .setLine(2, net.minecraft.network.chat.Component.literal(line2)).asImmutable(), net.minecraft.world.level.block.entity.SignTextSlot.FRONT)
+        be.setText(SignText.EMPTY.asMutable()
+            .setLine(1, Component.literal(line1))
+            .setLine(2, Component.literal(line2)).asImmutable(), SignTextSlot.FRONT)
     }
 
     // ------------------------------------------------------------------ Start on r3 / r4
@@ -680,7 +699,7 @@ object SimonSaysPractice : Module(
         // It only turns around: once you face more than [TURN_AROUND] degrees away from it, it goes behind
         // you, in front again (past 90, so looking along its side doesn't flip it back and forth).
         val facing = Direction.from2DDataValue(p.forward.get2DDataValue() + turned)
-        if (Math.abs(net.minecraft.util.Mth.wrapDegrees(player.yRot - facing.toYRot())) > TURN_AROUND) turned = (turned + 2) % 4
+        if (Math.abs(Mth.wrapDegrees(player.yRot - facing.toYRot())) > TURN_AROUND) turned = (turned + 2) % 4
         return View(p, eye ?: player.getEyePosition(partialTicks), turned, size)
     }
 
@@ -694,25 +713,25 @@ object SimonSaysPractice : Module(
      * A block drawn as a falling block is (all of its model, no world needed), lit from the
      * device's [Placement.lightPos], so one summoned into a wall or the ground isn't drawn dark.
      */
-    private class DeviceBlock(val lightPos: BlockPos) : net.minecraft.client.renderer.block.MovingBlockRenderState() {
-        override fun getBrightness(layer: net.minecraft.world.level.LightLayer, pos: BlockPos): Int =
+    private class DeviceBlock(val lightPos: BlockPos) : MovingBlockRenderState() {
+        override fun getBrightness(layer: LightLayer, pos: BlockPos): Int =
             lightEngine.getLayerListener(layer).getLightValue(lightPos)
         override fun getRawBrightness(pos: BlockPos, darkening: Int): Int = lightEngine.getRawBrightness(lightPos, darkening)
     }
 
     /** The device: its blocks, its signs (text and all), and the outline of the one you look at, as the game outlines a block. */
-    private fun draw(p: Placement, v: View, context: net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext) {
+    private fun draw(p: Placement, v: View, context: LevelRenderContext) {
         val pose = context.poseStack()
         val out = context.submitNodeCollector()
         val cam = mc.gameRenderer.mainCamera().position()
         val level = p.level
         val lightPos = if (follow) v.lightPos else p.lightPos
-        val light = net.minecraft.util.LightCoordsUtil.getLightCoords(level, lightPos)
+        val light = LightCoordsUtil.getLightCoords(level, lightPos)
         fun at(pos: BlockPos, draw: () -> Unit) {
             val w = v.toWorld(Vec3(pos.x.toDouble(), pos.y.toDouble(), pos.z.toDouble()))
             pose.pushPose()
             pose.translate(w.x - cam.x, w.y - cam.y, w.z - cam.z)
-            if (v.k != 0) pose.mulPose(org.joml.Matrix4f().rotateY(Math.toRadians(-90.0 * v.k).toFloat()))
+            if (v.k != 0) pose.mulPose(Matrix4f().rotateY(Math.toRadians(-90.0 * v.k).toFloat()))
             if (v.s != 1.0) pose.scale(v.s.toFloat(), v.s.toFloat(), v.s.toFloat())
             draw()
             pose.popPose()
@@ -727,14 +746,14 @@ object SimonSaysPractice : Module(
         val signs = mc.blockEntityRenderDispatcher
         val camera = context.levelState().cameraRenderState
         for ((pos, be) in p.signs) {
-            val s = signs.tryExtractRenderState<net.minecraft.world.level.block.entity.SignBlockEntity, net.minecraft.client.renderer.blockentity.state.BlockEntityRenderState>(be, 0f, null, false) ?: continue
+            val s = signs.tryExtractRenderState<SignBlockEntity, BlockEntityRenderState>(be, 0f, null, false) ?: continue
             s.lightCoords = light
             at(pos) { signs.submit(s, pose, out, camera) }
         }
         val target = target() ?: return
         val state = p.blocks[target] ?: return
         val width = mc.gameRenderer.gameRenderState().windowRenderState.appropriateLineWidth
-        at(target) { out.submitShapeOutline(pose, shapeOf(target, state), net.minecraft.client.renderer.rendertype.RenderTypes.linesTranslucent(), net.minecraft.util.ARGB.black(102), width, false) }
+        at(target) { out.submitShapeOutline(pose, shapeOf(target, state), RenderTypes.linesTranslucent(), ARGB.black(102), width, false) }
     }
 
     // ------------------------------------------------------------------ input (from the mixin)
@@ -778,7 +797,7 @@ object SimonSaysPractice : Module(
             val b = best ?: return@safely
             val at = v.toWorld(b.location)
             val game = mc.hitResult
-            if (game is net.minecraft.world.phys.EntityHitResult && game.entity !is net.minecraft.world.entity.player.Player && game.location.distanceToSqr(worldEye) < at.distanceToSqr(worldEye)) return@safely
+            if (game is EntityHitResult && game.entity !is Player && game.location.distanceToSqr(worldEye) < at.distanceToSqr(worldEye)) return@safely
             hit = b
             mc.hitResult = BlockHitResult.miss(at, b.direction, b.blockPos)
             mc.crosshairPickEntity = null

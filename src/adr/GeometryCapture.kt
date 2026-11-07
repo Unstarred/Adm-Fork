@@ -6,6 +6,7 @@ import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.world.level.block.Blocks
 import net.minecraft.world.level.block.InfestedBlock
 import net.minecraft.world.level.chunk.status.ChunkStatus
+import java.util.Locale
 
 /**
  * The per-run part of the dungeon geometry: two blocks per door spot ("dslots", [readDoors]). Every
@@ -81,7 +82,7 @@ class GeometryCapture(private val emit: (String) -> Unit) {
             for (ch in s) when {
                 ch == '"' -> sb.append("\\\"")
                 ch == '\\' -> sb.append("\\\\")
-                ch < ' ' -> sb.append(String.format(java.util.Locale.ROOT, "\\u%04x", ch.code))
+                ch < ' ' -> sb.append(String.format(Locale.ROOT, "\\u%04x", ch.code))
                 else -> sb.append(ch)
             }
             return sb.append('"').toString()

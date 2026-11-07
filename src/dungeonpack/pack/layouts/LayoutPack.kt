@@ -6,6 +6,7 @@ import com.engineerclient.dungeonpack.pack.rooms.checkHeader
 import com.google.gson.JsonObject
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.random.Random
 
 /*
  * The "Layout pool" data pack, version 1 (FORMAT-layouts.md): recorded dungeon layouts to replay. Rooms are placed by
@@ -143,7 +144,7 @@ class LayoutPack internal constructor(
     fun pick(seed: Long, filter: (Layout) -> Boolean = DEFAULT_FILTER): Layout? {
         val pool = pool(filter)
         if (pool.isEmpty()) return null
-        return pool[kotlin.random.Random(seed).nextInt(pool.size)]
+        return pool[Random(seed).nextInt(pool.size)]
     }
 
     companion object {

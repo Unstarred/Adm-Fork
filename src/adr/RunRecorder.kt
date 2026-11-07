@@ -1,35 +1,41 @@
 package com.engineerclient.adr
 
 import com.engineerclient.EngineerClient
+import com.engineerclient.mixin.ArrowInGroundInvoker
+import com.engineerclient.p3sim.P3Sim
 import com.google.gson.JsonParser
+import com.mojang.authlib.properties.PropertyMap
 import com.odtheking.odin.features.impl.dungeon.map.DungeonScan
 import com.odtheking.odin.utils.itemId
 import com.odtheking.odin.utils.skyblock.Island
 import com.odtheking.odin.utils.skyblock.LocationUtils
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
+import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.client.multiplayer.ClientLevel
 import net.minecraft.commands.arguments.blocks.BlockStateParser
 import net.minecraft.core.BlockPos
-import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.core.component.DataComponents
+import net.minecraft.core.registries.BuiltInRegistries
+import net.minecraft.network.chat.Component
+import net.minecraft.util.Mth
 import net.minecraft.world.entity.Entity
 import net.minecraft.world.entity.EquipmentSlot
 import net.minecraft.world.entity.LivingEntity
 import net.minecraft.world.entity.decoration.ArmorStand
+import net.minecraft.world.entity.decoration.ItemFrame
 import net.minecraft.world.entity.item.FallingBlockEntity
 import net.minecraft.world.entity.item.ItemEntity
-import net.minecraft.world.entity.decoration.ItemFrame
-import net.minecraft.world.item.ItemStack
 import net.minecraft.world.entity.player.Player
-import com.engineerclient.mixin.ArrowInGroundInvoker
 import net.minecraft.world.entity.projectile.arrow.AbstractArrow
 import net.minecraft.world.entity.projectile.hurtingprojectile.AbstractHurtingProjectile
 import net.minecraft.world.entity.projectile.hurtingprojectile.WitherSkull
-import net.minecraft.util.Mth
+import net.minecraft.world.item.ItemStack
 import net.minecraft.world.level.block.AbstractSkullBlock
 import net.minecraft.world.level.block.entity.SkullBlockEntity
 import net.minecraft.world.level.block.state.BlockState
+import net.minecraft.world.level.block.state.properties.BlockStateProperties
 import net.minecraft.world.level.chunk.status.ChunkStatus
+import net.minecraft.world.phys.Vec3
 import java.io.BufferedWriter
 import java.io.OutputStreamWriter
 import java.nio.file.Files
@@ -37,9 +43,11 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Base64
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.zip.GZIPOutputStream
+import kotlin.math.abs
 
 /**
  * One recording session: everything that happens in one world, from the moment it loads.
@@ -89,7 +97,7 @@ class RunRecorder(
         // Where the client had it when it was last launched: until the client moves it (it only does
         // when the server says, every few ticks for skulls), it hasn't strayed - it just hasn't moved yet.
         var lx = Double.NaN; var ly = Double.NaN; var lz = Double.NaN
-        fun launch(x: Double, y: Double, z: Double, v: net.minecraft.world.phys.Vec3) {
+        fun launch(x: Double, y: Double, z: Double, v: Vec3) {
             lx = x; ly = y; lz = z
             px = r(x, 1000.0); py = r(y, 1000.0); pz = r(z, 1000.0); vx = r(v.x, 10000.0); vy = r(v.y, 10000.0); vz = r(v.z, 10000.0)
         }
@@ -125,7 +133,7 @@ class RunRecorder(
         flushFrames()
         flushMouse()
         tick++
-        if (!confirmed && com.engineerclient.p3sim.P3Sim.inSim) {
+        if (!confirmed && P3Sim.inSim) {
             // Never the P3 Sim world as a Hypixel run: Odin is told it is in F7 there, and ADR would take it for one.
             abandon(); return
         } else if (!confirmed) {
@@ -378,7 +386,7 @@ class RunRecorder(
         tempFile = temp
         writer = BufferedWriter(OutputStreamWriter(GZIPOutputStream(Files.newOutputStream(temp)), Charsets.UTF_8), 1 shl 16)
         val self = EngineerClient.mc.player?.name?.string ?: "?"
-        fun modVersion(id: String) = net.fabricmc.loader.api.FabricLoader.getInstance().getModContainer(id)
+        fun modVersion(id: String) = FabricLoader.getInstance().getModContainer(id)
             .map { it.metadata.version.friendlyString }.orElse("?")
         val version = modVersion("engineerclient")
         // The game version as running, not a literal: this file ships on more than one MC version.
@@ -571,8 +579,8 @@ class RunRecorder(
      */
     fun onSsClick(pos: BlockPos, blocked: Boolean) {
         val state = EngineerClient.mc.level?.getBlockState(pos)
-        val powered = state != null && state.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.POWERED) &&
-            state.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.POWERED)
+        val powered = state != null && state.hasProperty(BlockStateProperties.POWERED) &&
+            state.getValue(BlockStateProperties.POWERED)
         emit("""{"k":"ssclick","t":${tick},"x":${pos.x},"y":${pos.y},"z":${pos.z},"blocked":${if (blocked) 1 else 0},"powered":${if (powered) 1 else 0}}""")
     }
 
@@ -618,7 +626,7 @@ class RunRecorder(
             val mob = level.getEntity(stand.id - back) as? LivingEntity ?: continue
             if (mob is ArmorStand || mob is Player) continue
             val dx = q(stand.x - mob.x); val dy = q(stand.y - mob.y); val dz = q(stand.z - mob.z)
-            if (kotlin.math.abs(dx) <= 0.05 && kotlin.math.abs(dz) <= 0.05 && dy in 0.0..4.0) return Tag(mob.id, dx, dy, dz)
+            if (abs(dx) <= 0.05 && abs(dz) <= 0.05 && dy in 0.0..4.0) return Tag(mob.id, dx, dy, dz)
         }
         return null
     }
@@ -626,7 +634,7 @@ class RunRecorder(
     // Each entity's name as text, plain and with its colours, kept while it has the same name (the
     // game keeps the same Component until the name changes): working both out for every entity every
     // tick was most of the time this took.
-    private class Named(val of: net.minecraft.network.chat.Component?, val name: String, val colored: String)
+    private class Named(val of: Component?, val name: String, val colored: String)
     private val names = HashMap<Int, Named>()
     private fun namesOf(e: Entity): Named {
         val c = e.customName
@@ -727,7 +735,7 @@ class RunRecorder(
             val tag = tags[id]
             if (tag != null) {
                 val mob = level.getEntity(tag.mob)
-                if (mob != null && kotlin.math.abs(mob.x + tag.dx - e.x) < 0.006 && kotlin.math.abs(mob.y + tag.dy - e.y) < 0.006 && kotlin.math.abs(mob.z + tag.dz - e.z) < 0.006) { t.x = qx; t.y = qy; t.z = qz; continue }
+                if (mob != null && abs(mob.x + tag.dx - e.x) < 0.006 && abs(mob.y + tag.dy - e.y) < 0.006 && abs(mob.z + tag.dz - e.z) < 0.006) { t.x = qx; t.y = qy; t.z = qz; continue }
                 tags.remove(id)
                 emit("""{"k":"tag","t":$tick,"id":$id,"of":null}""")
             }
@@ -870,11 +878,11 @@ class RunRecorder(
      * the slim model. The profile value it comes from (base64 JSON) also carries a profile id, name
      * and timestamp - three times the size, and nothing the viewer uses. Kept whole if it can't be read.
      */
-    private fun texturesOf(props: com.mojang.authlib.properties.PropertyMap): String? {
+    private fun texturesOf(props: PropertyMap): String? {
         val value = props.get("textures").firstOrNull()?.value() ?: return null
         return skinHashes.getOrPut(value) {
             runCatching {
-                val skin = JsonParser.parseString(String(java.util.Base64.getDecoder().decode(value))).asJsonObject["textures"].asJsonObject["SKIN"].asJsonObject
+                val skin = JsonParser.parseString(String(Base64.getDecoder().decode(value))).asJsonObject["textures"].asJsonObject["SKIN"].asJsonObject
                 val hash = skin["url"].asString.substringAfterLast('/')
                 if (!hash.matches(SKIN_HASH)) value
                 else hash + if (skin["metadata"]?.asJsonObject?.get("model")?.asString == "slim") ":s" else ""
@@ -914,7 +922,7 @@ class RunRecorder(
         if (!v.isFinite()) return "0"
         val scale = POW10[decimals]
         val r = Math.round(v * scale)
-        val abs = kotlin.math.abs(r)
+        val abs = abs(r)
         val sb = StringBuilder(20)
         if (r < 0) sb.append('-')
         sb.append(abs / scale)

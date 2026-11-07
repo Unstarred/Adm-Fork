@@ -4,6 +4,8 @@ import com.engineerclient.dungeonpack.pack.layouts.LayoutPack
 import com.engineerclient.dungeonpack.pack.mobs.MobPack
 import com.engineerclient.dungeonpack.pack.rooms.RoomPack
 import com.engineerclient.dungeonpack.pack.runstate.RunStatePack
+import org.slf4j.LoggerFactory
+import java.io.Closeable
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
 
@@ -22,7 +24,7 @@ class PackSet(
     val report: PackReport,
     /** Where each file came from. A set built by hand (tests) reads every file from [dir]. */
     val source: PackSource = PackSource.ofDir(dir),
-) : java.io.Closeable {
+) : Closeable {
     /** What a full run needs at the least: the room library and the layout pool. Mobs and run-state tables degrade gracefully. */
     val canBuildDungeon: Boolean get() = rooms != null && layouts != null
 
@@ -73,7 +75,7 @@ class PackSet(
  * unpacked once into `packs-bundled/<content hash>/` next to the override folder ([PackSource]).
  */
 object Packs {
-    private val log = org.slf4j.LoggerFactory.getLogger("engineerclient")
+    private val log = LoggerFactory.getLogger("engineerclient")
     private val loggedOverrides = HashSet<String>()
 
     @Volatile var current: PackSet? = null

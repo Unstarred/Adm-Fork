@@ -2,7 +2,11 @@ package com.engineerclient.p3sim
 
 import com.engineerclient.EngineerClient
 import com.google.gson.GsonBuilder
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
+import com.odtheking.odin.features.impl.dungeon.LeapMenu
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass
+import com.odtheking.odin.utils.skyblock.dungeon.DungeonPlayer
 import net.minecraft.client.Minecraft
 import net.minecraft.world.phys.Vec3
 import java.io.File
@@ -241,8 +245,8 @@ object P3Plan {
     var odinSort = true
 
     private fun odinOrder(classes: List<DungeonClass>): List<DungeonClass>? = runCatching {
-        val players = classes.map { com.odtheking.odin.utils.skyblock.dungeon.DungeonPlayer(Roles.label(it), it, 50, null) }.sortedBy { it.clazz.priority }
-        com.odtheking.odin.features.impl.dungeon.LeapMenu.odinSorting(players).toList().map { it.clazz }.filter { it in classes }
+        val players = classes.map { DungeonPlayer(Roles.label(it), it, 50, null) }.sortedBy { it.clazz.priority }
+        LeapMenu.odinSorting(players).toList().map { it.clazz }.filter { it in classes }
     }.getOrNull()?.takeIf { it.size == classes.size && it.toSet() == classes.toSet() }
 
     /** Slot [slot] (1-4) takes the next class ([back]: the one before): swaps with the slot that had it. */
@@ -318,13 +322,13 @@ object P3Plan {
      * The plan's parts a party shares (the fight's: the skill and the bots' options), the host's for everyone; the rest
      * (your jobs, your spots, the leap order) stays each player's own.
      */
-    fun sharedJson(): com.google.gson.JsonObject = com.google.gson.JsonObject().also {
+    fun sharedJson(): JsonObject = JsonObject().also {
         it.addProperty("skill", skill); it.addProperty("botMin", botMin); it.addProperty("botMax", botMax)
         it.addProperty("waitForYou", waitForYou); it.addProperty("helper", helper); it.addProperty("leapGap", leapGap)
     }
 
     /** The shared parts as [o] has them (a joiner's menu changed one: the host's take it). */
-    fun applyShared(o: com.google.gson.JsonObject, save: Boolean) {
+    fun applyShared(o: JsonObject, save: Boolean) {
         o.get("skill")?.let { skill = it.asInt.coerceIn(0, SKILLS.size - 1) }
         o.get("botMin")?.let { botMin = it.asDouble }
         o.get("botMax")?.let { botMax = it.asDouble }
@@ -335,7 +339,7 @@ object P3Plan {
     }
 
     /** A joiner's own shared parts from before the party (saved as theirs while in it, put back when it's left). */
-    private var ownShared: com.google.gson.JsonObject? = null
+    private var ownShared: JsonObject? = null
     /** The shared parts as the host last sent them: only a change from these goes back. */
     private var partyShared: String? = null
 
@@ -344,7 +348,7 @@ object P3Plan {
     private var ownMineFor: String? = null
 
     /** A joiner's game: the host's shared parts arrived. */
-    fun receiveShared(o: com.google.gson.JsonObject) {
+    fun receiveShared(o: JsonObject) {
         if (ownShared == null) { ownShared = sharedJson(); ownMine = mine().toList(); ownMineFor = mineFor }
         applyShared(o, save = false)
         partyShared = sharedJson().toString()
@@ -360,14 +364,14 @@ object P3Plan {
     }
 
     /** A joiner's plan for the server: their jobs and spots (and the shared parts, if their menu changed them). */
-    fun partyJson(): com.google.gson.JsonObject = com.google.gson.JsonObject().also { o ->
+    fun partyJson(): JsonObject = JsonObject().also { o ->
         val m = mine()
-        o.add("mine", com.google.gson.JsonArray().also { a -> m.forEach { a.add(it) } })
+        o.add("mine", JsonArray().also { a -> m.forEach { a.add(it) } })
         o.addProperty("mineFor", mineFor)
-        o.add("order", com.google.gson.JsonArray().also { a -> botOrder().forEach { a.add(it.name) } })
-        o.add("stacks", com.google.gson.JsonObject().also { st -> m.filter { isStacked(it) }.forEach { j -> helperOf(j)?.let { st.addProperty(j, it.name) } } })
-        o.add("spots", com.google.gson.JsonObject().also { s ->
-            spots().forEach { (k, p) -> s.add(k, com.google.gson.JsonArray().also { a -> a.add(p.x); a.add(p.y); a.add(p.z); a.add(p.yaw); a.add(p.pitch) }) }
+        o.add("order", JsonArray().also { a -> botOrder().forEach { a.add(it.name) } })
+        o.add("stacks", JsonObject().also { st -> m.filter { isStacked(it) }.forEach { j -> helperOf(j)?.let { st.addProperty(j, it.name) } } })
+        o.add("spots", JsonObject().also { s ->
+            spots().forEach { (k, p) -> s.add(k, JsonArray().also { a -> a.add(p.x); a.add(p.y); a.add(p.z); a.add(p.yaw); a.add(p.pitch) }) }
         })
         val sh = sharedJson()
         if (partyShared != null && sh.toString() != partyShared) o.add("shared", sh)

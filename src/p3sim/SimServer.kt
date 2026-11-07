@@ -1,15 +1,17 @@
 package com.engineerclient.p3sim
 
 import com.engineerclient.EngineerClient
+import com.mojang.brigadier.arguments.StringArgumentType
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents
-import com.mojang.brigadier.arguments.StringArgumentType
+import net.minecraft.client.Minecraft
 import net.minecraft.client.server.IntegratedServer
 import net.minecraft.commands.Commands
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.server.level.ServerPlayer
+import net.minecraft.world.level.Level
 import net.minecraft.world.level.gamerules.GameRules
 import net.minecraft.world.level.storage.LevelResource
 
@@ -33,7 +35,7 @@ object SimServer {
 
     /** Is [level] the sim's (server side). */
     @JvmStatic
-    fun isSimLevel(level: net.minecraft.world.level.Level): Boolean {
+    fun isSimLevel(level: Level): Boolean {
         val s = server ?: return false
         return level is ServerLevel && level.server === s
     }
@@ -44,7 +46,7 @@ object SimServer {
     val player: ServerPlayer? get() {
         val l = server?.playerList?.players ?: return null
         // By this game's own account: a respawn puts the host's new player at the end of the list.
-        val me = net.minecraft.client.Minecraft.getInstance().user.profileId
+        val me = Minecraft.getInstance().user.profileId
         return l.firstOrNull { it.uuid == me } ?: l.firstOrNull()
     }
 
@@ -136,7 +138,7 @@ object SimServer {
      * `/gfs ender_pearl 16`: tops up the stacks you have and fills empty slots with up to [what]'s amount (64 when none is given), as Hypixel's
      * "Moved N Ender Pearl from your Sacks to your inventory." says (recorded). The sacks never run out.
      */
-    private fun getFromSacks(p: net.minecraft.server.level.ServerPlayer, what: String) {
+    private fun getFromSacks(p: ServerPlayer, what: String) {
         val words = what.trim().split(Regex("\\s+"))
         val amount = words.last().toIntOrNull()
         val key = (if (amount != null) words.dropLast(1) else words).joinToString("_").lowercase().removeSuffix("s")

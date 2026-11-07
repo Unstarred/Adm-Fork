@@ -1,5 +1,9 @@
 package com.engineerclient.mappred
 
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.ceil
+import kotlin.math.floor
+
 /**
  * Names for the rooms nobody has named yet, from the dungeon's secret total: every name comes up at most
  * once a map ([MapStats.NAMES]), so the unnamed rooms take different names from their pools, and their
@@ -12,7 +16,7 @@ class SecretNames(used: Set<String>, private val targets: IntArray, missing: Set
     private val poolWeight = DoubleArray(MapStats.POOLS) { p -> avail[p].sumOf { it.seen.toDouble() } }
     /** [solve]'s answers by pools; several threads of one session ([PredictionSession]) share them. */
     private class Box(val result: Result?)
-    private val cache = java.util.concurrent.ConcurrentHashMap<String, Box>()
+    private val cache = ConcurrentHashMap<String, Box>()
     private val maxT = targets.maxOrNull() ?: -1
 
     /**
@@ -104,8 +108,8 @@ class SecretNames(used: Set<String>, private val targets: IntArray, missing: Set
         fun totals(found: Int, percent: Float): IntArray {
             if (found <= 0 || percent <= 0f) return IntArray(0)
             if (percent >= 100f) return intArrayOf(found)
-            val lo = kotlin.math.ceil(100.0 * found / (percent + 0.05)).toInt()
-            val hi = kotlin.math.floor(100.0 * found / maxOf(percent - 0.05, 0.001)).toInt()
+            val lo = ceil(100.0 * found / (percent + 0.05)).toInt()
+            val hi = floor(100.0 * found / maxOf(percent - 0.05, 0.001)).toInt()
             if (hi < lo || hi - lo > 40) return IntArray(0)
             return (maxOf(lo, found)..hi).toList().toIntArray()
         }

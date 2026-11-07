@@ -1,14 +1,21 @@
 package com.engineerclient.p3sim
 
-import com.engineerclient.index
 import com.engineerclient.EngineerClient
 import com.engineerclient.EngineerClient.mc
+import com.engineerclient.index
+import com.engineerclient.misc.RandomStuff
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
+import com.google.gson.JsonPrimitive
+import com.mojang.blaze3d.platform.InputConstants
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.KeybindSetting
 import com.odtheking.odin.clickgui.settings.impl.NumberSetting
 import com.odtheking.odin.clickgui.settings.impl.SelectorSetting
 import com.odtheking.odin.features.Category
 import com.odtheking.odin.features.Module
+import com.odtheking.odin.features.impl.render.HidePlayers
+import com.odtheking.odin.utils.Colors
 import com.odtheking.odin.utils.render.text
 import com.odtheking.odin.utils.skyblock.Island
 import com.odtheking.odin.utils.skyblock.LocationUtils
@@ -16,16 +23,26 @@ import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonListener
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonPlayer
 import com.odtheking.odin.utils.skyblock.dungeon.Floor
-import net.fabricmc.fabric.api.client.command.v2.ClientCommands
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents
 import net.fabricmc.fabric.api.client.screen.v1.Screens
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback
 import net.minecraft.client.gui.components.Button
+import net.minecraft.client.gui.screens.PauseScreen
 import net.minecraft.client.gui.screens.TitleScreen
+import net.minecraft.client.player.AbstractClientPlayer
+import net.minecraft.commands.Commands
 import net.minecraft.network.chat.Component
+import net.minecraft.network.chat.contents.TranslatableContents
+import net.minecraft.world.entity.Entity
+import net.minecraft.world.entity.EquipmentSlot
 import net.minecraft.world.entity.decoration.Mannequin
-import com.mojang.blaze3d.platform.InputConstants
+import net.minecraft.world.phys.BlockHitResult
+import net.minecraft.world.phys.HitResult
+import java.util.Locale
 
 /**
  * ADS (Advanced Dungeon Simulator, once P3 Sim): F7's boss fight in a singleplayer world of its own ("p3sim"), to
@@ -110,21 +127,21 @@ object P3Sim : Module(
             listOf("§6Practice $mode ${if (Practice.endTicks >= 0) "§a" else "§f"}${Practice.secs(Practice.ticks)}") +
                 Practice.tasks.map { t -> "§7${t.label} " + if (t.at >= 0) "§a${Practice.secs(t.at)}" else if (t === next) "§e..." else "§8-" }
         }
-        lines.forEachIndexed { i, l -> text(l, 0, i * 10, com.odtheking.odin.utils.Colors.WHITE, shadow = true) }
+        lines.forEachIndexed { i, l -> text(l, 0, i * 10, Colors.WHITE, shadow = true) }
         (lines.maxOf { mc.font.width(it) }) to lines.size * 10
     }
 
     /** Practice: the final time, large, as Term Info's section times look. */
     private val practiceTimeHud by HUD("Practice Time", "A practice's final time, large (as Term Info's Section Time), for 4 seconds.", true, 420, 300, 5f) { example ->
         val t = if (example) "§514.35" else Practice.endTicks.takeIf { inSim && Practice.active && it >= 0 && System.currentTimeMillis() - Practice.endMs < 4000 }?.let { "§5${Practice.secs(it)}" } ?: return@HUD 0 to 0
-        text(t, 0, 0, com.odtheking.odin.utils.Colors.WHITE, shadow = true)
+        text(t, 0, 0, Colors.WHITE, shadow = true)
         mc.font.width(t) to 10
     }
 
     /** Practice: the start timer counting down, large. */
     private val practiceStartHud by HUD("Practice Start Timer", "A practice's start timer counting down, large, until terminals and the rest are up.", true, 440, 250, 4f) { example ->
         val t = if (example) "§e2.4" else Practice.ticks.takeIf { inSim && Practice.active && it < 0 }?.let { "§e${"%.1f".format(java.util.Locale.ROOT, -it / 20.0)}" } ?: return@HUD 0 to 0
-        text(t, 0, 0, com.odtheking.odin.utils.Colors.WHITE, shadow = true)
+        text(t, 0, 0, Colors.WHITE, shadow = true)
         mc.font.width(t) to 10
     }
 
@@ -140,7 +157,7 @@ object P3Sim : Module(
      * A personal setting ([PartySettings.PERSONAL]) for the player it's about: on the sim's server, while a party's
      * joiner acts ([Sim.asPlayer]), theirs as their game sent it; else (the host, any game's own menu) this game's.
      */
-    private inline fun <T> mine(key: String, own: () -> T, read: (com.google.gson.JsonElement) -> T): T =
+    private inline fun <T> mine(key: String, own: () -> T, read: (JsonElement) -> T): T =
         Players.joiner()?.vals?.get(key)?.let { runCatching { read(it) }.getOrNull() } ?: own()
 
     /** This game's own class (its menu's). */
@@ -171,8 +188,8 @@ object P3Sim : Module(
     val shortbowCooldown: Int get() = mine("shortbow", { shortbowCooldownS.value.toInt() }) { it.asDouble.toInt() }
     /** Terror armor pieces worn right now (TERROR_* ids in the four armour slots, helmet included): 0 to 4. Hydra Strike follows it. */
     val terrorPieces: Int get() = Sim.player?.let { p ->
-        listOf(net.minecraft.world.entity.EquipmentSlot.HEAD, net.minecraft.world.entity.EquipmentSlot.CHEST,
-            net.minecraft.world.entity.EquipmentSlot.LEGS, net.minecraft.world.entity.EquipmentSlot.FEET)
+        listOf(EquipmentSlot.HEAD, EquipmentSlot.CHEST,
+            EquipmentSlot.LEGS, EquipmentSlot.FEET)
             .count { SimItems.idOf(p.getItemBySlot(it))?.startsWith("TERROR_") == true }
     } ?: 0
     val hydraStart: Int get() = mine("hydra", { hydraStartS.value.toInt() }) { it.asDouble.toInt() }
@@ -189,8 +206,8 @@ object P3Sim : Module(
     val record: Boolean get() = recordS.value
 
     /** Hide Players is Odin's own (its module and its Hide All / Distance settings); in the sim its rule hides the bots too. */
-    val hidePlayers: Boolean get() = com.odtheking.odin.features.impl.render.HidePlayers.enabled
-    fun toggleHidePlayers() = com.odtheking.odin.features.impl.render.HidePlayers.toggle()
+    val hidePlayers: Boolean get() = HidePlayers.enabled
+    fun toggleHidePlayers() = HidePlayers.toggle()
 
     /**
      * A bot (a mannequin in the sim) Odin's Hide Players would hide if it were a player. Client thread, every entity
@@ -198,9 +215,9 @@ object P3Sim : Module(
      * Odin state that in Odin 0.4.0 is Compose state (a snapshot lookup each).
      */
     @JvmStatic
-    fun hideBot(e: net.minecraft.world.entity.Entity): Boolean {
+    fun hideBot(e: Entity): Boolean {
         if (e !is Mannequin || !hidePlayers || !inSim) return false
-        val hp = com.odtheking.odin.features.impl.render.HidePlayers
+        val hp = HidePlayers
         if ((hp.settings["Hide all"] as? BooleanSetting)?.value == true) return true
         val d = (hp.settings["Distance"] as? NumberSetting<*>)?.value?.toDouble() ?: 3.0
         val me = mc.player ?: return false
@@ -219,15 +236,15 @@ object P3Sim : Module(
     val wornMask: Int get() = mine("wornMask", { wornMaskS.index }) { it.asInt }
 
     /** Sets the pet of the player it's about (a joiner's: theirs, and their game's menu follows). */
-    fun setPhoenix(on: Boolean) = setMine("phoenix", com.google.gson.JsonPrimitive(on)) { phoenixS.value = on }
-    fun setWornMask(i: Int) = setMine("wornMask", com.google.gson.JsonPrimitive(i)) { wornMaskS.index = i }
+    fun setPhoenix(on: Boolean) = setMine("phoenix", JsonPrimitive(on)) { phoenixS.value = on }
+    fun setWornMask(i: Int) = setMine("wornMask", JsonPrimitive(i)) { wornMaskS.index = i }
 
-    private fun setMine(key: String, v: com.google.gson.JsonElement, own: () -> Unit) {
+    private fun setMine(key: String, v: JsonElement, own: () -> Unit) {
         val p = Sim.acting?.takeIf { !Sim.isHost(it) }
         // The server changed it itself (a loadout, /stats, the Pet Rod): not a menu change to act on again.
         if (p == null) { own(); Sim.player?.let { PartyServer.notePersonal(it) }; return }
         Players.profile(p).vals[key] = v
-        SimNet.send(p, "set", com.google.gson.JsonObject().also { it.add(key, v) }.toString())
+        SimNet.send(p, "set", JsonObject().also { it.add(key, v) }.toString())
         PartyServer.notePersonal(p)
     }
     // Null-safe: a hotswapped game has the setting null until it is relaunched (off till then).
@@ -262,12 +279,12 @@ object P3Sim : Module(
         // /p3sim: the menu in the sim (or opens the sim); /p3sim <start> starts it; /p3sim rebuild remakes the world.
         // /stats: Hypixel's equipment window, here to swap masks. On the sim's own server only (a
         // server command, so Hypixel's /stats is never touched).
-        net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback.EVENT.register { dispatcher, _, _ ->
-            dispatcher.register(net.minecraft.commands.Commands.literal("stats")
+        CommandRegistrationCallback.EVENT.register { dispatcher, _, _ ->
+            dispatcher.register(Commands.literal("stats")
                 .requires { it.server === SimServer.server }
                 .executes { ctx -> ctx.source.player?.let { p -> Sim.asPlayer(p) { Masks.openStats(p) } }; 1 })
             // /loadouts: Hypixel's Loadouts window, same sim-server-only rule.
-            dispatcher.register(net.minecraft.commands.Commands.literal("loadouts")
+            dispatcher.register(Commands.literal("loadouts")
                 .requires { it.server === SimServer.server }
                 .executes { ctx -> ctx.source.player?.let { p -> Sim.asPlayer(p) { Loadouts.open(p) } }; 1 })
         }
@@ -288,7 +305,7 @@ object P3Sim : Module(
         // Odin scans a room once, when its centre chunk loads, and queues every chunk that loads before it believes it is in a dungeon (and never
         // flushes the queue, since the sim posts no location change). So the area and floor are set at join, before the first chunk packet.
         EngineerClient.safely("ads join hook") {
-            net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN.register { _, _, _ ->
+            ClientPlayConnectionEvents.JOIN.register { _, _, _ ->
                 if (inSim) EngineerClient.safely("ads join area") { setArea(Island.Dungeon); DungeonListener.floor = Floor.F7 }
             }
         }
@@ -304,7 +321,7 @@ object P3Sim : Module(
             // No Singleplayer button (another mod's menu): a small ADS button in the corner.
             if (screen is TitleScreen) EngineerClient.safely("ads title button") {
                 val widgets = Screens.getWidgets(screen)
-                fun key(b: Button) = (b.message.contents as? net.minecraft.network.chat.contents.TranslatableContents)?.key
+                fun key(b: Button) = (b.message.contents as? TranslatableContents)?.key
                 val buttons = widgets.filterIsInstance<Button>()
                 val single = buttons.firstOrNull { key(it) == "menu.singleplayer" }
                 val ads = Button.builder(Component.literal(FULL_NAME)) { SimWorld.open() }.let {
@@ -313,16 +330,16 @@ object P3Sim : Module(
                 widgets.add(ads)
                 val realms = buttons.firstOrNull { key(it) == "menu.online" } ?: return@safely
                 widgets.remove(realms)
-                widgets.add(Button.builder(Component.literal("Join Hypixel")) { com.engineerclient.misc.RandomStuff.joinHypixel(screen) }
+                widgets.add(Button.builder(Component.literal("Join Hypixel")) { RandomStuff.joinHypixel(screen) }
                     .bounds(realms.x, realms.y, realms.width, realms.height).build())
             }
             // In the sim, Esc's ADS Menu takes Open to LAN's place (right under Save and Quit if that
             // isn't there), and the whole menu shifts so the cursor, which opening it puts in the middle of
             // the screen, is already on it.
-            if (screen is net.minecraft.client.gui.screens.PauseScreen && inSim) EngineerClient.safely("p3sim pause button") {
+            if (screen is PauseScreen && inSim) EngineerClient.safely("p3sim pause button") {
                 val widgets = Screens.getWidgets(screen)
                 val buttons = widgets.filterIsInstance<Button>()
-                fun key(b: Button) = (b.message.contents as? net.minecraft.network.chat.contents.TranslatableContents)?.key
+                fun key(b: Button) = (b.message.contents as? TranslatableContents)?.key
                 val lan = buttons.firstOrNull { key(it) in LAN_KEYS }
                 val quit = buttons.firstOrNull { key(it) in QUIT_KEYS } ?: buttons.maxByOrNull { it.y }
                 val main = Button.builder(Component.literal("§6$NAME Menu")) { mc.gui.setScreen(SimRestartScreen()) }
@@ -348,10 +365,10 @@ object P3Sim : Module(
     /** Your position (y to the hundredth, as spots are set), yaw and pitch, and the block you look at: in chat and copied. */
     private fun pos() {
         val p = mc.player ?: return
-        val f = { v: Double -> String.format(java.util.Locale.ROOT, "%.2f", v) }
+        val f = { v: Double -> String.format(Locale.ROOT, "%.2f", v) }
         val y = Math.floor(p.y * 100 + 1e-6) / 100
         var line = "${f(p.x)}, ${f(y)}, ${f(p.z)}, yaw ${f(net.minecraft.util.Mth.wrapDegrees(p.yRot).toDouble())}, pitch ${f(p.xRot.toDouble())}"
-        (mc.hitResult as? net.minecraft.world.phys.BlockHitResult)?.takeIf { it.type == net.minecraft.world.phys.HitResult.Type.BLOCK }?.blockPos?.let { b ->
+        (mc.hitResult as? BlockHitResult)?.takeIf { it.type == HitResult.Type.BLOCK }?.blockPos?.let { b ->
             line += ", looking at ${b.x}, ${b.y}, ${b.z}"
         }
         mc.keyboardHandler.clipboard = line
@@ -394,7 +411,7 @@ object P3Sim : Module(
             val team = arrayListOf(DungeonPlayer(me, mine, 50, mc.player?.skin))
             sent.forEach { m ->
                 // A player's skin from their entity here, when it's loaded.
-                val skin = if (m.player) mc.level?.players()?.firstOrNull { it.gameProfile.name == m.name }?.let { (it as? net.minecraft.client.player.AbstractClientPlayer)?.skin } else null
+                val skin = if (m.player) mc.level?.players()?.firstOrNull { it.gameProfile.name == m.name }?.let { (it as? AbstractClientPlayer)?.skin } else null
                 team += DungeonPlayer(m.name, m.clazz, 50, skin)
             }
 

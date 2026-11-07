@@ -10,6 +10,10 @@ import com.mojang.authlib.properties.Property
 import com.mojang.authlib.properties.PropertyMap
 import net.minecraft.core.BlockPos
 import net.minecraft.core.component.DataComponents
+import net.minecraft.server.level.ServerLevel
+import net.minecraft.sounds.SoundEvents
+import net.minecraft.sounds.SoundSource
+import net.minecraft.world.entity.item.PrimedTnt
 import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.Items
 import net.minecraft.world.item.component.ResolvableProfile
@@ -135,7 +139,7 @@ object ArenaFixes {
     private object ChunkPosKey { fun of(cx: Int, cz: Int): Long = (cx.toLong() shl 32) or (cz.toLong() and 0xffffffffL) }
 
     /** A player head put back at [pos] ([Arena.restore], [Arena.resync]) gets its texture again, the clients told. */
-    fun reskull(level: net.minecraft.server.level.ServerLevel, pos: BlockPos) {
+    fun reskull(level: ServerLevel, pos: BlockPos) {
         val state = level.getBlockState(pos)
         if (state.block !is SkullBlock) return
         val s = skulls[ChunkPosKey.of(pos.x shr 4, pos.z shr 4)]?.firstOrNull { it.x == pos.x && it.y == pos.y && it.z == pos.z } ?: return
@@ -272,12 +276,12 @@ object ArenaFixes {
          * entity gone 21 ticks on, never exploding or hurting anything.
          */
         private fun primeCube(pos: BlockPos) {
-            val tnt = object : net.minecraft.world.entity.item.PrimedTnt(Sim.level, pos.x + 0.5, pos.y.toDouble(), pos.z + 0.5, null) {
+            val tnt = object : PrimedTnt(Sim.level, pos.x + 0.5, pos.y.toDouble(), pos.z + 0.5, null) {
                 override fun shouldBeSaved() = false
             }
             tnt.fuse = 80
             Sim.spawn(tnt)
-            Sim.sound(net.minecraft.sounds.SoundEvents.TNT_PRIMED, 1f, 1f, tnt.position(), net.minecraft.sounds.SoundSource.BLOCKS)
+            Sim.sound(SoundEvents.TNT_PRIMED, 1f, 1f, tnt.position(), SoundSource.BLOCKS)
             Fight.later(1, "tnt cube block") { if (Blocks.get(pos)?.`is`(B.TNT) == true) Blocks.set(pos, B.AIR.defaultBlockState()) }
             Fight.later(21, "tnt cube gone") { tnt.discard() }
         }

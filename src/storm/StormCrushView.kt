@@ -1,6 +1,7 @@
 package com.engineerclient.storm
 
 import com.engineerclient.EngineerClient.mc
+import com.engineerclient.misc.Witherborn
 import com.odtheking.odin.events.RenderExtractEvent
 import com.odtheking.odin.utils.Color
 import com.odtheking.odin.utils.Color.Companion.withAlpha
@@ -13,6 +14,7 @@ import net.minecraft.world.entity.boss.wither.WitherBoss
 import net.minecraft.world.phys.AABB
 import net.minecraft.world.phys.Vec3
 import java.util.Locale
+import kotlin.math.abs
 
 /**
  * Storm's crush hitbox (Sub Splits' Show Crush Info): from his lightning on, at every 20-tick
@@ -46,7 +48,7 @@ class StormCrushView {
     fun check(now: Int): Pair<StormCrush.Verdict, Boolean>? {
         val level = mc.level ?: return null
         val storm = level.entitiesForRendering().filterIsInstance<WitherBoss>()
-            .filter { it.isAlive && arena.contains(it.position()) && com.engineerclient.misc.Witherborn.isBoss(it) }
+            .filter { it.isAlive && arena.contains(it.position()) && Witherborn.isBoss(it) }
             .minByOrNull { it.distanceToSqr(70.0, 180.0, 53.0) } ?: return null
         val at = storm.positionCodec.base.takeIf { it != Vec3.ZERO } ?: storm.position()
         val pillar = StormCrush.nearest(at.x, at.z)
@@ -93,8 +95,8 @@ class StormCrushView {
     /** "0.42 in · head +1.20", with the pillar's colour, and "(not lowered)" if it wouldn't crush. */
     private fun label(s: Snapshot): String {
         val v = s.verdict
-        val side = (if (v.inset >= 0) "§a" else "§c") + fmt(kotlin.math.abs(v.inset)) + if (v.inset >= 0) " in" else " out"
-        val head = v.head?.let { (if (it >= 0) "§a" else "§c") + "head " + (if (it >= 0) "+" else "-") + fmt(kotlin.math.abs(it)) } ?: "§7no pillar"
+        val side = (if (v.inset >= 0) "§a" else "§c") + fmt(abs(v.inset)) + if (v.inset >= 0) " in" else " out"
+        val head = v.head?.let { (if (it >= 0) "§a" else "§c") + "head " + (if (it >= 0) "+" else "-") + fmt(abs(it)) } ?: "§7no pillar"
         return v.pillar.colour + v.pillar.name + " §7· " + side + " §7· " + head + if (s.armed) "" else " §8(not lowered)"
     }
 

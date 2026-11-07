@@ -7,10 +7,12 @@ import com.google.common.collect.ImmutableMultimap
 import com.mojang.authlib.GameProfile
 import com.mojang.authlib.properties.Property
 import com.mojang.authlib.properties.PropertyMap
+import net.minecraft.commands.arguments.blocks.BlockStateParser
 import net.minecraft.core.BlockPos
 import net.minecraft.core.component.DataComponentMap
 import net.minecraft.core.component.DataComponentPatch
 import net.minecraft.core.component.DataComponents
+import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.network.chat.Component
 import net.minecraft.world.item.DyeColor
 import net.minecraft.world.item.component.ResolvableProfile
@@ -24,6 +26,7 @@ import net.minecraft.world.level.block.entity.SignText
 import net.minecraft.world.level.block.entity.SignTextSlot
 import net.minecraft.world.level.block.entity.SkullBlockEntity
 import net.minecraft.world.level.block.state.BlockState
+import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -32,8 +35,8 @@ object BlockStates {
     private val parsed = ConcurrentHashMap<String, BlockState>()
 
     fun parse(state: String): BlockState = parsed.computeIfAbsent(state) {
-        try { net.minecraft.commands.arguments.blocks.BlockStateParser.parseForBlock(net.minecraft.core.registries.BuiltInRegistries.BLOCK, it, false).blockState() }
-        catch (t: Throwable) { com.engineerclient.EngineerClient.logger.warn("[ads] unknown block state {}", it); net.minecraft.world.level.block.Blocks.AIR.defaultBlockState() }
+        try { BlockStateParser.parseForBlock(BuiltInRegistries.BLOCK, it, false).blockState() }
+        catch (t: Throwable) { EngineerClient.logger.warn("[ads] unknown block state {}", it); Blocks.AIR.defaultBlockState() }
     }
 
     /** [state] turned [quarterTurns] clockwise (`BlockState.rotate`, FORMAT-rooms 3.3). */
@@ -117,7 +120,7 @@ class BlockEntityMaker(textures: List<SkullTexture>) {
         if (be !is SkullBlockEntity) return
         val profile = byHash.computeIfAbsent(hash) {
             val json = "{\"textures\":{\"SKIN\":{\"url\":\"http://textures.minecraft.net/texture/$it\"}}}"
-            val value = java.util.Base64.getEncoder().encodeToString(json.toByteArray())
+            val value = Base64.getEncoder().encodeToString(json.toByteArray())
             val map = PropertyMap(ImmutableMultimap.of("textures", Property("textures", value)))
             ResolvableProfile.createResolved(GameProfile(UUID.nameUUIDFromBytes("ads-head:$it".toByteArray()), it.take(12), map))
         }

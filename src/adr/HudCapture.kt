@@ -7,6 +7,7 @@ import net.minecraft.world.level.GameType
 import net.minecraft.world.scores.DisplaySlot
 import net.minecraft.world.scores.PlayerScoreEntry
 import net.minecraft.world.scores.PlayerTeam
+import java.util.UUID
 
 /**
  * What Hypixel shows on the HUD: the tab list, the sidebar, boss bars, titles and the action bar. Text is
@@ -30,7 +31,7 @@ class HudCapture(private val emit: (String) -> Unit) {
     private val tabComps = ArrayList<Component?>()
     private val sideRows = ArrayList<String>()
     private var sideTitle = ""
-    private val bars = HashMap<java.util.UUID, Int>()
+    private val bars = HashMap<UUID, Int>()
     private val barProgress = HashMap<Int, Int>()
     private var actionBar = ""
 
@@ -82,7 +83,7 @@ class HudCapture(private val emit: (String) -> Unit) {
         emit("""{"k":"sb","t":$t${if (retitled) ",\"title\":${GeometryCapture.jsonString(title)}" else ""}${if (resized) ",\"n\":${lines.size}" else ""},"d":[$sb]}""")
     }
 
-    fun bossBar(t: Int, id: java.util.UUID, name: Component?, progress: Float?, removed: Boolean) {
+    fun bossBar(t: Int, id: UUID, name: Component?, progress: Float?, removed: Boolean) {
         val i = bars.getOrPut(id) { bars.size }
         if (removed) { barProgress.remove(i); emit("""{"k":"bar","t":$t,"i":$i,"x":1}"""); return }
         val p = progress?.let { Math.round(it * 1000) }

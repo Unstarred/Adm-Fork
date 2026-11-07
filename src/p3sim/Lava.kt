@@ -4,8 +4,10 @@ import net.minecraft.core.BlockPos
 import net.minecraft.network.protocol.game.ClientboundHurtAnimationPacket
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.sounds.SoundEvents
+import net.minecraft.sounds.SoundSource
 import net.minecraft.tags.FluidTags
 import net.minecraft.world.phys.Vec3
+import java.util.ArrayDeque
 import kotlin.random.Random
 
 /**
@@ -32,7 +34,7 @@ object Lava {
 
     private class Seen(val ns: Long, val inLava: Boolean, val pitch: Float)
     // Each player's own ([perPlayer]).
-    private val seen: java.util.ArrayDeque<Seen> by perPlayer { java.util.ArrayDeque() }
+    private val seen: ArrayDeque<Seen> by perPlayer { ArrayDeque() }
     private var bouncedAt by perPlayer { -1000 }
     private var hurtAt by perPlayer { -1000 }
     fun reset() { seen.clear(); bouncedAt = -1000; hurtAt = -1000 }
@@ -96,7 +98,7 @@ object Lava {
         val hurt = {
             if (!p.isRemoved) {
                 p.connection.send(ClientboundHurtAnimationPacket(p))
-                Sim.sound(SoundEvents.PLAYER_HURT, 1f, 1f, p.position(), net.minecraft.sounds.SoundSource.PLAYERS)
+                Sim.sound(SoundEvents.PLAYER_HURT, 1f, 1f, p.position(), SoundSource.PLAYERS)
             }
         }
         if (Random.nextDouble() < 0.4) Fight.later(1, "lava hurt") { hurt() } else hurt()

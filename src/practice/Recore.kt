@@ -1,6 +1,11 @@
 package com.engineerclient.practice
 
+import com.engineerclient.DeadPlayers
 import com.engineerclient.EngineerClient
+import com.engineerclient.misc.OdinLeapScale
+import com.engineerclient.p3sim.Fight
+import com.engineerclient.p3sim.GoldorPhase
+import com.engineerclient.p3sim.P3Sim
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.ColorSetting
@@ -23,10 +28,15 @@ import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.PlayerFaceExtractor
+import net.minecraft.client.gui.screens.Screen
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
+import net.minecraft.client.multiplayer.ClientLevel
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket
 import net.minecraft.resources.Identifier
 import net.minecraft.util.ARGB
 import net.minecraft.world.entity.Entity
+import net.minecraft.world.entity.decoration.Mannequin
+import net.minecraft.world.entity.player.PlayerSkin
 
 /**
  * F7/M7 core leap (was Term Info's Core Leap, then Sub Splits'). Paste Last In Core is set here and sent by
@@ -150,8 +160,8 @@ object Recore : Module(
 
     /** Your own P3 sim in S4 (straight off the sim, as Term Info has it: a restart or later start has no chat). */
     private fun simS4(): Boolean {
-        if (!com.engineerclient.p3sim.P3Sim.localSim) return false
-        return (com.engineerclient.p3sim.Fight.phase as? com.engineerclient.p3sim.GoldorPhase)?.section == 4
+        if (!P3Sim.localSim) return false
+        return (Fight.phase as? GoldorPhase)?.section == 4
     }
 
     private fun watchingCore() = coreWatch || simS4()
@@ -171,22 +181,22 @@ object Recore : Module(
             // Unseen (out of render distance) keeps its place; dead or out of the box loses it. Passing
             // through on a leap's drag is neither: not in, and whatever was known stays.
             if (p == null) continue
-            if (com.engineerclient.DeadPlayers.isDead(m) || !inCore(p)) inCoreSince.remove(m.name)
+            if (DeadPlayers.isDead(m) || !inCore(p)) inCoreSince.remove(m.name)
             else if (!inFlight(p)) inCoreSince.putIfAbsent(m.name, now)
         }
     }
 
     /** In the P3 sim, a bot teammate: its Mannequin, by the name over it. */
-    private fun simBot(level: net.minecraft.client.multiplayer.ClientLevel, name: String): Entity? {
-        if (!com.engineerclient.p3sim.P3Sim.inSim) return null
-        return level.entitiesForRendering().firstOrNull { it is net.minecraft.world.entity.decoration.Mannequin && !it.isRemoved && it.customName?.string?.replace(CONTROL_CODES, "") == name }
+    private fun simBot(level: ClientLevel, name: String): Entity? {
+        if (!P3Sim.inSim) return null
+        return level.entitiesForRendering().firstOrNull { it is Mannequin && !it.isRemoved && it.customName?.string?.replace(CONTROL_CODES, "") == name }
     }
 
-    private fun isLeapScreen(screen: net.minecraft.client.gui.screens.Screen) =
-        (screen as? net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<*>)?.title?.string.let { it == "Spirit Leap" || it == "Teleport to Player" }
+    private fun isLeapScreen(screen: Screen) =
+        (screen as? AbstractContainerScreen<*>)?.title?.string.let { it == "Spirit Leap" || it == "Teleport to Player" }
 
     /** Someone to highlight: [i] is their place in Odin's Leap Menu, [since] when they were first seen in the core. */
-    private class Target(val i: Int, val name: String, val clazz: String, val skin: net.minecraft.world.entity.player.PlayerSkin, val since: Long)
+    private class Target(val i: Int, val name: String, val clazz: String, val skin: PlayerSkin, val since: Long)
 
     /**
      * The part of the screen where the first teammate seen in the core (or each one, with Highlight All Players
@@ -306,7 +316,7 @@ object Recore : Module(
                 val bh = LeapMenu.BOX_HEIGHT
                 val lx = if (right) 0 else -bw
                 val ly = if (bottom) 0 else -bh
-                val scale = com.engineerclient.misc.OdinLeapScale.get()
+                val scale = OdinLeapScale.get()
                 gfx.pose().pushMatrix()
                 gfx.pose().translate((cx + sx * 24).toFloat(), (cy + sy * 24).toFloat())
                 gfx.pose().scale(scale, scale)

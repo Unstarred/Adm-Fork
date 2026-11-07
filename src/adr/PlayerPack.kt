@@ -1,9 +1,11 @@
 package com.engineerclient.adr
 
 import com.google.gson.JsonArray
+import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.google.gson.JsonPrimitive
+import java.util.Arrays
 import java.util.TreeMap
 
 /**
@@ -76,7 +78,7 @@ internal class PlayerPlan private constructor(private val rows: TreeMap<Int, Jso
             }
             stretches += open.values
             // The recording player's look where the camera frames have it: the row before's (no change to send).
-            var look: Pair<com.google.gson.JsonElement, com.google.gson.JsonElement>? = null
+            var look: Pair<JsonElement, JsonElement>? = null
             for ((t, d) in selfRows) for (e in d) {
                 val r = e.asJsonArray
                 if (r.size() < 6 || r[0].asString != self) continue
@@ -156,7 +158,7 @@ internal class PlayerPlan private constructor(private val rows: TreeMap<Int, Jso
 
         /** Whether a camera frame is from [CAM_BEFORE] ticks before tick [t] to [CAM_AFTER] after. */
         private fun camNear(times: DoubleArray, t: Int): Boolean {
-            var i = java.util.Arrays.binarySearch(times, t - CAM_BEFORE)
+            var i = Arrays.binarySearch(times, t - CAM_BEFORE)
             if (i < 0) i = -i - 1
             return i < times.size && times[i] <= t + CAM_AFTER
         }

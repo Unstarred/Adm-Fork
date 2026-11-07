@@ -38,6 +38,8 @@ import net.minecraft.world.entity.Relative
 import net.minecraft.world.entity.player.Player
 import net.minecraft.world.phys.AABB
 import net.minecraft.world.phys.Vec3
+import kotlin.math.abs
+import kotlin.math.hypot
 
 /**
  * Team TP Maze, on Odin's Puzzle Solvers: one map of the Teleport Maze for the whole party, so a team stacked in the maze (leaping
@@ -193,7 +195,7 @@ object TeamTpMaze {
      */
     private fun teleport(fromX: Double, fromZ: Double, x: Double, y: Double, z: Double, yaw: Double, exact: Boolean) {
         val f = frame ?: return
-        if (kotlin.math.abs(y - LANDING_Y) > 0.01) return
+        if (abs(y - LANDING_Y) > 0.01) return
         val (rx, rz) = f.toRoom(x, z).let { it[0] to it[1] }
         val land = MazePads.landingAt(rx, rz)
         if (land < 0) return
@@ -201,7 +203,7 @@ object TeamTpMaze {
         // A pad's teleport starts in the maze (a leap onto a teammate standing on a landing cell doesn't), and no pad leads into its own
         // cell: a "landing" where you already were (a setback, a position resync) is no pad's.
         val origin = MazePads.regionAt(ox, oz)
-        if (origin < 0 || kotlin.math.hypot(ox - rx, oz - rz) < 1.5 || origin == MazePads.cell(land)) return
+        if (origin < 0 || hypot(ox - rx, oz - rz) < 1.5 || origin == MazePads.cell(land)) return
         val from = MazePads.padUnder(ox, oz, REACH)
         val ryaw = f.yawToRoom(yaw)
         var changed = false

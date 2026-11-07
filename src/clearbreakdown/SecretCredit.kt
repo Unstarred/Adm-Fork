@@ -1,5 +1,7 @@
 package com.engineerclient.clearbreakdown
 
+import kotlin.math.abs
+
 /** Secrets a player got in one room; [estimate] when some were split between players who could have found them. */
 data class RoomSecrets(val room: String, val count: Int, val estimate: Boolean)
 
@@ -48,8 +50,8 @@ class SecretCredit(private val mergeMs: Long = 1000, private val exactMs: Long =
         if (known != null) {
             // Exact beats in-reach only for the same moment (a party member's copy can be a few seconds
             // late): a click on a chest long after it was looted is a re-open, not its finder.
-            if (exact && !known.exact && kotlin.math.abs(atMs - known.atMs) <= exactMs) { known.candidates = candidates; known.exact = true }
-            else if (!exact && !known.exact && kotlin.math.abs(atMs - known.atMs) <= mergeMs) known.candidates = known.candidates + candidates
+            if (exact && !known.exact && abs(atMs - known.atMs) <= exactMs) { known.candidates = candidates; known.exact = true }
+            else if (!exact && !known.exact && abs(atMs - known.atMs) <= mergeMs) known.candidates = known.candidates + candidates
             return
         }
         // A party member's sighting can land just after Odin's count already made it a gap: it

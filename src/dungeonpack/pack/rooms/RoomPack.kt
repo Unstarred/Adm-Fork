@@ -1,10 +1,14 @@
 package com.engineerclient.dungeonpack.pack.rooms
 
 import com.engineerclient.dungeonpack.pack.*
+import com.google.gson.JsonArray
+import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+import java.io.Closeable
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
+import java.util.zip.CRC32
 
 /*
  * The "Room library" data pack, version 1 (FORMAT-rooms.md): every room design's blocks and features in the canonical
@@ -123,7 +127,7 @@ class RoomPack internal constructor(
     val aliases: Map<String, String>,
     private val blobs: BlobSource?,
     private val report: PackReport,
-) : java.io.Closeable {
+) : Closeable {
     private val byId: Map<String, RoomDesign> = designs.associateBy { it.id }
     private val byFamily: Map<String, List<RoomDesign>> = designs.groupBy { it.family }
     private val byName: Map<String, List<RoomDesign>> = designs.groupBy { it.name }
@@ -332,12 +336,12 @@ class RoomPack internal constructor(
         }
 
         /** An anchor is one `[x,y,z]` or a list of them. */
-        private fun anchorList(v: com.google.gson.JsonElement): List<Pos> {
+        private fun anchorList(v: JsonElement): List<Pos> {
             v.asPos()?.let { return listOf(it) }
             return v.asPosList()
         }
 
-        private fun com.google.gson.JsonArray.getOrNull(i: Int): com.google.gson.JsonElement? = if (i < size()) get(i) else null
+        private fun JsonArray.getOrNull(i: Int): JsonElement? = if (i < size()) get(i) else null
 
         private fun parseBlob(o: JsonObject) = BlobRef(o.str("kind") ?: "volume", o.long("off") ?: 0, o.int("len") ?: 0, o.str("crc32"), o.int("nonAir") ?: 0)
 
@@ -351,7 +355,7 @@ class RoomPack internal constructor(
         )
 
         private fun fileCrc32(path: Path): String {
-            val c = java.util.zip.CRC32()
+            val c = CRC32()
             Files.newInputStream(path).use { s -> val buf = ByteArray(1 shl 16); while (true) { val n = s.read(buf); if (n < 0) break; c.update(buf, 0, n) } }
             return "%08x".format(c.value)
         }

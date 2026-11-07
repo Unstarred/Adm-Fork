@@ -1,9 +1,16 @@
 package com.engineerclient.p3sim
 
 import com.engineerclient.EngineerClient
+import com.engineerclient.practice.TermInfo
 import com.google.gson.GsonBuilder
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass
 import net.minecraft.client.Minecraft
+import net.minecraft.core.BlockPos
+import net.minecraft.network.protocol.game.ClientboundSetHeldSlotPacket
+import net.minecraft.server.level.ServerPlayer
+import net.minecraft.world.item.BowItem
+import net.minecraft.world.item.ItemStack
+import net.minecraft.world.phys.Vec3
 import java.io.File
 import java.util.Locale
 
@@ -55,7 +62,7 @@ object Practice {
      * Infinileap's always does).
      */
     class Setup(val name: String, val section: Int, val start: Spots.Spot, val jobs: List<String>, val checkpoints: List<Spots.Spot> = emptyList(), val delay: Double? = null,
-                val item: String? = null, val mines: List<net.minecraft.core.BlockPos> = emptyList(), val restartMs: Long = 250)
+                val item: String? = null, val mines: List<BlockPos> = emptyList(), val restartMs: Long = 250)
 
     /** [Setup.item]: the first bow on your hotbar. */
     const val FIRST_BOW = "first bow"
@@ -63,7 +70,7 @@ object Practice {
     private const val BONZO = "STARRED_BONZO_STAFF"
 
     /** The high EE3's 2x2 quartz platform (x 15-16, y 122, z 93-94), as Theoretical's bers mines it there. */
-    private val HEE3_MINES get() = listOf(15, 16).flatMap { x -> listOf(93, 94).map { net.minecraft.core.BlockPos(x, 122, it) } }
+    private val HEE3_MINES get() = listOf(15, 16).flatMap { x -> listOf(93, 94).map { BlockPos(x, 122, it) } }
 
     /**
      * Preset [name] in section [section] from a custom practice's [code] ([PracticeCode]: its start, jobs (unless [jobs]),
@@ -200,7 +207,7 @@ object Practice {
         mode = m; section = s
         tasks = emptyList(); ticks = 0; endTicks = -1
         // The last try's times come down at once (the Section Time too, not only once the start timer ends).
-        com.engineerclient.practice.TermInfo.simClearTime()
+        TermInfo.simClearTime()
         startedMs = System.currentTimeMillis()
         Fight.start(listOf(Fight.Start.S1, Fight.Start.S2, Fight.Start.S3, Fight.Start.S4)[s - 1], practice = true)
         // The preset's blocks already mined away (back with the next start's restore).
@@ -383,7 +390,7 @@ object Practice {
 
     /** The section (1-4) [x], [y], [z] is in, else the nearest one (the middle, the core, a gap between two). */
     fun sectionAt(x: Double, y: Double, z: Double): Int {
-        val v = net.minecraft.world.phys.Vec3(x, y, z)
+        val v = Vec3(x, y, z)
         return GoldorPhase.dtZone(v).takeIf { it in 1..4 }
             ?: GoldorPhase.DT_ZONES.minBy { (_, box) -> box.distanceToSqr(v) }.first
     }
@@ -412,17 +419,17 @@ object Practice {
     fun clearCustom() { customStart = null; customItem = null; customSection = 0; customJobs.clear(); checkpoints.clear(); leapWaypoints.clear(); startDelay = 0.0; save() }
 
     /** An item as the start remembers it: its SkyBlock id, else its name. */
-    fun itemKey(s: net.minecraft.world.item.ItemStack): String? =
+    fun itemKey(s: ItemStack): String? =
         if (s.isEmpty) null else SimItems.idOf(s) ?: "name:" + s.hoverName.string
 
     /** In a custom practice or a preset with one: you hold its start item again (the hotbar slot it's in now, if any). */
-    fun holdStartItem(player: net.minecraft.server.level.ServerPlayer) {
+    fun holdStartItem(player: ServerPlayer) {
         val set = setup ?: return
         val key = (if (set.name == "Custom") customItem else set.item) ?: return
         val inv = player.inventory
-        val slot = (0..8).firstOrNull { val s = inv.getItem(it); if (key == FIRST_BOW) s.item is net.minecraft.world.item.BowItem else itemKey(s) == key } ?: return
+        val slot = (0..8).firstOrNull { val s = inv.getItem(it); if (key == FIRST_BOW) s.item is BowItem else itemKey(s) == key } ?: return
         inv.selectedSlot = slot
-        player.connection.send(net.minecraft.network.protocol.game.ClientboundSetHeldSlotPacket(slot))
+        player.connection.send(ClientboundSetHeldSlotPacket(slot))
     }
 
     /** The custom practice as a code to share ([PracticeCode]). */

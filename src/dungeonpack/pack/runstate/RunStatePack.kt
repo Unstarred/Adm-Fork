@@ -2,6 +2,7 @@ package com.engineerclient.dungeonpack.pack.runstate
 
 import com.engineerclient.dungeonpack.pack.*
 import com.engineerclient.dungeonpack.pack.rooms.checkHeader
+import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import java.nio.file.Files
 import java.nio.file.Path
@@ -269,7 +270,7 @@ class RunStatePack internal constructor(
                 chatFormats, sbPresets, damage, lag, constants, problems, root, chestClears)
         }
 
-        private fun primitive(e: com.google.gson.JsonElement?): Any? {
+        private fun primitive(e: JsonElement?): Any? {
             if (e == null || !e.isJsonPrimitive) return null
             val p = e.asJsonPrimitive
             return if (p.isNumber) p.asDouble else if (p.isBoolean) p.asBoolean else p.asString

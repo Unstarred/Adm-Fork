@@ -21,6 +21,7 @@ import net.minecraft.world.level.levelgen.flat.FlatLevelGeneratorSettings
 import net.minecraft.world.level.levelgen.presets.WorldPresets
 import net.minecraft.world.level.levelgen.structure.StructureSet
 import java.nio.file.Files
+import java.nio.file.Path
 import java.util.Optional
 import java.util.zip.CRC32
 
@@ -113,7 +114,7 @@ object SimWorld {
             // would grow villages and mineshafts into the dungeon.
             val plains = biomes.getOrThrow(Biomes.PLAINS)
             val flat = FlatLevelGeneratorSettings(Optional.of<HolderSet<StructureSet>>(HolderSet.empty()), plains, emptyList())
-            provider.lookupOrThrow(net.minecraft.core.registries.Registries.WORLD_PRESET).getOrThrow(WorldPresets.FLAT).value().createWorldDimensions().replaceOverworldGenerator(provider, FlatLevelSource(flat))
+            provider.lookupOrThrow(Registries.WORLD_PRESET).getOrThrow(WorldPresets.FLAT).value().createWorldDimensions().replaceOverworldGenerator(provider, FlatLevelSource(flat))
         }, TitleScreen())
     }
 
@@ -143,10 +144,10 @@ object SimWorld {
     @Volatile var opening = false
 
     /** Built by the mod from the arena this jar carries: one from another build (opened from the world list) isn't the sim's. */
-    fun isBuilt(worldDir: java.nio.file.Path) = runCatching { Files.readString(worldDir.resolve(MARKER)).trim() == arenaVersion }.getOrDefault(false)
+    fun isBuilt(worldDir: Path) = runCatching { Files.readString(worldDir.resolve(MARKER)).trim() == arenaVersion }.getOrDefault(false)
 
     /** Called on the server once it runs: stamps which arena the world was built from. */
-    fun markBuilt(worldDir: java.nio.file.Path) {
+    fun markBuilt(worldDir: Path) {
         EngineerClient.safely("p3sim marker") { Files.writeString(worldDir.resolve(MARKER), arenaVersion) }
     }
 }

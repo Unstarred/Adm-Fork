@@ -1,19 +1,34 @@
 package com.engineerclient.p3sim
 
+import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents
+import net.fabricmc.fabric.api.event.player.UseBlockCallback
+import net.minecraft.ChatFormatting
 import net.minecraft.core.BlockPos
 import net.minecraft.core.Holder
+import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.network.chat.Component
+import net.minecraft.network.chat.Style
+import net.minecraft.network.chat.TextColor
+import net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket
 import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket
 import net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket
-import net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket
+import net.minecraft.network.protocol.game.ClientboundSoundPacket
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.sounds.SoundEvent
+import net.minecraft.sounds.SoundEvents
 import net.minecraft.sounds.SoundSource
+import net.minecraft.world.InteractionResult
 import net.minecraft.world.entity.Entity
 import net.minecraft.world.entity.Relative
 import net.minecraft.world.phys.AABB
 import net.minecraft.world.phys.Vec3
+import java.util.Collections
+import java.util.UUID
+import java.util.WeakHashMap
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.properties.ReadWriteProperty
+import kotlin.reflect.KProperty
 
 /**
  * Small server-side helpers for the sim (server thread only).
@@ -101,10 +116,10 @@ object Sim {
     fun guardBlocks() {
         if (guarded) return
         guarded = true
-        net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.BEFORE.register { level, _, _, _, _ -> !SimServer.isSimLevel(level) }
+        PlayerBlockBreakEvents.BEFORE.register { level, _, _, _, _ -> !SimServer.isSimLevel(level) }
         // Registered after SimItems' hooks, so it only sees what they passed on (a block item's placement).
-        net.fabricmc.fabric.api.event.player.UseBlockCallback.EVENT.register { _, level, _, _ ->
-            if (SimServer.isSimLevel(level)) net.minecraft.world.InteractionResult.FAIL else net.minecraft.world.InteractionResult.PASS
+        UseBlockCallback.EVENT.register { _, level, _, _ ->
+            if (SimServer.isSimLevel(level)) InteractionResult.FAIL else InteractionResult.PASS
         }
     }
 
@@ -145,18 +160,18 @@ object Sim {
     /** `§` text as a styled component (no codes left in its string), as Hypixel's names come. */
     fun legacy(text: String): Component {
         val out = Component.empty()
-        var style = net.minecraft.network.chat.Style.EMPTY
+        var style = Style.EMPTY
         val sb = StringBuilder()
         var i = 0
         fun flush() { if (sb.isNotEmpty()) { out.append(Component.literal(sb.toString()).withStyle(style)); sb.clear() } }
         while (i < text.length) {
             val c = text[i]
             if (c == '§' && i + 1 < text.length) {
-                val f = net.minecraft.ChatFormatting.getByCode(text[i + 1])
+                val f = ChatFormatting.getByCode(text[i + 1])
                 if (f != null) {
                     flush()
-                    style = if (f == net.minecraft.ChatFormatting.RESET) net.minecraft.network.chat.Style.EMPTY
-                        else if (net.minecraft.network.chat.TextColor.fromLegacyFormat(f) != null) net.minecraft.network.chat.Style.EMPTY.withColor(f) else style.applyFormat(f)
+                    style = if (f == ChatFormatting.RESET) Style.EMPTY
+                        else if (TextColor.fromLegacyFormat(f) != null) Style.EMPTY.withColor(f) else style.applyFormat(f)
                     i += 2; continue
                 }
             }
@@ -171,7 +186,7 @@ object Sim {
         chat("§4[BOSS] $name§r§c: $line")
         if (stand) BossWither.speak(name, line)
         // At the boss: Hypixel plays it within a block of him, not at the player.
-        sound(net.minecraft.sounds.SoundEvents.WITHER_AMBIENT, 5f, 1.19f, at)
+        sound(SoundEvents.WITHER_AMBIENT, 5f, 1.19f, at)
     }
 
     fun title(title: String, sub: String = "", fadeIn: Int = 0, stay: Int = 30, fadeOut: Int = 5) {
@@ -191,9 +206,9 @@ object Sim {
      */
     fun sound(sound: SoundEvent, volume: Float = 1f, pitch: Float = 1f, at: Vec3? = null, source: SoundSource = SoundSource.MASTER) {
         if (at != null) { level.playSound(null, at.x, at.y, at.z, sound, source, volume, pitch); return }
-        val holder = net.minecraft.core.registries.BuiltInRegistries.SOUND_EVENT.wrapAsHolder(sound)
+        val holder = BuiltInRegistries.SOUND_EVENT.wrapAsHolder(sound)
         val seed = level.random.nextLong()
-        for (p in audience()) p.connection.send(net.minecraft.network.protocol.game.ClientboundSoundPacket(holder, source, p.x, p.y, p.z, volume, pitch, seed))
+        for (p in audience()) p.connection.send(ClientboundSoundPacket(holder, source, p.x, p.y, p.z, volume, pitch, seed))
     }
 
     fun sound(sound: Holder<SoundEvent>, volume: Float = 1f, pitch: Float = 1f, at: Vec3? = null, source: SoundSource = SoundSource.MASTER) = sound(sound.value(), volume, pitch, at, source)
@@ -233,19 +248,19 @@ object Sim {
  * One value per player (keyed by [Sim.player]'s UUID): an item's cooldown, a mask's timer, a terminal's click
  * window, so each player in a party has their own. Alone it is one value, as before.
  */
-class PerPlayer<T>(private val init: () -> T) : kotlin.properties.ReadWriteProperty<Any?, T> {
+class PerPlayer<T>(private val init: () -> T) : ReadWriteProperty<Any?, T> {
     private class Box<T>(var v: T)
-    private val map = java.util.concurrent.ConcurrentHashMap<java.util.UUID, Box<T>>()
+    private val map = ConcurrentHashMap<UUID, Box<T>>()
     init { all += this }
     private fun box(): Box<T> = map.getOrPut(Sim.player?.uuid ?: NOBODY) { Box(init()) }
-    override fun getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>): T = box().v
-    override fun setValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>, value: T) { box().v = value }
+    override fun getValue(thisRef: Any?, property: KProperty<*>): T = box().v
+    override fun setValue(thisRef: Any?, property: KProperty<*>, value: T) { box().v = value }
     /** Every player's value, as it stands. */
     fun values(): List<T> = map.values.map { it.v }
     companion object {
-        private val NOBODY = java.util.UUID(0, 0)
+        private val NOBODY = UUID(0, 0)
         /** Weakly: a phase's own go with it. */
-        private val all = java.util.Collections.synchronizedSet(java.util.Collections.newSetFromMap(java.util.WeakHashMap<PerPlayer<*>, Boolean>()))
+        private val all = Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<PerPlayer<*>, Boolean>()))
         /** Everyone's values back to new (a new sim). */
         fun clearAll() = synchronized(all) { all.toList() }.forEach { it.map.clear() }
     }

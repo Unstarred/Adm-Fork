@@ -1,5 +1,6 @@
 package com.engineerclient.misc
 
+import com.mojang.blaze3d.vertex.PoseStack
 import com.odtheking.odin.clickgui.settings.impl.ColorSetting
 import com.odtheking.odin.events.LevelEvent
 import com.odtheking.odin.events.MessageEvent
@@ -11,9 +12,11 @@ import com.odtheking.odin.features.Module
 import com.odtheking.odin.utils.Color
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
 import com.odtheking.odin.utils.skyblock.dungeon.M7Phases
+import net.minecraft.client.renderer.SubmitNodeCollector
 import net.minecraft.client.renderer.rendertype.RenderTypes
 import net.minecraft.world.entity.boss.wither.WitherBoss
 import net.minecraft.world.entity.player.Player
+import net.minecraft.world.phys.Vec3
 
 /**
  * F7 P1/P2: Maxor and Storm aggro onto whoever is closest, so a see-through sphere around the boss
@@ -129,9 +132,9 @@ object AgroSphere : Module(
 
     /** Translucent, depth-tested, not culled: reads from inside the sphere as well as outside. */
     private fun drawSphere(
-        pose: com.mojang.blaze3d.vertex.PoseStack,
-        collector: net.minecraft.client.renderer.SubmitNodeCollector,
-        center: net.minecraft.world.phys.Vec3,
+        pose: PoseStack,
+        collector: SubmitNodeCollector,
+        center: Vec3,
         radius: Double,
         color: Color,
     ) {

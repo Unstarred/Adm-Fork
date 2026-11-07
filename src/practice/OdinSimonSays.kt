@@ -14,10 +14,11 @@ import com.odtheking.odin.utils.skyblock.dungeon.M7Phases
 import net.minecraft.core.BlockPos
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket
 import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket
-import net.minecraft.world.level.block.ButtonBlock
 import net.minecraft.world.level.block.Blocks
+import net.minecraft.world.level.block.ButtonBlock
 import net.minecraft.world.level.block.state.BlockState
 import net.minecraft.world.level.block.state.properties.BlockStateProperties
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * engineerClient's Simon Says solver, in Odin's Simon Says: Odin keeps drawing the boxes, blocking
@@ -51,9 +52,9 @@ object OdinSimonSays {
      * handler queues, so by the time the handler runs the packet may already be in the world (every lighting would
      * look like a re-send, and nothing would ever be drawn).
      */
-    private val lampLit = java.util.concurrent.ConcurrentHashMap<BlockPos, Boolean>()
+    private val lampLit = ConcurrentHashMap<BlockPos, Boolean>()
     /** The server tick each button's last packet arrived in (its block event comes when the packet is applied). */
-    private val buttonTick = java.util.concurrent.ConcurrentHashMap<BlockPos, Long>()
+    private val buttonTick = ConcurrentHashMap<BlockPos, Long>()
 
     private val GRID = (120..123).flatMap { y -> (92..95).map { z -> BlockPos(110, y, z) } }
 

@@ -1,7 +1,8 @@
 package com.engineerclient.p3sim
 
-import com.engineerclient.index
 import com.engineerclient.EngineerClient
+import com.engineerclient.index
+import com.google.gson.GsonBuilder
 import com.google.gson.JsonParser
 import net.minecraft.core.component.DataComponents
 import net.minecraft.core.registries.BuiltInRegistries
@@ -17,11 +18,15 @@ import net.minecraft.world.entity.player.Inventory
 import net.minecraft.world.entity.player.Player
 import net.minecraft.world.inventory.ChestMenu
 import net.minecraft.world.inventory.ContainerInput
+import net.minecraft.world.inventory.ContainerSynchronizer
 import net.minecraft.world.inventory.MenuType
 import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.Items
 import net.minecraft.world.item.component.CustomData
+import net.minecraft.world.item.component.DyedItemColor
 import net.minecraft.world.item.component.ItemLore
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Hypixel's Loadouts window ("(1/3) Loadouts"), opened with /loadouts (Hypixel re-sends the window after a
@@ -54,7 +59,7 @@ object Loadouts {
             else Terminals.named(BuiltInRegistries.ITEM.getValue(Identifier.withDefaultNamespace(item)), name)
         if (lore.isNotEmpty()) s.set(DataComponents.LORE, ItemLore(lore.map { l -> Component.literal(l).withStyle { it.withItalic(false) } }))
         if (glint) s.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true)
-        if (dye != null) s.set(DataComponents.DYED_COLOR, net.minecraft.world.item.component.DyedItemColor(dye))
+        if (dye != null) s.set(DataComponents.DYED_COLOR, DyedItemColor(dye))
         if (id != null) s.set(DataComponents.CUSTOM_DATA, CustomData.of(CompoundTag().also { it.putString("id", id); it.putBoolean("p3sim", true) }))
         if (style != null) SimItems.hy(s, null, style) else HypixelPack.look(s, null, null)
         return s
@@ -133,15 +138,15 @@ object Loadouts {
 
     private class Custom(val name: String = "", val worn: Worn = Worn())
 
-    private val gson = com.google.gson.GsonBuilder().setPrettyPrinting().create()
+    private val gson = GsonBuilder().setPrettyPrinting().create()
     /** Each player's custom loadouts (the host's from this computer, a joiner's from their game: [PlayerFiles]). */
-    private val customLists = java.util.concurrent.ConcurrentHashMap<String, MutableList<Custom>>()
+    private val customLists = ConcurrentHashMap<String, MutableList<Custom>>()
     private fun owner() = PlayerFiles.owner()?.toString() ?: ""
 
     /** This game's file changed (the sim's server saved a joiner's): read it again. */
     fun forgetLocal() { customLists.remove("") }
     /** A joiner's files arrived (or they left): read theirs again. */
-    fun forget(id: java.util.UUID) { customLists.remove(id.toString()) }
+    fun forget(id: UUID) { customLists.remove(id.toString()) }
 
     private fun customs(): MutableList<Custom> = customLists[owner()] ?: run {
         val l = runCatching {
@@ -282,7 +287,7 @@ object Loadouts {
         init { draw() }
 
         /** As main sends it: one container_set_slot per slot, not one container_set_content. */
-        override fun setSynchronizer(synchronizer: net.minecraft.world.inventory.ContainerSynchronizer) = super.setSynchronizer(SimItems.PerSlotSync(synchronizer, sp))
+        override fun setSynchronizer(synchronizer: ContainerSynchronizer) = super.setSynchronizer(SimItems.PerSlotSync(synchronizer, sp))
 
         fun refresh() { draw(); broadcastFullState() }
 

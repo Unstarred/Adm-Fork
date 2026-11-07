@@ -10,9 +10,12 @@ import com.mojang.authlib.GameProfile
 import com.mojang.authlib.properties.Property
 import com.mojang.authlib.properties.PropertyMap
 import io.netty.buffer.Unpooled
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents
 import net.fabricmc.fabric.api.networking.v1.ServerLoginConnectionEvents
 import net.fabricmc.fabric.api.networking.v1.ServerLoginNetworking
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents
 import net.fabricmc.loader.api.FabricLoader
+import net.minecraft.client.Minecraft
 import net.minecraft.network.FriendlyByteBuf
 import net.minecraft.network.chat.Component
 import net.minecraft.resources.Identifier
@@ -54,7 +57,7 @@ object AdsServer {
     private const val OPEN = 5; private const val DATA = 6; private const val CLOSE = 7; private const val INFO = 8
     private const val PING = 9; private const val ERROR = 10
 
-    private val mc get() = net.minecraft.client.Minecraft.getInstance()
+    private val mc get() = Minecraft.getInstance()
 
     private class Host(val port: Int) {
         @Volatile var socket: Socket? = null
@@ -233,9 +236,9 @@ object AdsServer {
 
     fun register() {
         SimNet.onClient("adsHello") { inHostsSim = true }
-        net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN.register { _, _, _ -> inHostsSim = false }
-        net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.DISCONNECT.register { _, _ -> inHostsSim = false }
-        net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.JOIN.register { handler, _, server ->
+        ClientPlayConnectionEvents.JOIN.register { _, _, _ -> inHostsSim = false }
+        ClientPlayConnectionEvents.DISCONNECT.register { _, _ -> inHostsSim = false }
+        ServerPlayConnectionEvents.JOIN.register { handler, _, server ->
             if (forwards(server) && handler.player.uuid != server.singleplayerProfile?.id()) SimNet.send(handler.player, "adsHello")
         }
         ServerLoginConnectionEvents.QUERY_START.register { handler, server, sender, _ ->

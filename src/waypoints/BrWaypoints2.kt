@@ -3,8 +3,9 @@ package com.engineerclient.waypoints
 import com.engineerclient.EngineerClient
 import com.engineerclient.splits.DoorBlocks
 import com.google.gson.GsonBuilder
-import com.google.gson.JsonParser
 import com.google.gson.JsonElement
+import com.google.gson.JsonParser
+import com.mojang.blaze3d.platform.InputConstants
 import com.mojang.brigadier.arguments.IntegerArgumentType
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.ActionSetting
@@ -33,8 +34,8 @@ import com.odtheking.odin.utils.Colors
 import com.odtheking.odin.utils.alert
 import com.odtheking.odin.utils.itemId
 import com.odtheking.odin.utils.itemUUID
-import com.odtheking.odin.utils.render.drawFilledBox
 import com.odtheking.odin.utils.render.BoxStyle
+import com.odtheking.odin.utils.render.drawFilledBox
 import com.odtheking.odin.utils.render.drawStyledBox
 import com.odtheking.odin.utils.render.drawText
 import com.odtheking.odin.utils.render.drawWireFrameBox
@@ -45,17 +46,18 @@ import net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal
 import net.minecraft.core.BlockPos
 import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket
-import net.minecraft.world.level.block.Blocks
 import net.minecraft.world.entity.Entity
 import net.minecraft.world.entity.boss.wither.WitherBoss
 import net.minecraft.world.entity.decoration.ArmorStand
 import net.minecraft.world.entity.monster.Enderman
 import net.minecraft.world.entity.player.Player
 import net.minecraft.world.item.ItemStack
+import net.minecraft.world.level.block.Blocks
 import net.minecraft.world.phys.AABB
 import net.minecraft.world.phys.Vec3
-import com.mojang.blaze3d.platform.InputConstants
 import java.io.File
+import kotlin.math.abs
+import kotlin.math.hypot
 
 /**
  * Boxes that group a room's starred mobs, made on undonecoffee.com/brroles and pulled from there.
@@ -329,7 +331,7 @@ object BrWaypoints2 : Module(
         for (mob in mobs) {
             val e = mob.entity ?: continue
             if (!e.isRemoved) continue
-            val d = kotlin.math.hypot(player.x - e.x, player.z - e.z)
+            val d = hypot(player.x - e.x, player.z - e.z)
             val withTag = mob.tagGoneAt?.let { ticks - it <= 1 } == true
             if (d < DIES_WITH_TAG && (withTag || d < DIES_ALONE)) mob.dead = true
             mob.entity = null
@@ -603,7 +605,7 @@ object BrWaypoints2 : Module(
         val room = tileRoom(t)?.name ?: return
         myTile = t
         val from = was?.let { tileRoom(it)?.name } ?: return
-        if (from == room || kotlin.math.abs(was.first - t.first) + kotlin.math.abs(was.second - t.second) != 1) return
+        if (from == room || abs(was.first - t.first) + abs(was.second - t.second) != 1) return
         walkedIn[room] = (-185 + 16 * (was.first + t.first)) to (-185 + 16 * (was.second + t.second))
     }
 

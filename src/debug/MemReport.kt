@@ -4,8 +4,10 @@ import com.engineerclient.EngineerClient
 import org.lwjgl.system.Configuration
 import org.lwjgl.system.MemoryUtil
 import java.nio.file.Files
+import java.nio.file.Path
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
  * `/adm memreport`: who holds LWJGL's native memory - Minecraft's MemoryUtil, backed here by LWJGL's
@@ -45,7 +47,7 @@ object MemReport {
                 }
                 val ranked = sites.entries.sortedByDescending { it.value[0] }
                 val anon = runCatching {
-                    Files.readAllLines(java.nio.file.Path.of("/proc/self/status")).firstOrNull { it.startsWith("RssAnon") }?.trim()
+                    Files.readAllLines(Path.of("/proc/self/status")).firstOrNull { it.startsWith("RssAnon") }?.trim()
                 }.getOrNull()
                 val rt = Runtime.getRuntime()
                 val out = StringBuilder()
@@ -69,5 +71,5 @@ object MemReport {
         }, "engineerclient-memreport").apply { isDaemon = true }.start()
     }
 
-    private fun mb(bytes: Long) = String.format(java.util.Locale.ROOT, "%.1f MB", bytes / 1048576.0)
+    private fun mb(bytes: Long) = String.format(Locale.ROOT, "%.1f MB", bytes / 1048576.0)
 }

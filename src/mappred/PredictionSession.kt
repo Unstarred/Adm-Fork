@@ -1,5 +1,6 @@
 package com.engineerclient.mappred
 
+import java.lang.management.ManagementFactory
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.ExecutorService
@@ -641,7 +642,7 @@ internal class PredictionSession(
         fun autoThreads(): Int = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, MAX_THREADS)
 
         private fun threadCpuNanos(): Long {
-            val bean = java.lang.management.ManagementFactory.getThreadMXBean()
+            val bean = ManagementFactory.getThreadMXBean()
             return if (bean.isCurrentThreadCpuTimeSupported) bean.currentThreadCpuTime else System.nanoTime()
         }
     }

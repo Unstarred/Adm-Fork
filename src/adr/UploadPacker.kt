@@ -6,21 +6,28 @@ import com.google.gson.JsonNull
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.google.gson.JsonPrimitive
+import org.slf4j.LoggerFactory
 import org.tukaani.xz.LZMA2Options
 import org.tukaani.xz.XZInputStream
 import org.tukaani.xz.XZOutputStream
 import java.io.BufferedInputStream
 import java.io.BufferedReader
 import java.io.BufferedWriter
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
+import java.io.OutputStream
 import java.io.OutputStreamWriter
+import java.io.SequenceInputStream
 import java.math.BigDecimal
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Collections
+import java.util.TreeMap
+import java.util.TreeSet
 import java.util.zip.GZIPInputStream
-import org.slf4j.LoggerFactory
 
 /**
  * What a saved run (.jsonl.gz, as written while recording) is turned into to upload:
@@ -712,12 +719,12 @@ object UploadPacker {
      * its numbers instead ("cat": in order, each from the one before).
      */
     private fun skullsLines(lines: List<String>, cat: Catalogue.Skulls? = null, frame: Templates.Frame? = null): List<String> {
-        val at = java.util.TreeMap<Triple<Int, Int, Int>, String>(compareBy<Triple<Int, Int, Int>>({ it.first }, { it.third }, { it.second }))
+        val at = TreeMap<Triple<Int, Int, Int>, String>(compareBy<Triple<Int, Int, Int>>({ it.first }, { it.third }, { it.second }))
         for (line in lines) runCatching {
             val l = obj(line)
             at[Triple(int(l["x"]), int(l["y"]), int(l["z"]))] = (l["tex"] as JsonPrimitive).asString
         }
-        val ids = java.util.TreeSet<Int>()
+        val ids = TreeSet<Int>()
         if (cat != null && frame != null) at.entries.removeIf { (p, tex) ->
             val f = frame.fwd(p.first, p.second, p.third, "") ?: return@removeIf false
             val id = cat.id[Catalogue.skullKey(f.space, f.a, f.y, f.b, tex)] ?: return@removeIf false
@@ -763,7 +770,7 @@ object UploadPacker {
      * same xz library, the same settings): only then can the site and viewer put them back.
      */
     private fun dictUsable(d: Catalogue.Dict): Boolean = d.usable ?: runCatching {
-        val b = java.io.ByteArrayOutputStream()
+        val b = ByteArrayOutputStream()
         XZOutputStream(b, xzOptions()).apply { write(d.text); flush() }
         val all = b.toByteArray()
         val start = 12 + ((all[12].toInt() and 0xff) + 1) * 4
@@ -775,8 +782,8 @@ object UploadPacker {
      * the dictionary's own bytes (the stream's header and its block's, then straight on after them).
      * The xz stream goes in up to the end of the dictionary ([cut]); then everything goes through.
      */
-    private class DictCut(private val out: java.io.OutputStream, private val dict: Catalogue.Dict) : java.io.OutputStream() {
-        private var head: java.io.ByteArrayOutputStream? = java.io.ByteArrayOutputStream()
+    private class DictCut(private val out: OutputStream, private val dict: Catalogue.Dict) : OutputStream() {
+        private var head: ByteArrayOutputStream? = ByteArrayOutputStream()
         fun cut() {
             val b = head!!.toByteArray(); head = null
             val start = b.size - dict.packed.size
@@ -1763,7 +1770,7 @@ object UploadPacker {
             val sh = input.readNBytes(13)
             if (sh.size < 13) throw Malformed("cut short")
             val bh = input.readNBytes(((sh[12].toInt() and 0xff) + 1) * 4 - 1)
-            input = BufferedInputStream(java.io.SequenceInputStream(java.util.Collections.enumeration(listOf(java.io.ByteArrayInputStream(sh + bh), java.io.ByteArrayInputStream(dict.packed), input))), 1 shl 16)
+            input = BufferedInputStream(SequenceInputStream(Collections.enumeration(listOf(ByteArrayInputStream(sh + bh), ByteArrayInputStream(dict.packed), input))), 1 shl 16)
             head = sh.copyOf(6); skip = dict.text.size.toLong()
         }
         val xz = head.size >= 3 && head[0] == 0xFD.toByte() && head[1] == '7'.code.toByte() && head[2] == 'z'.code.toByte()

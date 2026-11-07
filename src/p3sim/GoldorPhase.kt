@@ -1,19 +1,29 @@
 package com.engineerclient.p3sim
 
-import net.minecraft.world.entity.EntityTypes
 import com.engineerclient.rotation.P3Sections
 import net.minecraft.core.BlockPos
+import net.minecraft.core.particles.ParticleTypes
 import net.minecraft.network.chat.Component
+import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket
+import net.minecraft.network.protocol.game.ClientboundHurtAnimationPacket
+import net.minecraft.server.level.ServerPlayer
 import net.minecraft.sounds.SoundEvents
+import net.minecraft.sounds.SoundSource
+import net.minecraft.world.effect.MobEffectInstance
+import net.minecraft.world.effect.MobEffects
 import net.minecraft.world.entity.EntityType
+import net.minecraft.world.entity.EntityTypes
 import net.minecraft.world.entity.EquipmentSlot
 import net.minecraft.world.entity.boss.wither.WitherBoss
 import net.minecraft.world.entity.monster.Giant
 import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.Items
+import net.minecraft.world.level.Level
 import net.minecraft.world.level.block.LeverBlock
+import net.minecraft.world.level.block.StairBlock
 import net.minecraft.world.phys.AABB
 import net.minecraft.world.phys.Vec3
+import kotlin.random.Random
 
 /**
  * P3: Goldor, as measured on Hypixel (n = server ticks since "Who dares trespass into my domain?"):
@@ -176,8 +186,8 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
             // The intro, then the taunts that queue up behind it (they almost always start at 248).
             lines += listOf("Little ants, plotting and scheming, thinking they are invincible...",
                 "I won't let you break the factory core, I gave my life to my Master.", "No one matches me in close quarters.")
-            val k = kotlin.random.Random.nextInt(100).let { if (it < 2) 0 else if (it < 43) 1 else if (it < 93) 2 else 3 }
-            repeat(k) { tauntAt[20 + kotlin.random.Random.nextInt(220)] = taunt() }
+            val k = Random.nextInt(100).let { if (it < 2) 0 else if (it < 43) 1 else if (it < 93) 2 else 3 }
+            repeat(k) { tauntAt[20 + Random.nextInt(220)] = taunt() }
             // The red pad's drop hole: its frames run 24-30 ticks after this line.
             Blocks.play("p3start")
           }
@@ -236,7 +246,7 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
         for (s in 1..3) if (autoGateAt[s] >= 0 && n >= autoGateAt[s] && !gateDown[s]) blowGate(s, null)
         // Death ticks: the chat line lands at n = 60k-1 on main, a tick early (60k-2) about a quarter of the time.
         if (section <= 4) {
-            if (n % 60 == 58) dtEarly = kotlin.random.Random.nextInt(98) < 26
+            if (n % 60 == 58) dtEarly = Random.nextInt(98) < 26
             if ((n % 60 == 58 && dtEarly) || (n % 60 == 59 && !dtEarly)) deathTick()
         }
         goldor.tick(this)
@@ -262,7 +272,7 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
      */
     private var lastIn: Vec3? by perPlayer { null }
     private var innerAt by perPlayer { -100 }
-    private fun innerChamber(p: net.minecraft.server.level.ServerPlayer) {
+    private fun innerChamber(p: ServerPlayer) {
         val was = lastIn; val now = p.position(); lastIn = now
         // From S4's start until Goldor takes off for the core (not at the opening), nothing gets you out of the inner chamber: any move from inside
         // CORE_BOX to outside it (a step, a leap, a teleport) snaps you back. Coming in from outside is free
@@ -272,7 +282,7 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
         lastIn = Vec3(54.5, 115.0, 58.3)
         if (n - innerAt < 20) return
         innerAt = n
-        Sim.sound(SoundEvents.ENDERMAN_TELEPORT, 8f, 0f, Vec3(54.5, 115.0, 58.3), net.minecraft.sounds.SoundSource.HOSTILE)
+        Sim.sound(SoundEvents.ENDERMAN_TELEPORT, 8f, 0f, Vec3(54.5, 115.0, 58.3), SoundSource.HOSTILE)
         Sim.chat("§cA mystical force prevents you from leaving the inner chamber!")
     }
 
@@ -321,7 +331,7 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
 
     /** S2-S4: a later taunt (13% a section, ~34% of runs), at any point of those sections. */
     private fun maybeTaunt() {
-        if (section in 2..4 && kotlin.random.Random.nextDouble() < 0.13) tauntAt[n + 20 + kotlin.random.Random.nextInt(180)] = taunt()
+        if (section in 2..4 && Random.nextDouble() < 0.13) tauntAt[n + 20 + Random.nextInt(180)] = taunt()
     }
 
     // ------------------------------------------------------------------ completions
@@ -360,7 +370,7 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
         Sim.title("", line.replace("§r", ""), 0, 40, 0)
         // Every progress line (devices too): pling vol 8 at your own position, pitch 4.05 as sent (the client clamps it to 2;
         // Odin's Terminal Sounds keys on the raw 4.047619).
-        Sim.sound(SoundEvents.NOTE_BLOCK_PLING, 8f, 4.047619f, source = net.minecraft.sounds.SoundSource.BLOCKS)
+        Sim.sound(SoundEvents.NOTE_BLOCK_PLING, 8f, 4.047619f, source = SoundSource.BLOCKS)
     }
 
     /** `§b<P>§r§a activated a terminal! (§r§c4§r§a/7)`: you and the bots are MVP+, so every name is §b (as the leap menu and party lines colour the bots). */
@@ -391,7 +401,7 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
                 Sim.chat("§aThe gate will open in 5 seconds!")
                 Sim.title("", "§aThe gate will open in 5 seconds!", 0, 40, 0)
             }
-            Sim.sound(SoundEvents.NOTE_BLOCK_PLING, 8f, 4.047619f, source = net.minecraft.sounds.SoundSource.BLOCKS)
+            Sim.sound(SoundEvents.NOTE_BLOCK_PLING, 8f, 4.047619f, source = SoundSource.BLOCKS)
             // Practice: the gate stays until you blow it (a gate job is yours to do).
             if (!practice) autoGateAt[s] = n + 100
             // The door's stairs and iron blocks (upper part, y118+) go 1 tick later; the barriers and portcullis wait for the gate.
@@ -401,7 +411,7 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
                 Blocks.anim("door$s")?.frames?.forEach { f ->
                     if (f.dt != 0 || f.pos.y < 118) return@forEach
                     val b = Blocks.get(f.pos)?.block
-                    if (b == net.minecraft.world.level.block.Blocks.IRON_BLOCK || b is net.minecraft.world.level.block.StairBlock) Blocks.set(f.pos, f.state)
+                    if (b == net.minecraft.world.level.block.Blocks.IRON_BLOCK || b is StairBlock) Blocks.set(f.pos, f.state)
                 }
             }
         }
@@ -465,7 +475,7 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
     /** Each player's own death tick (where they stand). */
     private fun deathTick() = Sim.forEachPlayer { deathTick(it) }
 
-    private fun deathTick(p: net.minecraft.server.level.ServerPlayer) {
+    private fun deathTick(p: ServerPlayer) {
         if (p.isSpectator || p.isCreative || Masks.ghost) return   // the Creeper Veil does not stop death ticks
         // The server's view of you, about one one-way latency late.
         val seen = Fight.seenPos(p)
@@ -489,7 +499,7 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
         // after the death/proc chat and sounds.
         val line = {
             Sim.chat("§4[BOSS] Goldor§r§c: What do you think you are doing there!")
-            Sim.sound(SoundEvents.WITHER_AMBIENT, 1f, 1f, null, net.minecraft.sounds.SoundSource.HOSTILE)
+            Sim.sound(SoundEvents.WITHER_AMBIENT, 1f, 1f, null, SoundSource.HOSTILE)
         }
         when (P3Sim.deathTicks) {
             1 -> { line(); Sim.title("", "§cDeath tick §7(S$at during S$section)", 0, 25, 5) }
@@ -506,7 +516,7 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
         coreAt = n
         Sim.chat("§aThe Core entrance is opening!")
         Sim.title("", "§aThe Core entrance is opening!", 0, 40, 0)
-        Sim.sound(SoundEvents.NOTE_BLOCK_PLING, 8f, 4.047619f, source = net.minecraft.sounds.SoundSource.BLOCKS)
+        Sim.sound(SoundEvents.NOTE_BLOCK_PLING, 8f, 4.047619f, source = SoundSource.BLOCKS)
         if (from != 5) Stats.section(4, n - sectionStart[4])
         // Stop After Terms: the run ends here, as the menu's Stop (not in a section practice).
         if (P3Sim.termsOnly && !practice && from != 5) Fight.later(1, "stop after terms") { Sim.note("Terms done: stopped §7(Stop After Terms)."); Fight.end() }
@@ -550,7 +560,7 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
                 if (hit >= 3) { Masks.hit(p, "Goldor"); frenzyHits = 0 }
                 // The damage ramps over hits in a row (e.g. 2,849 -> 44,323.9 -> 54,925.9 on main): a small first
                 // hit, then 44k-60k. Hypixel's format: thousands commas, one decimal, none when it's whole.
-                val r = kotlin.random.Random
+                val r = Random
                 var dmg = when (hit) { 1 -> 2_000.0 + r.nextDouble(11_000.0); 2 -> 44_000.0 + r.nextDouble(4_000.0); else -> 52_000.0 + r.nextDouble(8_000.0) }
                 dmg = if (r.nextInt(100) < 40) Math.floor(dmg) else Math.round(dmg * 10) / 10.0
                 // Sounds as measured: explode v0.5 p0.49 + hurt.
@@ -645,12 +655,12 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
         private var nextHurt = 0
         private var pos = Vec3.ZERO
         /** Armoured (health 1) on the track in about two runs in three, from 1-7 ticks after spawning. */
-        private val armouredRun = kotlin.random.Random.nextInt(36) < 23
-        private val armourAt = 1 + kotlin.random.Random.nextInt(7)
+        private val armouredRun = Random.nextInt(36) < 23
+        private val armourAt = 1 + Random.nextInt(7)
         private var armourOffAt = Int.MAX_VALUE
         private var spawnedN = 0
         /** The giants appear at n 11-19 and orbit. */
-        private val giantsAt = 11 + kotlin.random.Random.nextInt(9)
+        private val giantsAt = 11 + Random.nextInt(9)
         private var giantAngle = 0.0
         var killAt = Int.MAX_VALUE
             private set
@@ -671,7 +681,7 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
                 val e = SimGiant(Sim.level)
                 e.setNoAi(true); e.isSilent = true; e.isPermanentlyInvulnerable = true; e.setNoGravity(true); e.isInvisible = true
                 // Vanilla clears a mob's invisible flag without the effect: the effect keeps it (no particles).
-                e.addEffect(net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.INVISIBILITY, -1, 0, false, false))
+                e.addEffect(MobEffectInstance(MobEffects.INVISIBILITY, -1, 0, false, false))
                 e.setItemSlot(EquipmentSlot.MAINHAND, ItemStack(Items.GOLDEN_SWORD))
                 val g = giantPos(i)
                 e.snapTo(g.x, g.y, g.z, 0f, 0f)
@@ -699,7 +709,7 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
             if (flying || sec !in 1..3) return
             val inIt = if (sec == 1) s >= S1_ENTRY || s < BOUNDS[1] else segment(s) == sec - 1
             // The sprint starts 48-59 ticks (median ~55) after the door, not at once.
-            if (inIt && sprintFrom < 0) { sprintFrom = doorN + SPRINT_LAG_MIN + kotlin.random.Random.nextInt(SPRINT_LAG_SPREAD); sprintSec = sec }
+            if (inIt && sprintFrom < 0) { sprintFrom = doorN + SPRINT_LAG_MIN + Random.nextInt(SPRINT_LAG_SPREAD); sprintSec = sec }
         }
 
         fun fly(n: Int) {
@@ -709,7 +719,7 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
             // Killed [P3Sim.goldorKill] after leaving (the setting; flight start to the "...." line measures median 43, range 17-74).
             killAt = n + P3Sim.goldorKill.toInt()
             // His armour goes 4-14 ticks before the "...." line.
-            armourOffAt = killAt - 4 - kotlin.random.Random.nextInt(11)
+            armourOffAt = killAt - 4 - Random.nextInt(11)
         }
 
         /**
@@ -717,11 +727,11 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
          * (count 1, speed 1.0, no offset) scattered 3-6 blocks off him in x/z, half a block above his feet (~y 119.5).
          */
         private fun aura() {
-            val k = if (kotlin.random.Random.nextDouble() < 0.34) 2 else 1
+            val k = if (Random.nextDouble() < 0.34) 2 else 1
             repeat(k) {
-                val a = kotlin.random.Random.nextDouble() * Math.PI * 2
-                val r = 3.0 + kotlin.random.Random.nextDouble() * 3.0
-                Sim.level.sendParticles(net.minecraft.core.particles.ParticleTypes.ANGRY_VILLAGER, pos.x + Math.cos(a) * r, pos.y + 0.5, pos.z + Math.sin(a) * r, 1, 0.0, 0.0, 0.0, 1.0)
+                val a = Random.nextDouble() * Math.PI * 2
+                val r = 3.0 + Random.nextDouble() * 3.0
+                Sim.level.sendParticles(ParticleTypes.ANGRY_VILLAGER, pos.x + Math.cos(a) * r, pos.y + 0.5, pos.z + Math.sin(a) * r, 1, 0.0, 0.0, 0.0, 1.0)
             }
         }
 
@@ -755,8 +765,8 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
             if (flying) {
                 // The party hitting him from the moment he leaves: the red hurt flash every few ticks.
                 if (n >= nextHurt) {
-                    nextHurt = n + 2 + kotlin.random.Random.nextInt(11)
-                    Sim.players().forEach { it.connection.send(net.minecraft.network.protocol.game.ClientboundHurtAnimationPacket(boss.e)) }
+                    nextHurt = n + 2 + Random.nextInt(11)
+                    Sim.players().forEach { it.connection.send(ClientboundHurtAnimationPacket(boss.e)) }
                 }
                 if (!arrived) {
                     val to = CORE_POINT.subtract(pos)
@@ -847,7 +857,7 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
     }
 
     /** A greatsword giant that stays in the peaceful sim world (vanilla deletes monsters there, as it does [SimWither]s). */
-    class SimGiant(level: net.minecraft.world.level.Level) : Giant(EntityTypes.GIANT, level) {
+    class SimGiant(level: Level) : Giant(EntityTypes.GIANT, level) {
         override fun checkDespawn() {}
     }
 
@@ -869,7 +879,7 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
         if (!left) Blocks.get(lever)?.takeIf { it.hasProperty(LeverBlock.POWERED) }?.let { Blocks.set(lever, it.setValue(LeverBlock.POWERED, nowOn)) }
         complete(st, by)
         // The click comes after the credit (chat, title, pling), blocks source, exact pitches.
-        if (!left) Sim.sound(SoundEvents.LEVER_CLICK, 0.3f, if (nowOn) 0.5873016f else 0.4920635f, Vec3.atCenterOf(lever), net.minecraft.sounds.SoundSource.BLOCKS)
+        if (!left) Sim.sound(SoundEvents.LEVER_CLICK, 0.3f, if (nowOn) 0.5873016f else 0.4920635f, Vec3.atCenterOf(lever), SoundSource.BLOCKS)
         if (left && st.done && by == Sim.me) refuseLever(lever, true)
         // The lever's stand renames 1-3 ticks after the pull, not on the 20-tick grid.
         if (st.done) Fight.later(1, "lever stand") { if (Fight.phase === this) st.refreshStands() }
@@ -879,14 +889,14 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
      * "Someone has already activated this lever!", then enderman.teleport (hostile, vol 8, pitch 0) at you. A left click
      * (never seen by the server's use_item_on handler, which resends the block itself) also gets the lever's block back.
      */
-    private fun refuseLever(lever: net.minecraft.core.BlockPos, left: Boolean) {
+    private fun refuseLever(lever: BlockPos, left: Boolean) {
         Sim.chat("§cSomeone has already activated this lever!")
-        Sim.sound(SoundEvents.ENDERMAN_TELEPORT, 8f, 0f, source = net.minecraft.sounds.SoundSource.HOSTILE)
+        Sim.sound(SoundEvents.ENDERMAN_TELEPORT, 8f, 0f, source = SoundSource.HOSTILE)
         if (left) sendBlock(lever)
     }
 
-    private fun sendBlock(pos: net.minecraft.core.BlockPos) {
-        Sim.player?.connection?.send(net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket(Sim.level, pos))
+    private fun sendBlock(pos: BlockPos) {
+        Sim.player?.connection?.send(ClientboundBlockUpdatePacket(Sim.level, pos))
     }
 
     /** A click on a terminal's stand. */

@@ -1,5 +1,7 @@
 package com.engineerclient.dungeonpack.pack.rooms
 
+import com.engineerclient.dungeonpack.pack.Tile
+
 /**
  * Odin's room core (`WorldScan.getRoomCore`, FORMAT-rooms 8.2): the hash of a tile's CENTRE column that Odin looks up in its
  * `rooms.json` to name a room. Pure, so the layout module and its tests can check headless that a pasted room will be
@@ -47,5 +49,5 @@ object OdinCore {
     fun ofVolume(volume: RoomVolume, x: Int, z: Int): Int = ofStates { y -> if (volume.contains(x, y, z)) volume.stateAt(x, y, z) else null }
 
     /** The cores of every tile centre of a canonical room of the given tile cells, in the order of [tiles]. */
-    fun ofRoom(volume: RoomVolume, tiles: List<com.engineerclient.dungeonpack.pack.Tile>): List<Int> = tiles.map { ofVolume(volume, 32 * it.x + 15, 32 * it.z + 15) }
+    fun ofRoom(volume: RoomVolume, tiles: List<Tile>): List<Int> = tiles.map { ofVolume(volume, 32 * it.x + 15, 32 * it.z + 15) }
 }

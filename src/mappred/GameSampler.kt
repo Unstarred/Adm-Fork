@@ -1,5 +1,7 @@
 package com.engineerclient.mappred
 
+import java.util.Arrays
+import java.util.IdentityHashMap
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.pow
@@ -465,7 +467,7 @@ internal class GameSampler(
         for (e in wallA.indices) if (par[wallA[e]].toInt() == wallB[e] || par[wallB[e]].toInt() == wallA[e]) return null
         val nr = sh.size
         val cnt = cntBuf; val id = idBuf
-        java.util.Arrays.fill(cnt, 0, nr, 0); java.util.Arrays.fill(id, 0, nr, -1)
+        Arrays.fill(cnt, 0, nr, 0); Arrays.fill(id, 0, nr, -1)
         // the main grid's tiles only (off it, and in the puzzle column, the owner is -1)
         for (t in 0 until n) { val o = wo[t].toInt(); if (o >= 0) cnt[o]++ }
         // the discovered rooms are the sample's rooms with the same tiles; the others keep their order after them (the
@@ -689,7 +691,7 @@ internal class GameSampler(
         }
         var bw = 0.0
         val sink = store?.takeIf { it.size < storeLimit }
-        val wholes = if (sink != null) java.util.IdentityHashMap<IntArray, Whole>() else null
+        val wholes = if (sink != null) IdentityHashMap<IntArray, Whole>() else null
         for (pt in ps) {
             if (!(pt.w > 0) || mainTiles.any { !pt.inT[it] }) continue
             val fin = finish(pt) ?: continue
@@ -704,7 +706,7 @@ internal class GameSampler(
     }
 
     /** A kept particle as a [Stored] sample; the particles of one ancestor share their layout. */
-    private fun keep(pt: Particle, fin: Finish, wholes: java.util.IdentityHashMap<IntArray, Whole>): Stored {
+    private fun keep(pt: Particle, fin: Finish, wholes: IdentityHashMap<IntArray, Whole>): Stored {
         val whole = wholes.getOrPut(pt.owner) { Whole(ByteArray(n) { pt.owner[it].toByte() }, ByteArray(pt.shape.size) { pt.shape[it].toByte() }) }
         val s = Stored(whole, ByteArray(n) { pt.parent[it].toByte() }, pt.w, srcId, batchNo)
         if (fin.names != null) { s.names = true; s.totals = view.secretTotals }

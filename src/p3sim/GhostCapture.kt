@@ -3,6 +3,7 @@ package com.engineerclient.p3sim
 import com.engineerclient.EngineerClient
 import net.minecraft.client.Minecraft
 import java.io.File
+import java.util.Locale
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
@@ -154,7 +155,7 @@ object GhostCapture {
         }
     }
 
-    private fun secs(n: Int) = "%.2fs".format(java.util.Locale.ROOT, n / 20.0)
+    private fun secs(n: Int) = "%.2fs".format(Locale.ROOT, n / 20.0)
 
     /** What you hold: the sim item's id (a bot shows it, [Party.setHeld]), "" for anything else. */
     fun heldKey(id: String?): String = id?.takeIf { it != "SKYBLOCK_MENU" } ?: ""

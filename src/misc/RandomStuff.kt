@@ -1,10 +1,12 @@
 package com.engineerclient.misc
 
+import com.engineerclient.chat.ChatHider
 import com.mojang.blaze3d.platform.InputConstants
+import com.odtheking.odin.clickgui.ClickGUI
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
+import com.odtheking.odin.clickgui.settings.impl.ActionSetting
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.NumberSetting
-import com.odtheking.odin.clickgui.settings.impl.ActionSetting
 import com.odtheking.odin.clickgui.settings.impl.SelectorSetting
 import com.odtheking.odin.events.LevelEvent
 import com.odtheking.odin.events.MessageEvent
@@ -19,19 +21,26 @@ import com.odtheking.odin.utils.skyblock.LocationUtils
 import com.odtheking.odin.utils.skyblock.dungeon.terminals.TerminalTypes
 import com.odtheking.odin.utils.skyblock.dungeon.terminals.TerminalUtils
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents
-import net.minecraft.client.gui.screens.ConnectScreen
-import net.minecraft.client.gui.screens.Screen
-import net.minecraft.client.gui.screens.TitleScreen
+import net.fabricmc.fabric.api.client.screen.v1.Screens
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.FriendsButton
 import net.minecraft.client.gui.components.PlainTextButton
-import net.fabricmc.fabric.api.client.screen.v1.Screens
-import net.minecraft.network.chat.contents.TranslatableContents
+import net.minecraft.client.gui.screens.ConnectScreen
+import net.minecraft.client.gui.screens.Screen
+import net.minecraft.client.gui.screens.TitleScreen
 import net.minecraft.client.multiplayer.ServerData
 import net.minecraft.client.multiplayer.resolver.ServerAddress
+import net.minecraft.network.Connection
+import net.minecraft.network.chat.contents.TranslatableContents
+import net.minecraft.network.protocol.game.ClientboundRespawnPacket
+import net.minecraft.world.entity.projectile.arrow.AbstractArrow
 import net.minecraft.world.inventory.Slot
 import net.minecraft.world.item.ItemDisplayContext
+import kotlin.math.abs
+import kotlin.math.round
+import kotlin.math.sqrt
 
 /**
  * Grab bag of small independent toggles that don't warrant their own module.
@@ -123,7 +132,7 @@ object RandomStuff : Module(
     private val hideSbCleared by BooleanSetting("Scoreboard: Hide Cleared %", false, desc = "Hides the dungeon's Cleared: #% (#) line.").withDependency { hideSbLines }
     private val cleanChat by BooleanSetting("Clean Chat", true, desc = "Hides the chat lines its rules mark Block (built in, or config/adm/chat-hider.json). Other mods still see every line.")
     private val logHidden by BooleanSetting("Log Hidden Lines", false, desc = "Writes every hidden line and the rule that hid it to the EC session log, for checking a rule.").withDependency { cleanChat }
-    private val reloadChatRules by ActionSetting("Reload Rules", desc = "Re-reads config/adm/chat-hider.json (or the built-in rules if that file is absent).") { com.engineerclient.chat.ChatHider.reload() }.withDependency { cleanChat }
+    private val reloadChatRules by ActionSetting("Reload Rules", desc = "Re-reads config/adm/chat-hider.json (or the built-in rules if that file is absent).") { ChatHider.reload() }.withDependency { cleanChat }
 
     private val partyLeaveRegex = Regex("^(?:\\[[^]]*?] ?)?\\w{1,16} has left the party\\.$")
     private const val BLESS_COOLDOWN_MS = 10_000L
@@ -132,14 +141,14 @@ object RandomStuff : Module(
     // Auto join state, per connection.
     private var pendingSkyblockJoin = false
     /** The connection Auto Join Skyblock last started on: a JOIN on it again is a server switch. */
-    private var skyblockConnection: net.minecraft.network.Connection? = null
+    private var skyblockConnection: Connection? = null
     private var ticksUntilSkyblock = -1
     private var attempts = 0
 
     /** The title screen's Join Hypixel button: connects to Hypixel (Auto Join Skyblock then takes it to Skyblock). */
-    fun joinHypixel(screen: net.minecraft.client.gui.screens.Screen) = connect(screen)
+    fun joinHypixel(screen: Screen) = connect(screen)
 
-    private fun connect(screen: net.minecraft.client.gui.screens.Screen) {
+    private fun connect(screen: Screen) {
         ConnectScreen.startConnecting(
             screen,
             mc,
@@ -179,9 +188,9 @@ object RandomStuff : Module(
      * glyph of every frame, menu or not, so the screen comes first and the scale (a square root) only in the menu.
      */
     fun smoothsGuiText(m00: Float, m01: Float): Boolean {
-        if (mc.gui.screen() !is com.odtheking.odin.clickgui.ClickGUI) return false
-        val px = kotlin.math.sqrt(m00 * m00 + m01 * m01) * mc.window.guiScale
-        return kotlin.math.abs(px - kotlin.math.round(px)) > 0.01f
+        if (mc.gui.screen() !is ClickGUI) return false
+        val px = sqrt(m00 * m00 + m01 * m01) * mc.window.guiScale
+        return abs(px - round(px)) > 0.01f
     }
 
     /** Mod Menu's mod list over [parent], or null without Mod Menu (the Esc menu's Options then stays full width). */
@@ -247,7 +256,7 @@ object RandomStuff : Module(
     fun hidesTerminalNumbers(): Boolean = enabled && hideTermNumbers
 
     /** [arrow] is one the local player shot, still in flight ([inGround] false), within 5 blocks of them. */
-    fun hidesOwnArrow(arrow: net.minecraft.world.entity.projectile.arrow.AbstractArrow, inGround: Boolean): Boolean {
+    fun hidesOwnArrow(arrow: AbstractArrow, inGround: Boolean): Boolean {
         if (!enabled || !hideOwnArrows || inGround) return false
         val me = mc.player ?: return false
         return arrow.owner === me && arrow.distanceToSqr(me) < 25.0
@@ -327,7 +336,7 @@ object RandomStuff : Module(
         // Auto Join Skyblock: a new connection to Hypixel starts the countdown to the first /skyblock. Hypixel
         // moves you to Skyblock through the configuration phase (its resource pack comes then), which fires JOIN
         // again on the same connection: that is the transfer, not a new connection, so it only waits for it.
-        net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN.register { handler, _, client ->
+        ClientPlayConnectionEvents.JOIN.register { handler, _, client ->
             val ip = client.currentServer?.ip?.lowercase().orEmpty()
             // Any new connection drops what the last one left pending: a countdown cut short by a
             // disconnect must not carry on into the next world, Hypixel or not.
@@ -349,7 +358,7 @@ object RandomStuff : Module(
 
         // A server switch after a /skyblock is the transfer under way. Lobby to Skyblock is the same dimension,
         // so no new world (LevelEvent.Load) comes: the respawn packet does.
-        onReceive<net.minecraft.network.protocol.game.ClientboundRespawnPacket> {
+        onReceive<ClientboundRespawnPacket> {
             if (!enabled || !autoJoinSkyblock || !pendingSkyblockJoin || attempts == 0) return@onReceive
             ticksUntilSkyblock = TRANSFER_TICKS
         }

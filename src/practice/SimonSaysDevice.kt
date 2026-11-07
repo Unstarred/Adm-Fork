@@ -1,5 +1,7 @@
 package com.engineerclient.practice
 
+import java.util.Random
+
 /**
  * Simon Says (F7 P3's first device) as Hypixel runs it since the October 2026 update, as measured from recorded
  * runs. One device, shared by SS Practice and the P3 Sim: each draws its lamps and buttons its own way ([Io]) and
@@ -87,7 +89,7 @@ class SimonSaysDevice(private val io: Io) {
 
     private class Last(val tick: Long, val ms: Double)
     private val lastPress = HashMap<String, Last>()
-    private val random = java.util.Random()
+    private val random = Random()
 
     /** The cell to press next, while a round is being put in. */
     fun due(): Int? = if (accepting && next < round) sequence[next] else null

@@ -1,15 +1,33 @@
 package com.engineerclient.p3sim
 
 import com.engineerclient.index
+import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass
 import net.minecraft.core.component.DataComponents
+import net.minecraft.core.particles.ParticleTypes
 import net.minecraft.nbt.CompoundTag
 import net.minecraft.network.chat.Component
+import net.minecraft.network.protocol.game.ClientboundSetHeldSlotPacket
+import net.minecraft.resources.Identifier
 import net.minecraft.server.level.ServerPlayer
+import net.minecraft.sounds.SoundEvent
 import net.minecraft.sounds.SoundEvents
+import net.minecraft.sounds.SoundSource
+import net.minecraft.world.SimpleContainer
+import net.minecraft.world.SimpleMenuProvider
+import net.minecraft.world.effect.MobEffectInstance
+import net.minecraft.world.effect.MobEffects
 import net.minecraft.world.entity.EquipmentSlot
+import net.minecraft.world.entity.player.Inventory
+import net.minecraft.world.entity.player.Player
+import net.minecraft.world.inventory.ChestMenu
+import net.minecraft.world.inventory.ContainerInput
+import net.minecraft.world.inventory.MenuType
 import net.minecraft.world.item.ItemStack
+import net.minecraft.world.item.Items
 import net.minecraft.world.item.component.CustomData
+import net.minecraft.world.item.component.ItemAttributeModifiers
 import net.minecraft.world.item.component.ItemLore
+import kotlin.random.Random
 
 /**
  * The three invincibility items, as Hypixel procs them on a hit that would kill you: Spirit Mask
@@ -77,7 +95,7 @@ object Masks {
 
     /** Hypixel's /stats window (as recorded in ADR runs); click a mask in your inventory below to wear it. */
     fun openStats(p: ServerPlayer) {
-        p.openMenu(net.minecraft.world.SimpleMenuProvider({ id, inv, _ -> StatsMenu(id, inv, p) }, Component.literal("Stats & Equipment")))
+        p.openMenu(SimpleMenuProvider({ id, inv, _ -> StatsMenu(id, inv, p) }, Component.literal("Stats & Equipment")))
     }
 
     // Equipment as in the recordings (the heads' skins; the armour's dyes).
@@ -95,8 +113,8 @@ object Masks {
      * Active Effects, Achievements at 49-51. Your inventory below: click a mask there to wear it
      * (the one you had on goes where it was).
      */
-    class StatsMenu(id: Int, inv: net.minecraft.world.entity.player.Inventory, private val sp: ServerPlayer) :
-        net.minecraft.world.inventory.ChestMenu(net.minecraft.world.inventory.MenuType.GENERIC_9x6, id, inv, net.minecraft.world.SimpleContainer(54), 6) {
+    class StatsMenu(id: Int, inv: Inventory, private val sp: ServerPlayer) :
+        ChestMenu(MenuType.GENERIC_9x6, id, inv, SimpleContainer(54), 6) {
         /** A recorded /stats window's names and lore, by slot: equipment heads, stat categories, the pet, the buttons. */
         private val REC_NAME = mapOf(10 to "§6\ue068 Blooming Bone Necklace §6\u272a\u272a\u272a\u272a\u272a", 19 to "§d\ue068 Blooming Shadow Assassin Cloak §6\u272a\u272a\u272a\u272a\u272a", 28 to "§6Blooming Implosion Belt", 37 to "§6Blooming Soulweaver Gloves §6\u272a\u272a\u272a\u272a\u272a", 47 to "§7[Lvl 100] §6Black Cat§5 \u2726")
         private val REC_LORE = mapOf(
@@ -119,14 +137,14 @@ object Masks {
 
         /** [s] with the recorded lore for [slot] (if there is one); the stat icons lose their vanilla attribute lines as on main. */
         private fun rec(slot: Int, s: ItemStack): ItemStack {
-            REC_LORE[slot]?.let { l -> s.set(DataComponents.LORE, net.minecraft.world.item.component.ItemLore(l.map { Component.literal(it).withStyle { st -> st.withItalic(false) } })) }
-            if (slot in 14..16) s.set(DataComponents.ATTRIBUTE_MODIFIERS, net.minecraft.world.item.component.ItemAttributeModifiers.EMPTY)
+            REC_LORE[slot]?.let { l -> s.set(DataComponents.LORE, ItemLore(l.map { Component.literal(it).withStyle { st -> st.withItalic(false) } })) }
+            if (slot in 14..16) s.set(DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY)
             return s
         }
 
         /** What you wear in [eq], or main's grey "Empty ... Slot" pane. */
         private fun worn(eq: EquipmentSlot, empty: String): ItemStack =
-            sp.getItemBySlot(eq).copy().takeUnless { it.isEmpty } ?: Terminals.named(net.minecraft.world.item.Items.STAINED_GLASS_PANE.gray(), "§7Empty $empty Slot")
+            sp.getItemBySlot(eq).copy().takeUnless { it.isEmpty } ?: Terminals.named(Items.STAINED_GLASS_PANE.gray(), "§7Empty $empty Slot")
 
         init { draw() }
 
@@ -143,21 +161,21 @@ object Masks {
             c.setItem(20, worn(EquipmentSlot.CHEST, "Chestplate"))
             c.setItem(29, worn(EquipmentSlot.LEGS, "Leggings"))
             c.setItem(38, worn(EquipmentSlot.FEET, "Boots"))
-            c.setItem(14, rec(14, Terminals.named(net.minecraft.world.item.Items.STONE_SWORD, "§cCombat Stats")))
-            c.setItem(15, rec(15, Terminals.named(net.minecraft.world.item.Items.STONE_PICKAXE, "§6Mining Stats")))
-            c.setItem(16, rec(16, Terminals.named(net.minecraft.world.item.Items.GOLDEN_HOE, "§aFarming Stats")))
-            c.setItem(23, rec(23, Terminals.named(net.minecraft.world.item.Items.JUNGLE_SAPLING, "§2Foraging Stats")))
-            c.setItem(24, rec(24, Terminals.named(net.minecraft.world.item.Items.FISHING_ROD, "§bFishing Stats")))
-            c.setItem(25, rec(25, Terminals.named(net.minecraft.world.item.Items.CLOCK, "§dMiscellaneous Stats")))
-            c.setItem(32, rec(32, Terminals.named(net.minecraft.world.item.Items.LEAD, "§eHunting Stats")))
-            c.setItem(34, rec(34, Terminals.named(net.minecraft.world.item.Items.BOOK, "§3Wisdom Stats")))
+            c.setItem(14, rec(14, Terminals.named(Items.STONE_SWORD, "§cCombat Stats")))
+            c.setItem(15, rec(15, Terminals.named(Items.STONE_PICKAXE, "§6Mining Stats")))
+            c.setItem(16, rec(16, Terminals.named(Items.GOLDEN_HOE, "§aFarming Stats")))
+            c.setItem(23, rec(23, Terminals.named(Items.JUNGLE_SAPLING, "§2Foraging Stats")))
+            c.setItem(24, rec(24, Terminals.named(Items.FISHING_ROD, "§bFishing Stats")))
+            c.setItem(25, rec(25, Terminals.named(Items.CLOCK, "§dMiscellaneous Stats")))
+            c.setItem(32, rec(32, Terminals.named(Items.LEAD, "§eHunting Stats")))
+            c.setItem(34, rec(34, Terminals.named(Items.BOOK, "§3Wisdom Stats")))
             c.setItem(47, if (Sim.asPlayer(sp) { P3Sim.phoenix }) SimItems.head(PHOENIX_TEX, "§7[Lvl 76] §6Phoenix") else rec(47, SimItems.head(BLACK_CAT_TEX, REC_NAME.getValue(47))))
-            c.setItem(49, Terminals.named(net.minecraft.world.item.Items.BARRIER, "§cClose"))
-            c.setItem(50, rec(50, Terminals.named(net.minecraft.world.item.Items.POTION, "§aActive Effects")))
-            c.setItem(51, rec(51, Terminals.named(net.minecraft.world.item.Items.DIAMOND, "§aSkyBlock Achievements")))
+            c.setItem(49, Terminals.named(Items.BARRIER, "§cClose"))
+            c.setItem(50, rec(50, Terminals.named(Items.POTION, "§aActive Effects")))
+            c.setItem(51, rec(51, Terminals.named(Items.DIAMOND, "§aSkyBlock Achievements")))
         }
 
-        override fun clicked(slot: Int, button: Int, input: net.minecraft.world.inventory.ContainerInput, p: net.minecraft.world.entity.player.Player) {
+        override fun clicked(slot: Int, button: Int, input: ContainerInput, p: Player) {
             if (slot == 49) { sp.closeContainer(); return }
             // Below the window: your inventory (54-80 = inventory 9-35, 81-89 = the hotbar).
             val index = when (slot) { in 54..80 -> slot - 45; in 81..89 -> slot - 81; else -> -1 }
@@ -177,8 +195,8 @@ object Masks {
             sp.inventoryMenu.broadcastChanges()
         }
 
-        override fun quickMoveStack(p: net.minecraft.world.entity.player.Player, i: Int): ItemStack = ItemStack.EMPTY
-        override fun stillValid(p: net.minecraft.world.entity.player.Player) = true
+        override fun quickMoveStack(p: Player, i: Int): ItemStack = ItemStack.EMPTY
+        override fun stillValid(p: Player) = true
     }
 
     // ------------------------------------------------------------------ the pet rod
@@ -188,7 +206,7 @@ object Masks {
         P3Sim.setPhoenix(!P3Sim.phoenix)
         // The speed update lands 2-3 ticks after the Autopet chat (about evenly); the swap itself is silent
         // bar one vol-0 splash at (200,300,400).
-        Fight.later(2 + kotlin.random.Random.nextInt(2), "pet speed") { Fight.applySpeed(p) }
+        Fight.later(2 + Random.nextInt(2), "pet speed") { Fight.applySpeed(p) }
         // The splash goes to you alone (SimItems.castRod); then main's player_abilities with the new pet's walking speed,
         // ahead of the movement_speed attribute that follows 2-3 ticks on.
         p.abilities.setWalkingSpeed(Fight.speedStat(p).coerceAtLeast(100) / 1000f)
@@ -203,7 +221,7 @@ object Masks {
     private var safeUntil by perPlayer { 0 }
 
     /** Phoenix's scream as main names it: an unregistered (direct) sound event. */
-    private val PHOENIX_SCREAM = net.minecraft.sounds.SoundEvent.createVariableRangeEvent(net.minecraft.resources.Identifier.parse("minecraft:mob.ghast.affectionate_scream"))
+    private val PHOENIX_SCREAM = SoundEvent.createVariableRangeEvent(Identifier.parse("minecraft:mob.ghast.affectionate_scream"))
 
     /** Everyone's masks ready again, nobody a ghost (every start). */
     fun reset() {
@@ -221,7 +239,7 @@ object Masks {
     private fun resetOne() {
         items.forEach { it.readyAt = 0 }; safeUntil = 0
         reviveGen++
-        if (ghost) { ghost = false; saved = null; Sim.player?.let { p -> restoreArmor(p); p.removeEffect(net.minecraft.world.effect.MobEffects.INVISIBILITY); p.abilities.flying = false; p.abilities.mayfly = false; p.onUpdateAbilities() } }
+        if (ghost) { ghost = false; saved = null; Sim.player?.let { p -> restoreArmor(p); p.removeEffect(MobEffects.INVISIBILITY); p.abilities.flying = false; p.abilities.mayfly = false; p.onUpdateAbilities() } }
     }
 
     private fun worn(): String? = Sim.player?.let { SimItems.idOf(it.getItemBySlot(EquipmentSlot.HEAD))?.removePrefix("STARRED_") }
@@ -256,21 +274,21 @@ object Masks {
         if (item.id == "PHOENIX" && !P3Sim.phoenix) { P3Sim.setPhoenix(true); Fight.applySpeed(p) }
         safeUntil = now + SAFE
         // Proc particles as recorded: explosion x3 at your feet, Phoenix adds lava x18.
-        Sim.level.sendParticles(net.minecraft.core.particles.ParticleTypes.EXPLOSION, p.x, p.y, p.z, 3, 1.0, 1.0, 1.0, 0.0)
-        if (item.id == "PHOENIX") Sim.level.sendParticles(net.minecraft.core.particles.ParticleTypes.LAVA, p.x, p.y, p.z, 18, 0.1, 0.1, 0.1, 0.08)
+        Sim.level.sendParticles(ParticleTypes.EXPLOSION, p.x, p.y, p.z, 3, 1.0, 1.0, 1.0, 0.0)
+        if (item.id == "PHOENIX") Sim.level.sendParticles(ParticleTypes.LAVA, p.x, p.y, p.z, 18, 0.1, 0.1, 0.1, 0.08)
         // Proc order as recorded: masks eat + cure then the proc chat; Phoenix chat, then
         // extinguish, two infects and the ghast scream; then Goldor's line. No enderman sound on Spirit.
         if (item.id == "PHOENIX") {
             Sim.chat(item.line)
-            Sim.sound(SoundEvents.LAVA_EXTINGUISH, 1f, 1.492f, null, net.minecraft.sounds.SoundSource.BLOCKS)
-            Sim.sound(SoundEvents.ZOMBIE_INFECT, 1f, 1.19f, null, net.minecraft.sounds.SoundSource.HOSTILE)
-            Sim.sound(SoundEvents.ZOMBIE_INFECT, 1f, 1.19f, null, net.minecraft.sounds.SoundSource.HOSTILE)
+            Sim.sound(SoundEvents.LAVA_EXTINGUISH, 1f, 1.492f, null, SoundSource.BLOCKS)
+            Sim.sound(SoundEvents.ZOMBIE_INFECT, 1f, 1.19f, null, SoundSource.HOSTILE)
+            Sim.sound(SoundEvents.ZOMBIE_INFECT, 1f, 1.19f, null, SoundSource.HOSTILE)
             // Main sends the legacy id mob.ghast.affectionate_scream (no such sound in 26.1.2's assets, so the client
             // plays nothing): sent as the same direct, unregistered sound event.
-            Sim.sound(PHOENIX_SCREAM, 1f, 1.41f + kotlin.random.Random.nextFloat() * 0.15f)
+            Sim.sound(PHOENIX_SCREAM, 1f, 1.41f + Random.nextFloat() * 0.15f)
         } else {
-            Sim.sound(SoundEvents.GENERIC_EAT, 0.9f, 0.59f, null, net.minecraft.sounds.SoundSource.PLAYERS)
-            Sim.sound(SoundEvents.ZOMBIE_VILLAGER_CURE, 1f, 2f, null, net.minecraft.sounds.SoundSource.HOSTILE)
+            Sim.sound(SoundEvents.GENERIC_EAT, 0.9f, 0.59f, null, SoundSource.PLAYERS)
+            Sim.sound(SoundEvents.ZOMBIE_VILLAGER_CURE, 1f, 2f, null, SoundSource.HOSTILE)
             Sim.chat(item.line)
         }
         return true
@@ -286,9 +304,9 @@ object Masks {
         val name = p.gameProfile.name
         Sim.asPlayer(p) { Sim.chatOthers(when { crushed -> "§c ☠ §r§7$name was crushed and became a ghost."; by == null -> "§c ☠ §r§7$name died and became a ghost."; else -> "§c ☠ §r§7$name was killed by $by and became a ghost." }) }
         // The Revive Stone line shows in about 71% of deaths on Hypixel; it changes nothing.
-        if (kotlin.random.Random.nextInt(100) < 71) Sim.chat("§aYour Revive Stone revived you and broke!")
+        if (Random.nextInt(100) < 71) Sim.chat("§aYour Revive Stone revived you and broke!")
         becomeGhost(p, reviveIn)
-        Sim.sound(SoundEvents.GENERIC_HURT, 1f, 0.889f, null, net.minecraft.sounds.SoundSource.NEUTRAL)
+        Sim.sound(SoundEvents.GENERIC_HURT, 1f, 0.889f, null, SoundSource.NEUTRAL)
     }
 
     /**
@@ -321,10 +339,10 @@ object Masks {
         private set
     private var saved: List<ItemStack>? by perPlayer { null }
     private var savedSlot by perPlayer { 0 }
-    private var savedArmor: Map<net.minecraft.world.entity.EquipmentSlot, ItemStack>? by perPlayer { null }
+    private var savedArmor: Map<EquipmentSlot, ItemStack>? by perPlayer { null }
     private var reviveGen by perPlayer { 0 }
 
-    private val ARMOR_SLOTS = listOf(net.minecraft.world.entity.EquipmentSlot.HEAD, net.minecraft.world.entity.EquipmentSlot.CHEST, net.minecraft.world.entity.EquipmentSlot.LEGS, net.minecraft.world.entity.EquipmentSlot.FEET)
+    private val ARMOR_SLOTS = listOf(EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET)
 
     /** Puts the armour you died in back (the ghost's armour slots are empty). */
     private fun restoreArmor(p: ServerPlayer) {
@@ -344,18 +362,18 @@ object Masks {
         for (i in 0 until 36) if (SimItems.idOf(inv.getItem(i)) != "HYPERION") inv.setItem(i, ItemStack.EMPTY)
         // The ghost kit as recorded: Haunt in hotbar 1, the class's two abilities in 4 and 6, the Magical Map in 9, Ghost Arrows
         // in the first inventory slot. The Haunt opens the "Teleport to Player" menu; the abilities are inert here. The selected slot stays.
-        inv.setItem(0, SimItems.ghostStack(net.minecraft.world.item.Items.PLAYER_HEAD, "HAUNT_ABILITY", "§aHaunt"))
+        inv.setItem(0, SimItems.ghostStack(Items.PLAYER_HEAD, "HAUNT_ABILITY", "§aHaunt"))
         val (a3, a5) = when (P3Sim.myClass) {
-            com.odtheking.odin.utils.skyblock.dungeon.DungeonClass.MAGE -> SimItems.ghostStack(net.minecraft.world.item.Items.BRICKS, "MAGE_DUNGEON_ABILITY_1", "§aPop-up Wall") to SimItems.ghostStack(net.minecraft.world.item.Items.BLAZE_POWDER, "MAGE_DUNGEON_ABILITY_3", "§aFireball")
-            com.odtheking.odin.utils.skyblock.dungeon.DungeonClass.TANK -> SimItems.ghostStack(net.minecraft.world.item.Items.PLAYER_HEAD, "TANK_DUNGEON_ABILITY_1", "§aStun Potion") to SimItems.ghostStack(net.minecraft.world.item.Items.PLAYER_HEAD, "TANK_DUNGEON_ABILITY_2", "§aAbsorption Potion")
+            DungeonClass.MAGE -> SimItems.ghostStack(Items.BRICKS, "MAGE_DUNGEON_ABILITY_1", "§aPop-up Wall") to SimItems.ghostStack(Items.BLAZE_POWDER, "MAGE_DUNGEON_ABILITY_3", "§aFireball")
+            DungeonClass.TANK -> SimItems.ghostStack(Items.PLAYER_HEAD, "TANK_DUNGEON_ABILITY_1", "§aStun Potion") to SimItems.ghostStack(Items.PLAYER_HEAD, "TANK_DUNGEON_ABILITY_2", "§aAbsorption Potion")
             // Berserk is the recorded Warrior kit; Archer and Healer were never recorded, so they get it too.
-            else -> SimItems.ghostStack(net.minecraft.world.item.Items.PLAYER_HEAD, "WARRIOR_DUNGEON_ABILITY_1", "§aStrength Potion") to SimItems.ghostStack(net.minecraft.world.item.Items.IRON_AXE, "GHOST_THROWING_AXE", "§aGhost Axe")
+            else -> SimItems.ghostStack(Items.PLAYER_HEAD, "WARRIOR_DUNGEON_ABILITY_1", "§aStrength Potion") to SimItems.ghostStack(Items.IRON_AXE, "GHOST_THROWING_AXE", "§aGhost Axe")
         }
         inv.setItem(3, a3)
         inv.setItem(5, a5)
-        inv.setItem(8, SimItems.ghostStack(net.minecraft.world.item.Items.FILLED_MAP, "MAP", "§aMagical Map"))
-        inv.setItem(9, SimItems.ghostStack(net.minecraft.world.item.Items.ARROW, null, "§fGhost Arrow", 10))
-        p.addEffect(net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.INVISIBILITY, -1, 0, false, false, false))
+        inv.setItem(8, SimItems.ghostStack(Items.FILLED_MAP, "MAP", "§aMagical Map"))
+        inv.setItem(9, SimItems.ghostStack(Items.ARROW, null, "§fGhost Arrow", 10))
+        p.addEffect(MobEffectInstance(MobEffects.INVISIBILITY, -1, 0, false, false, false))
         p.abilities.mayfly = true
         p.abilities.flying = true
         p.onUpdateAbilities()
@@ -363,7 +381,7 @@ object Masks {
         p.inventoryMenu.broadcastChanges()
         Sim.title("§eYou became a ghost!", "§7Hopefully your teammates will be able to revive you!", 0, 100, 5)
         // Revived 119-137 ticks on (median ~124); the countdown titles run 5..1 from 100 ticks before.
-        val delay = reviveIn ?: if (kotlin.random.Random.nextInt(10) < 6) kotlin.random.Random.nextInt(120, 126) else kotlin.random.Random.nextInt(119, 138)
+        val delay = reviveIn ?: if (Random.nextInt(10) < 6) Random.nextInt(120, 126) else Random.nextInt(119, 138)
         val gen = ++reviveGen
         Corpse.spawn(p, delay)
         // The corpse wears what you had on; the ghost's own armour slots are empty.
@@ -390,7 +408,7 @@ object Masks {
     /** Back to normal: abilities, visibility and the inventory you had. */
     private fun endGhost(p: ServerPlayer) {
         ghost = false
-        p.removeEffect(net.minecraft.world.effect.MobEffects.INVISIBILITY)
+        p.removeEffect(MobEffects.INVISIBILITY)
         p.abilities.flying = false
         p.abilities.mayfly = false
         p.onUpdateAbilities()
@@ -398,7 +416,7 @@ object Masks {
         restoreArmor(p)
         saved = null
         p.inventory.selectedSlot = savedSlot
-        p.connection.send(net.minecraft.network.protocol.game.ClientboundSetHeldSlotPacket(savedSlot))
+        p.connection.send(ClientboundSetHeldSlotPacket(savedSlot))
         p.containerMenu.broadcastChanges()
         p.inventoryMenu.broadcastChanges()
     }

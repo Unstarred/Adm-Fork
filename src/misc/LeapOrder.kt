@@ -3,8 +3,15 @@ package com.engineerclient.misc
 import com.engineerclient.EngineerClient
 import com.engineerclient.EngineerClient.mc
 import com.engineerclient.adr.PartyTracker
+import com.mojang.blaze3d.platform.InputConstants
+import com.mojang.brigadier.Command
 import com.mojang.brigadier.arguments.StringArgumentType
+import com.mojang.brigadier.tree.CommandNode
 import com.odtheking.odin.clickgui.settings.impl.SelectorSetting
+import com.odtheking.odin.events.ScreenEvent
+import com.odtheking.odin.events.core.EventBus
+import com.odtheking.odin.events.core.EventPriority
+import com.odtheking.odin.events.core.on
 import com.odtheking.odin.features.ModuleManager
 import com.odtheking.odin.features.impl.dungeon.LeapMenu
 import com.odtheking.odin.utils.Color
@@ -13,17 +20,13 @@ import com.odtheking.odin.utils.render.roundedRectOutlined
 import com.odtheking.odin.utils.render.text
 import com.odtheking.odin.utils.skyblock.PartyUtils
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass
-import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonListener
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonPlayer
-import com.odtheking.odin.events.ScreenEvent
-import com.odtheking.odin.events.core.EventBus
-import com.odtheking.odin.events.core.EventPriority
-import com.odtheking.odin.events.core.on
+import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback
-import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands.argument
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal
+import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
 import net.fabricmc.fabric.api.event.Event
 import net.fabricmc.loader.api.FabricLoader
@@ -31,16 +34,19 @@ import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.PlayerFaceExtractor
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.input.MouseButtonEvent
+import net.minecraft.client.resources.DefaultPlayerSkin
 import net.minecraft.network.chat.Component
 import net.minecraft.resources.Identifier
+import net.minecraft.sounds.SoundEvents
+import net.minecraft.util.Util
+import net.minecraft.world.entity.player.PlayerSkin
+import org.lwjgl.sdl.SDLMouse
+import java.nio.FloatBuffer
 import java.nio.file.Files
 import java.util.Locale
 import java.util.Optional
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
-import net.minecraft.client.resources.DefaultPlayerSkin
-import net.minecraft.util.Util
-import net.minecraft.world.entity.player.PlayerSkin
 
 /**
  * Odin's custom leap order (`/od leaporder a b c d`, Leap Menu sorting Custom), kept across restarts: Odin holds
@@ -114,7 +120,7 @@ object LeapOrder {
                     dispatcher.root.getChild("odin")?.getChild("leaporder"),
                     dispatcher.root.getChild("od")?.let { it.redirect ?: it }?.getChild("leaporder"),
                 ).distinct()
-                for (node in nodes) COMMAND.set(node, com.mojang.brigadier.Command<FabricClientCommandSource> { open(); 1 })
+                for (node in nodes) COMMAND.set(node, Command<FabricClientCommandSource> { open(); 1 })
                 if (nodes.isEmpty()) EngineerClient.logger.info("[ec] leap order: Odin has no /od leaporder here, /lo only")
             }
             dispatcher.register(literal("lo").executes { open(); 1 }
@@ -153,7 +159,7 @@ object LeapOrder {
     private val looking = ConcurrentHashMap.newKeySet<String>()
 
     /** Brigadier's node command (no setter: Odin's node is given the bare run in place). */
-    private val COMMAND by lazy { com.mojang.brigadier.tree.CommandNode::class.java.getDeclaredField("command").apply { isAccessible = true } }
+    private val COMMAND by lazy { CommandNode::class.java.getDeclaredField("command").apply { isAccessible = true } }
 
     private fun open() = mc.schedule { mc.gui.setScreen(LeapOrderScreen()) }
 
@@ -346,7 +352,7 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
 
     override fun isPauseScreen() = false
 
-    private val scale get() = com.engineerclient.misc.OdinLeapScale.get()
+    private val scale get() = OdinLeapScale.get()
 
     /** Spot [i]'s box on screen: x0, y0, x1, y1. */
     private fun box(i: Int): IntArray {
@@ -480,13 +486,13 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
         val cb = checkbox()
         if (isLeft(event) && event.x() >= cb[0] && event.x() < cb[2] && event.y() >= cb[1] && event.y() < cb[3]) {
             LeapOrder.setCustom(!LeapOrder.custom)
-            mc.player?.playSound(net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(), 0.4f, 1.2f)
+            mc.player?.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 0.4f, 1.2f)
             return true
         }
         val rb = recheckButton()
         if (isLeft(event) && event.x() >= rb[0] && event.x() < rb[2] && event.y() >= rb[1] && event.y() < rb[3]) {
             EngineerClient.safely("leap order recheck") { PartyTracker.recheck() }
-            mc.player?.playSound(net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(), 0.4f, 1.2f)
+            mc.player?.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 0.4f, 1.2f)
             return true
         }
         val i = spotAt(event.x(), event.y())
@@ -525,17 +531,17 @@ class LeapOrderScreen : Screen(Component.literal("Leap Order")) {
             LeapOrder.set(order)
             // Moving anyone flicks Custom on, even back to the order it was.
             LeapOrder.setCustom(true)
-            mc.player?.playSound(net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(), 0.4f, 1.2f)
+            mc.player?.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 0.4f, 1.2f)
         }
         dragging = -1
     }
 
     /** A left click: 26.3 numbers the buttons as SDL does (left 1, middle 2, right 3), not GLFW's (left 0). */
-    private fun isLeft(event: MouseButtonEvent): Boolean = event.button() == com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT
+    private fun isLeft(event: MouseButtonEvent): Boolean = event.button() == InputConstants.MOUSE_BUTTON_LEFT
 
     /** The left button is still held (SDL), or null when that can't be told. */
     private fun leftHeld(): Boolean? = runCatching {
-        (org.lwjgl.sdl.SDLMouse.SDL_GetMouseState(null as java.nio.FloatBuffer?, null as java.nio.FloatBuffer?) and 1) != 0
+        (SDLMouse.SDL_GetMouseState(null as FloatBuffer?, null as FloatBuffer?) and 1) != 0
     }.getOrNull()
 
     private companion object {

@@ -1,6 +1,8 @@
 package com.engineerclient.mixin.odin;
 
 import com.engineerclient.misc.OdinMasksUsed;
+import com.odtheking.odin.clickgui.settings.impl.BooleanSetting;
+import com.odtheking.odin.features.impl.dungeon.InvincibilityTimer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.injection.At;
@@ -17,21 +19,21 @@ public class InvincibilityHudMixin {
     private static final String METHOD = "invoke(Lnet/minecraft/client/gui/GuiGraphicsExtractor;Z)Lkotlin/Pair;";
 
     @Redirect(method = METHOD, at = @At(value = "INVOKE", target = OWNER + "access$getShowSpirit(" + OWNER + ")Z"), remap = false)
-    private boolean ec$spirit(com.odtheking.odin.features.impl.dungeon.InvincibilityTimer t) {
+    private boolean ec$spirit(InvincibilityTimer t) {
         return OdinMasksUsed.shows(0, ec$get(t, "Show Spirit Mask"));
     }
 
     @Redirect(method = METHOD, at = @At(value = "INVOKE", target = OWNER + "access$getShowBonzo(" + OWNER + ")Z"), remap = false)
-    private boolean ec$bonzo(com.odtheking.odin.features.impl.dungeon.InvincibilityTimer t) {
+    private boolean ec$bonzo(InvincibilityTimer t) {
         return OdinMasksUsed.shows(1, ec$get(t, "Show Bonzo Mask"));
     }
 
     @Redirect(method = METHOD, at = @At(value = "INVOKE", target = OWNER + "access$getShowPhoenix(" + OWNER + ")Z"), remap = false)
-    private boolean ec$phoenix(com.odtheking.odin.features.impl.dungeon.InvincibilityTimer t) {
+    private boolean ec$phoenix(InvincibilityTimer t) {
         return OdinMasksUsed.shows(2, ec$get(t, "Show Phoenix Pet"));
     }
 
-    private static boolean ec$get(com.odtheking.odin.features.impl.dungeon.InvincibilityTimer t, String name) {
-        return t.getSettings().get(name) instanceof com.odtheking.odin.clickgui.settings.impl.BooleanSetting b ? b.getValue() : true;
+    private static boolean ec$get(InvincibilityTimer t, String name) {
+        return t.getSettings().get(name) instanceof BooleanSetting b ? b.getValue() : true;
     }
 }

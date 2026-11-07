@@ -3,8 +3,19 @@ package com.engineerclient.p3sim
 import com.engineerclient.EngineerClient
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import it.unimi.dsi.fastutil.shorts.ShortOpenHashSet
 import net.minecraft.core.BlockPos
+import net.minecraft.core.SectionPos
+import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket
+import net.minecraft.world.effect.MobEffectInstance
+import net.minecraft.world.effect.MobEffects
+import net.minecraft.world.entity.EntityTypes
+import net.minecraft.world.entity.MoverType
+import net.minecraft.world.entity.ambient.Bat
+import net.minecraft.world.entity.item.FallingBlockEntity
+import net.minecraft.world.level.Level
 import net.minecraft.world.level.block.state.BlockState
+import net.minecraft.world.phys.Vec3
 import kotlin.random.Random
 import net.minecraft.world.level.block.Blocks as B
 
@@ -65,14 +76,14 @@ object Blocks {
     fun resend(positions: Collection<BlockPos>) {
         val level = SimServer.level ?: return
         if (positions.isEmpty()) return
-        val bySection = positions.groupBy { net.minecraft.core.SectionPos.of(it) }
+        val bySection = positions.groupBy { SectionPos.of(it) }
         val packets = bySection.mapNotNull { (sp, ps) ->
             val chunk = level.getChunkSource().getChunkNow(sp.x(), sp.z()) ?: return@mapNotNull null
             val si = chunk.getSectionIndexFromSectionY(sp.y())
             if (si < 0 || si >= chunk.sections.size) return@mapNotNull null
-            val shorts = it.unimi.dsi.fastutil.shorts.ShortOpenHashSet()
-            ps.forEach { shorts.add(net.minecraft.core.SectionPos.sectionRelativePos(it)) }
-            net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket(sp, shorts, chunk.getSection(si))
+            val shorts = ShortOpenHashSet()
+            ps.forEach { shorts.add(SectionPos.sectionRelativePos(it)) }
+            ClientboundSectionBlocksUpdatePacket(sp, shorts, chunk.getSection(si))
         }
         for (p in Sim.players()) packets.forEach { p.connection.send(it) }
     }
@@ -153,9 +164,9 @@ object Blocks {
     private fun coreBats() {
         val gold = B.GOLD_BLOCK.defaultBlockState()
         repeat(35) {
-            val b = net.minecraft.world.entity.ambient.Bat(net.minecraft.world.entity.EntityTypes.BAT, Sim.level)
+            val b = Bat(EntityTypes.BAT, Sim.level)
             // Invisible, as Hypixel's are.
-            b.isSilent = true; b.isPermanentlyInvulnerable = true; b.isInvisible = true; b.addEffect(net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.INVISIBILITY, -1, 0, false, false))
+            b.isSilent = true; b.isPermanentlyInvulnerable = true; b.isInvisible = true; b.addEffect(MobEffectInstance(MobEffects.INVISIBILITY, -1, 0, false, false))
             // No flying of its own: it is placed each tick below.
             b.setNoAi(true); b.setNoGravity(true)
             val x = 52.0 + Random.nextDouble() * 4.0
@@ -222,7 +233,7 @@ object Blocks {
         debrisCount++
         val e = Debris(level, s)
         e.snapTo(pos.x + 0.5, pos.y.toDouble(), pos.z + 0.5, 0f, 0f)
-        e.deltaMovement = net.minecraft.world.phys.Vec3.ZERO
+        e.deltaMovement = Vec3.ZERO
         Sim.spawn(e)
     }
 
@@ -314,32 +325,32 @@ object Blocks {
  * Gate / door / core debris: a falling block that falls as vanilla's does but is discarded where it lands (or after
  * 10 s), never placing itself or dropping anything, so the arena stays as the animations leave it.
  */
-class Debris(level: net.minecraft.world.level.Level, state: net.minecraft.world.level.block.state.BlockState) :
-    net.minecraft.world.entity.item.FallingBlockEntity(net.minecraft.world.entity.EntityTypes.FALLING_BLOCK, level) {
+class Debris(level: Level, state: BlockState) :
+    FallingBlockEntity(EntityTypes.FALLING_BLOCK, level) {
     /** An autosave never writes it (it would come back as a vanilla falling block that lands and places itself). */
     override fun shouldBeSaved() = false
     init {
         runCatching {
-            net.minecraft.world.entity.item.FallingBlockEntity::class.java.getDeclaredField("blockState").apply { isAccessible = true }.set(this, state)
+            FallingBlockEntity::class.java.getDeclaredField("blockState").apply { isAccessible = true }.set(this, state)
         }
     }
     override fun tick() {
         if (++time > 200) { discard(); return }
         applyGravity()
-        move(net.minecraft.world.entity.MoverType.SELF, deltaMovement)
+        move(MoverType.SELF, deltaMovement)
         if (onGround()) { discard(); return }
         deltaMovement = deltaMovement.scale(0.98)
     }
 }
 
 /** A falling block that is only carried: never ticks, so it never falls, lands or places itself. */
-class CarriedBlock(level: net.minecraft.world.level.Level, state: net.minecraft.world.level.block.state.BlockState) :
-    net.minecraft.world.entity.item.FallingBlockEntity(net.minecraft.world.entity.EntityTypes.FALLING_BLOCK, level) {
+class CarriedBlock(level: Level, state: BlockState) :
+    FallingBlockEntity(EntityTypes.FALLING_BLOCK, level) {
     /** An autosave never writes it (it would come back as a vanilla falling block that lands and places itself). */
     override fun shouldBeSaved() = false
     init {
         runCatching {
-            net.minecraft.world.entity.item.FallingBlockEntity::class.java.getDeclaredField("blockState").apply { isAccessible = true }.set(this, state)
+            FallingBlockEntity::class.java.getDeclaredField("blockState").apply { isAccessible = true }.set(this, state)
         }
         setNoGravity(true)
     }

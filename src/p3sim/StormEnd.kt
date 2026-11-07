@@ -1,10 +1,12 @@
 package com.engineerclient.p3sim
 
-import net.minecraft.world.entity.EntityTypes
 import net.minecraft.core.BlockPos
 import net.minecraft.core.particles.ParticleTypes
 import net.minecraft.sounds.SoundEvents
+import net.minecraft.sounds.SoundSource
+import net.minecraft.tags.BlockTags
 import net.minecraft.world.entity.EntityType
+import net.minecraft.world.entity.EntityTypes
 import net.minecraft.world.entity.LightningBolt
 import net.minecraft.world.entity.decoration.ArmorStand
 import net.minecraft.world.entity.projectile.hurtingprojectile.LargeFireball
@@ -113,10 +115,10 @@ internal class StormCorpse(private val body: BossWither) {
             yaw += 40.0
             val r = Math.toRadians(yaw)
             body.moveTo(at, at.add(-sin(r), 0.0, cos(r)))
-            if (n == nextHurt) { Sim.sound(SoundEvents.WITHER_HURT, 15f, 1f, at, net.minecraft.sounds.SoundSource.HOSTILE); nextHurt += Random.nextInt(9, 12) }
+            if (n == nextHurt) { Sim.sound(SoundEvents.WITHER_HURT, 15f, 1f, at, SoundSource.HOSTILE); nextHurt += Random.nextInt(9, 12) }
         }
         when (n) {
-            0, 4 -> Sim.sound(SoundEvents.GENERIC_EXPLODE, 2f, 0.6f, at, net.minecraft.sounds.SoundSource.BLOCKS)
+            0, 4 -> Sim.sound(SoundEvents.GENERIC_EXPLODE, 2f, 0.6f, at, SoundSource.BLOCKS)
             12 -> Sim.sound(SoundEvents.ZOMBIE_BREAK_WOODEN_DOOR, 3f, 0.9f, at)
             DEAD -> body.dieAnim()
             GONE -> body.remove()
@@ -180,7 +182,7 @@ internal object StormFx {
         b.snapTo(p.x, p.y, p.z, 0f, 0f)
         Sim.spawn(b)
         // A visual-only bolt plays no sound of its own here: in the lead-in Hypixel sends the thunder per bolt, at it (vol 10000, pitch 0.8-1.0, WEATHER).
-        if (thunder) Sim.sound(SoundEvents.LIGHTNING_BOLT_THUNDER, 10000f, 0.8f + Random.nextFloat() * 0.2f, p, net.minecraft.sounds.SoundSource.WEATHER)
+        if (thunder) Sim.sound(SoundEvents.LIGHTNING_BOLT_THUNDER, 10000f, 0.8f + Random.nextFloat() * 0.2f, p, SoundSource.WEATHER)
         return p
     }
 
@@ -190,7 +192,7 @@ internal object StormFx {
         var y = floor(fromY).toInt()
         repeat(15) {
             // 26.3 dropped blocksMotion() for the blocks_motion tag.
-            if (Sim.level.getBlockState(BlockPos(bx, y, bz)).`is`(net.minecraft.tags.BlockTags.BLOCKS_MOTION)) return y + 1.0
+            if (Sim.level.getBlockState(BlockPos(bx, y, bz)).`is`(BlockTags.BLOCKS_MOTION)) return y + 1.0
             y--
         }
         return fromY

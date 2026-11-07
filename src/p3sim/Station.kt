@@ -1,13 +1,24 @@
 package com.engineerclient.p3sim
 
-import net.minecraft.world.entity.EntityTypes
 import com.engineerclient.EngineerClient
 import net.minecraft.core.BlockPos
+import net.minecraft.core.component.DataComponents
 import net.minecraft.network.chat.Component
-import net.minecraft.world.entity.EntityType
+import net.minecraft.server.level.ServerPlayer
+import net.minecraft.world.entity.Entity
 import net.minecraft.world.entity.EntitySpawnReason
+import net.minecraft.world.entity.EntityType
+import net.minecraft.world.entity.EntityTypes
+import net.minecraft.world.entity.EquipmentSlot
+import net.minecraft.world.entity.Pose
 import net.minecraft.world.entity.decoration.ArmorStand
+import net.minecraft.world.entity.decoration.Mannequin
+import net.minecraft.world.item.ItemStack
+import net.minecraft.world.item.Items
+import net.minecraft.world.item.component.ResolvableProfile
+import net.minecraft.world.level.Level
 import net.minecraft.world.phys.Vec3
+import kotlin.math.abs
 
 /**
  * One thing that counts toward a P3 section: a terminal, a lever or the section's device. Its
@@ -82,7 +93,7 @@ class Station(
         }
         if (kind == Kind.TERMINAL) top?.let {
             val y = at.y + if (done) BOTTOM_DY else TOP_DY
-            if (kotlin.math.abs(it.y - y) > 1e-3) it.snapTo(at.x, y, at.z, 0f, 0f)
+            if (abs(it.y - y) > 1e-3) it.snapTo(at.x, y, at.z, 0f, 0f)
         }
         val ps = Sim.players()
         val far = kind != Kind.LEVER && ps.isNotEmpty() && ps.none { it.position().distanceTo(at) < 25.0 }
@@ -98,7 +109,7 @@ class Station(
         top?.discard(); bottom?.discard(); top = null; bottom = null
     }
 
-    fun owns(e: net.minecraft.world.entity.Entity) = e === top || e === bottom
+    fun owns(e: Entity) = e === top || e === bottom
 
     companion object {
         /** Hypixel's settled stand heights relative to the terminal (after the first position sync). */
@@ -147,7 +158,7 @@ class Station(
  * A status stand as Hypixel's: gravity on (noGravity false in Hypixel's stand data) yet
  * it stays where it is put, as there. Vanilla would let it fall, so its own movement is dropped.
  */
-open class SimStand(level: net.minecraft.world.level.Level) : ArmorStand(EntityTypes.ARMOR_STAND, level) {
+open class SimStand(level: Level) : ArmorStand(EntityTypes.ARMOR_STAND, level) {
     override fun travel(travelVector: Vec3) {}
 }
 
@@ -155,10 +166,10 @@ open class SimStand(level: net.minecraft.world.level.Level) : ArmorStand(EntityT
  * A stand that belongs to something the sim rebuilds itself (a mob's tag, a line of talk): never written with its chunk, so an unloaded chunk cannot bring back a stale copy.
  * [trackSquare] > 0 sends it only to players within that many blocks on x and on z (a square, as Hypixel's tracking ranges are).
  */
-class TransientStand(level: net.minecraft.world.level.Level) : SimStand(level) {
+class TransientStand(level: Level) : SimStand(level) {
     var trackSquare = 0
     override fun shouldBeSaved(): Boolean = false
-    override fun broadcastToPlayer(player: net.minecraft.server.level.ServerPlayer): Boolean =
+    override fun broadcastToPlayer(player: ServerPlayer): Boolean =
         (trackSquare <= 0 || (Math.abs(player.x - x) <= trackSquare && Math.abs(player.z - z) <= trackSquare)) && super.broadcastToPlayer(player)
 }
 
@@ -168,20 +179,20 @@ class TransientStand(level: net.minecraft.world.level.Level) : SimStand(level) {
  * stand just under it, and a stand with your head on it a block to the side.
  */
 object Corpse {
-    fun spawn(p: net.minecraft.server.level.ServerPlayer, ticks: Int) {
-        val made = ArrayList<net.minecraft.world.entity.Entity>()
+    fun spawn(p: ServerPlayer, ticks: Int) {
+        val made = ArrayList<Entity>()
         EngineerClient.safely("p3sim corpse") {
-            val m = net.minecraft.world.entity.decoration.Mannequin(EntityTypes.MANNEQUIN, Sim.level)
-            m.setComponent(net.minecraft.core.component.DataComponents.PROFILE, net.minecraft.world.item.component.ResolvableProfile.createResolved(p.gameProfile))
+            val m = Mannequin(EntityTypes.MANNEQUIN, Sim.level)
+            m.setComponent(DataComponents.PROFILE, ResolvableProfile.createResolved(p.gameProfile))
             m.isPermanentlyInvulnerable = true
             m.setNoGravity(true)
             m.isSilent = true
-            for (slot in listOf(net.minecraft.world.entity.EquipmentSlot.HEAD, net.minecraft.world.entity.EquipmentSlot.CHEST, net.minecraft.world.entity.EquipmentSlot.LEGS, net.minecraft.world.entity.EquipmentSlot.FEET))
+            for (slot in listOf(EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET))
                 m.setItemSlot(slot, p.getItemBySlot(slot).copy())
-            m.pose = net.minecraft.world.entity.Pose.SLEEPING
+            m.pose = Pose.SLEEPING
             m.snapTo(p.x, p.y, p.z, p.yRot, 0f)
             made += Sim.spawn(m)
-            fun stand(x: Double, y: Double, name: String?, head: net.minecraft.world.item.ItemStack? = null, invisible: Boolean = true) {
+            fun stand(x: Double, y: Double, name: String?, head: ItemStack? = null, invisible: Boolean = true) {
                 val s = SimStand(Sim.level)
                 s.snapTo(x, y, p.z, 0f, 0f)
                 s.isInvisible = invisible
@@ -189,12 +200,12 @@ object Corpse {
                 s.isSilent = true
                 Station.setMarker(s)
                 if (name != null) { s.setCustomName(Sim.legacy(name)); s.isCustomNameVisible = true }
-                if (head != null) s.setItemSlot(net.minecraft.world.entity.EquipmentSlot.HEAD, head)
+                if (head != null) s.setItemSlot(EquipmentSlot.HEAD, head)
                 made += Sim.spawn(s)
             }
             stand(p.x, p.y - 1.28, "§a${p.gameProfile.name}")
             stand(p.x, p.y - 1.66, "§c§lDEAD")
-            stand(p.x - 1.0, p.y, null, net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.PLAYER_HEAD), invisible = false)
+            stand(p.x - 1.0, p.y, null, ItemStack(Items.PLAYER_HEAD), invisible = false)
         }
         Fight.later(ticks, "corpse gone") { made.forEach { it.discard() } }
     }

@@ -3,6 +3,7 @@ package com.engineerclient.pov
 import com.engineerclient.mixin.LivingEntityAccessor
 import net.minecraft.client.Minecraft
 import net.minecraft.world.entity.LivingEntity
+import java.util.UUID
 
 /**
  * Decides where a teammate's eyes are for a POV preview pass — the "interpolate head
@@ -70,7 +71,7 @@ object PovPose {
     }
 
     /** The last pose sampled for this player and when (System.nanoTime), while it is still kept. */
-    fun lastSeen(id: java.util.UUID): PovInterpolator.Sample? = interpolator.newest(id)
+    fun lastSeen(id: UUID): PovInterpolator.Sample? = interpolator.newest(id)
 
     /** Forgets all history — world change, or the feature being switched off. */
     fun reset() = interpolator.clear()

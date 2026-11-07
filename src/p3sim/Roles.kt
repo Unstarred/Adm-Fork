@@ -6,6 +6,7 @@ import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass.BERSERK
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass.HEALER
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass.MAGE
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass.TANK
+import net.minecraft.core.BlockPos
 import net.minecraft.world.phys.Vec3
 
 /**
@@ -47,7 +48,7 @@ import net.minecraft.world.phys.Vec3
  * **Mines**: blocks an early enterer's bot mines once it's on its spot (`ee3` -> the blocks); yours you mine yourself.
  */
 object Roles {
-    class Preset(val name: String, val roles: Map<DungeonClass, String>, val times: List<String>, val moves: List<String>, val helps: List<Help> = emptyList(), val spots: Map<String, Vec3> = emptyMap(), val defaults: Map<String, Spots.Spot> = emptyMap(), val mines: Map<String, List<net.minecraft.core.BlockPos>> = emptyMap())
+    class Preset(val name: String, val roles: Map<DungeonClass, String>, val times: List<String>, val moves: List<String>, val helps: List<Help> = emptyList(), val spots: Map<String, Vec3> = emptyMap(), val defaults: Map<String, Spots.Spot> = emptyMap(), val mines: Map<String, List<BlockPos>> = emptyMap())
 
     /**
      * Help on a stack (the menu's Helper): when you're on [yours] (that terminal and the stack's
@@ -180,7 +181,7 @@ object Roles {
         ),
         defaults = mapOf("ee3" to Spots.Spot("EE3", 18.70, 121.50, 91.30, 0.82f, -8.64f)),
         // As Theoretical's: the 2x2 quartz platform beside the high EE3, mined once the tank is on it.
-        mines = mapOf("ee3" to listOf(15, 16).flatMap { x -> listOf(93, 94).map { net.minecraft.core.BlockPos(x, 122, it) } }),
+        mines = mapOf("ee3" to listOf(15, 16).flatMap { x -> listOf(93, 94).map { BlockPos(x, 122, it) } }),
     )
 
     /**
@@ -272,7 +273,7 @@ object Roles {
         ),
         // Once on the high EE3, the bers mines the 2x2 quartz platform beside it (x 15-16, y 122, z 93-94); the ledge it
         // stands on stays.
-        mines = mapOf("ee3" to listOf(15, 16).flatMap { x -> listOf(93, 94).map { net.minecraft.core.BlockPos(x, 122, it) } }),
+        mines = mapOf("ee3" to listOf(15, 16).flatMap { x -> listOf(93, 94).map { BlockPos(x, 122, it) } }),
     )
 
     /** By saved index, with Random after the first three ([P3Plan.SKILLS]); new ones go last (the menu orders them itself). */

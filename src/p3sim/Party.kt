@@ -1,18 +1,35 @@
 package com.engineerclient.p3sim
 
-import net.minecraft.world.entity.EntityTypes
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.mojang.authlib.GameProfile
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass
+import net.minecraft.client.Minecraft
+import net.minecraft.core.BlockPos
+import net.minecraft.core.Direction
 import net.minecraft.core.component.DataComponents
 import net.minecraft.network.chat.Component
+import net.minecraft.server.level.ServerPlayer
+import net.minecraft.sounds.SoundEvents
+import net.minecraft.sounds.SoundSource
+import net.minecraft.tags.FluidTags
+import net.minecraft.util.Mth
+import net.minecraft.world.InteractionHand
 import net.minecraft.world.entity.EntityType
+import net.minecraft.world.entity.EntityTypes
 import net.minecraft.world.entity.EquipmentSlot
 import net.minecraft.world.entity.decoration.Mannequin
+import net.minecraft.world.item.Item
 import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.Items
+import net.minecraft.world.item.component.DyedItemColor
 import net.minecraft.world.item.component.ResolvableProfile
+import net.minecraft.world.level.block.Block
+import net.minecraft.world.level.block.CommandBlock
 import net.minecraft.world.phys.AABB
 import net.minecraft.world.phys.Vec3
+import java.io.File
 import java.util.UUID
 import kotlin.math.roundToInt
 import kotlin.random.Random
@@ -128,7 +145,7 @@ object Party {
     }
 
     /** One of the party as a player sees it: another player, or a bot. */
-    class Mate(val name: String, val clazz: DungeonClass, val player: net.minecraft.server.level.ServerPlayer?, val bot: Bot?) {
+    class Mate(val name: String, val clazz: DungeonClass, val player: ServerPlayer?, val bot: Bot?) {
         val pos: Vec3 get() = player?.position() ?: bot!!.pos
         val yaw: Float get() = player?.yRot ?: bot!!.yaw
         val pitch: Float get() = player?.xRot ?: bot!!.entity?.xRot ?: bot!!.pitch
@@ -138,7 +155,7 @@ object Party {
     }
 
     /** Everyone but [viewer], players and bots, in [viewer]'s leap order (slots 1-4). */
-    fun mates(viewer: net.minecraft.server.level.ServerPlayer?): List<Mate> {
+    fun mates(viewer: ServerPlayer?): List<Mate> {
         // Not yet in (no class until their hello): everyone, in class order.
         val classless = viewer != null && !Players.hasClass(viewer)
         val mine = viewer?.let { Players.classOf(it) } ?: P3Sim.ownClass
@@ -242,17 +259,17 @@ object Party {
     }
 
     /** The bots' state for [Recorder]. */
-    fun record(o: com.google.gson.JsonObject) {
-        fun v(p: Vec3?) = p?.let { com.google.gson.JsonArray().apply { add(Recorder.r(it.x)); add(Recorder.r(it.y)); add(Recorder.r(it.z)) } }
-        o.add("bots", com.google.gson.JsonArray().apply {
-            for (b in bots) add(com.google.gson.JsonObject().apply {
+    fun record(o: JsonObject) {
+        fun v(p: Vec3?) = p?.let { JsonArray().apply { add(Recorder.r(it.x)); add(Recorder.r(it.y)); add(Recorder.r(it.z)) } }
+        o.add("bots", JsonArray().apply {
+            for (b in bots) add(JsonObject().apply {
                 addProperty("name", b.name)
                 add("pos", v(b.pos))
                 b.to?.let { add("to", v(it)); addProperty("goAt", b.goAt); addProperty("due", b.due) }
                 addProperty("in", b.inSection)
                 if (b.hold) addProperty("hold", true)
                 b.working?.let { addProperty("working", it.id) }
-                add("jobs", com.google.gson.JsonArray().apply { jobs.filter { it.bot === b }.forEach { j -> add("${j.job}@${j.at}") } })
+                add("jobs", JsonArray().apply { jobs.filter { it.bot === b }.forEach { j -> add("${j.job}@${j.at}") } })
             })
         })
         o.addProperty("ee", "arrived=${eeArrived.toList()} youOn=${youOn.toList()} preleapAt=${preleapAt.toList()} spotBy=${eeSpotBy.toList()}")
@@ -416,7 +433,7 @@ object Party {
         i4Shot = n + if (cell != null) 3 + Random.nextInt(4) else 8
         val v = aim.add(0.0, 0.7, 0.0).subtract(eye).normalize().scale(3.0)
         swing(b)
-        Sim.sound(net.minecraft.sounds.SoundEvents.ARROW_SHOOT, 1f, 1f / (Random.nextFloat() * 0.4f + 1.2f) + 0.5f, eye, net.minecraft.sounds.SoundSource.PLAYERS)
+        Sim.sound(SoundEvents.ARROW_SHOOT, 1f, 1f / (Random.nextFloat() * 0.4f + 1.2f) + 0.5f, eye, SoundSource.PLAYERS)
         Bows.launch(eye, eye.add(v), v)
     }
 
@@ -503,7 +520,7 @@ object Party {
     /** Who a leap lands on, and where: by who it is, not by who stands there (leapers land on the same spot). */
     private class Target(val pos: Vec3, val name: String? = null, val yaw: Float? = null)
     private fun Bot.asTarget() = Target(pos, name, yaw)
-    private fun net.minecraft.server.level.ServerPlayer.asTarget() = Target(position(), gameProfile.name, yRot)
+    private fun ServerPlayer.asTarget() = Target(position(), gameProfile.name, yRot)
     private val leaps = ArrayList<Leap>()
     /** The plan's "2 onto 1" moves of the sections begun: a leap onto someone at their terminal instead of the early enterer. */
     private val ontoLeaps = ArrayList<Roles.Move>()
@@ -766,7 +783,7 @@ object Party {
         // The preset's blocks this early enterer mines there (Theoretical: the bers, S3's 3rd term ledge).
         P3Plan.preset().mines[if (into == 5) "core" else "ee$into"]?.let { blocks ->
             for (pos in blocks) if (!Sim.level.getBlockState(pos).isAir) {
-                Sim.level.levelEvent(2001, pos, net.minecraft.world.level.block.Block.getId(Sim.level.getBlockState(pos)))
+                Sim.level.levelEvent(2001, pos, Block.getId(Sim.level.getBlockState(pos)))
                 Blocks.set(pos, net.minecraft.world.level.block.Blocks.AIR.defaultBlockState())
             }
         }
@@ -926,15 +943,15 @@ object Party {
     private fun legLead(clazz: String): List<GhostRun.Frame>? = legsFile()?.get(clazz)?.second?.takeIf { it.isNotEmpty() }
 
     private fun legsFile(): Map<String, Pair<List<Piece>, List<GhostRun.Frame>>>? {
-        val f = java.io.File(net.minecraft.client.Minecraft.getInstance().gameDirectory, "config/adm/p3sim-legs/${P3Plan.skillName()}.json")
+        val f = File(Minecraft.getInstance().gameDirectory, "config/adm/p3sim-legs/${P3Plan.skillName()}.json")
         if (!f.exists()) return null
         val key = "${f.path}@${f.lastModified()}"
-        fun frames(arr: com.google.gson.JsonArray?) = arr?.map { fe ->
+        fun frames(arr: JsonArray?) = arr?.map { fe ->
             val a = fe.asJsonArray
             GhostRun.Frame(P(a[0].asDouble, a[1].asDouble, a[2].asDouble), a[3].asFloat, a[4].asFloat, if (a.size() > 5) a[5].asString else "")
         }.orEmpty()
         val read = legsRead?.takeIf { it.first == key } ?: runCatching {
-            val o = com.google.gson.JsonParser.parseString(f.readText()).asJsonObject.getAsJsonObject("classes")
+            val o = JsonParser.parseString(f.readText()).asJsonObject.getAsJsonObject("classes")
             key to o.entrySet().associate { (c, v) ->
                 // A broken class is left out (its bot plays its role), not the whole file.
                 c to runCatching {
@@ -1009,7 +1026,7 @@ object Party {
                     b.pos = to; b.to = null; b.vy = 0.0; b.leaptAt = n
                     lg.leaptOnto += c.name
                     setHeld(b, "leap")
-                    Sim.sound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 1f, 1f, to)
+                    Sim.sound(SoundEvents.ENDERMAN_TELEPORT, 1f, 1f, to)
                     val name = Players.playerOf(c)?.gameProfile?.name ?: Roles.label(c)
                     if (name == Sim.hostName) GhostCapture.event("landed", b.clazz.name)
                     val gen = generation
@@ -1245,12 +1262,12 @@ object Party {
         for (bx in Math.floor(b.pos.x - 0.3).toInt()..Math.floor(b.pos.x + 0.3).toInt())
             for (by in Math.floor(b.pos.y).toInt()..Math.floor(b.pos.y + 1.79).toInt())
                 for (bz in Math.floor(b.pos.z - 0.3).toInt()..Math.floor(b.pos.z + 0.3).toInt()) {
-                    val pos = net.minecraft.core.BlockPos(bx, by, bz)
+                    val pos = BlockPos(bx, by, bz)
                     val s = level.getBlockState(pos)
                     // What the Dungeonbreaker can't break it just goes through.
                     if (s.isAir || s.getDestroySpeed(level, pos) < 0 || s.`is`(net.minecraft.world.level.block.Blocks.BARRIER) ||
-                        s.`is`(net.minecraft.world.level.block.Blocks.BEDROCK) || s.block is net.minecraft.world.level.block.CommandBlock) continue
-                    level.levelEvent(2001, pos, net.minecraft.world.level.block.Block.getId(s))
+                        s.`is`(net.minecraft.world.level.block.Blocks.BEDROCK) || s.block is CommandBlock) continue
+                    level.levelEvent(2001, pos, Block.getId(s))
                     Blocks.set(pos, net.minecraft.world.level.block.Blocks.AIR.defaultBlockState())
                     broke = true
                     // Back after the regen, as the Dungeonbreaker's are; not once the core's open (its door would come back).
@@ -1663,7 +1680,7 @@ object Party {
         // Looking where the player looked there (turning at most 40° a tick), else the way it goes.
         val ry = r.yaw[i]
         if (!ry.isNaN()) {
-            b.yaw += net.minecraft.util.Mth.wrapDegrees(ry - b.yaw).coerceIn(-40f, 40f)
+            b.yaw += Mth.wrapDegrees(ry - b.yaw).coerceIn(-40f, 40f)
             b.pitch += (r.pitch[i] - b.pitch).coerceIn(-30f, 30f)
         } else if (Math.hypot(p.x - b.pos.x, p.z - b.pos.z) > 0.05) b.yaw = Math.toDegrees(Math.atan2(-(p.x - b.pos.x), p.z - b.pos.z)).toFloat()
         // The item the player had out; a boost (rising a block or more in a tick) starts with its click.
@@ -1753,20 +1770,20 @@ object Party {
         var cy = Math.floor(y + 1.25).toInt()
         val bottom = cy - 40
         while (cy > bottom) {
-            val pos = net.minecraft.core.BlockPos(bx, cy, bz)
+            val pos = BlockPos(bx, cy, bz)
             val state = level.getBlockState(pos)
             // Nobody walks into the lava under P3's floors: it's a blink across.
-            if (state.fluidState.`is`(net.minecraft.tags.FluidTags.LAVA)) return WALL
+            if (state.fluidState.`is`(FluidTags.LAVA)) return WALL
             val shape = state.getCollisionShape(level, pos)
             if (!shape.isEmpty) {
-                val top = cy + shape.max(net.minecraft.core.Direction.Axis.Y)
+                val top = cy + shape.max(Direction.Axis.Y)
                 if (top > y + 1.25) return WALL
                 // Room for the body above it.
                 for (hy in Math.floor(top + 0.01).toInt()..Math.floor(top + 1.79).toInt()) {
                     if (hy == cy) continue
-                    val hp = net.minecraft.core.BlockPos(bx, hy, bz)
+                    val hp = BlockPos(bx, hy, bz)
                     val hs = level.getBlockState(hp).getCollisionShape(level, hp)
-                    if (!hs.isEmpty && hy + hs.min(net.minecraft.core.Direction.Axis.Y) < top + 1.8) return WALL
+                    if (!hs.isEmpty && hy + hs.min(Direction.Axis.Y) < top + 1.8) return WALL
                 }
                 return top
             }
@@ -1780,7 +1797,7 @@ object Party {
         val at = to.pos
         b.pos = at; b.to = null; b.vy = 0.0; b.leaptAt = n; b.route = null; b.routeTo = null
         to.yaw?.let { b.yaw = it }
-        Sim.sound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 1f, 1f, at)
+        Sim.sound(SoundEvents.ENDERMAN_TELEPORT, 1f, 1f, at)
         // Most teammates' leaps are announced, usually 1 tick after the tp.
         val name = to.name ?: return
         // On you: what an early enterer (you, recording) waits for.
@@ -1792,7 +1809,7 @@ object Party {
     /** A bot's party chat line, as Hypixel shows one (the bots are MVP+, as the leap lines colour them). */
     fun partyLine(b: Bot, text: String) = "§9Party §8> §b[MVP§c+§b] ${b.name}§f: $text"
 
-    private fun swing(b: Bot) { b.entity?.let { it.swing(net.minecraft.world.InteractionHand.MAIN_HAND, it.mainHandItem.interactAnimation, false) } }
+    private fun swing(b: Bot) { b.entity?.let { it.swing(InteractionHand.MAIN_HAND, it.mainHandItem.interactAnimation, false) } }
 
     /**
      * What a bot holds, as teammates do: in P3 the Dungeonbreaker (teammates' rest
@@ -1911,8 +1928,8 @@ object Party {
             DungeonClass.ARCHER -> Triple(0xe7413c, 0xe75c3c, 0x8969c8)
             else -> Triple(0x3e05af, 0x5d23d1, 0x7c44ec)
         }
-        fun dyed(item: net.minecraft.world.item.Item, rgb: Int) =
-            if (rgb < 0) ItemStack(Items.CHAINMAIL_CHESTPLATE) else ItemStack(item).also { it.set(DataComponents.DYED_COLOR, net.minecraft.world.item.component.DyedItemColor(rgb)) }
+        fun dyed(item: Item, rgb: Int) =
+            if (rgb < 0) ItemStack(Items.CHAINMAIL_CHESTPLATE) else ItemStack(item).also { it.set(DataComponents.DYED_COLOR, DyedItemColor(rgb)) }
         m.setItemSlot(EquipmentSlot.CHEST, dyed(Items.LEATHER_CHESTPLATE, chest))
         m.setItemSlot(EquipmentSlot.LEGS, dyed(Items.LEATHER_LEGGINGS, legs))
         m.setItemSlot(EquipmentSlot.FEET, dyed(Items.LEATHER_BOOTS, boots))

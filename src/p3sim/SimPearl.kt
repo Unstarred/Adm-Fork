@@ -1,6 +1,7 @@
 package com.engineerclient.p3sim
 
 import com.engineerclient.p3sim.Sim
+import net.minecraft.core.Direction
 import net.minecraft.core.particles.ParticleTypes
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.server.level.ServerPlayer
@@ -11,6 +12,7 @@ import net.minecraft.world.entity.Relative
 import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl
 import net.minecraft.world.item.ItemStack
 import net.minecraft.world.level.Level
+import net.minecraft.world.phys.BlockHitResult
 import net.minecraft.world.phys.EntityHitResult
 import net.minecraft.world.phys.HitResult
 import net.minecraft.world.phys.Vec3
@@ -40,7 +42,7 @@ class SimPearl(level: Level, owner: LivingEntity, stack: ItemStack) : ThrownEnde
         if (scripted) { discard(); return }
         val thrower = getOwner() as? ServerPlayer
         if (thrower != null && thrower.isAlive && !thrower.isSleeping && thrower.level() === level) {
-            val top = (hit as? net.minecraft.world.phys.BlockHitResult)?.takeIf { it.type == HitResult.Type.BLOCK && it.direction == net.minecraft.core.Direction.UP }
+            val top = (hit as? BlockHitResult)?.takeIf { it.type == HitResult.Type.BLOCK && it.direction == Direction.UP }
             land(thrower, top?.let { Vec3(it.blockPos.x + 0.5, it.location.y, it.blockPos.z + 0.5) } ?: oldPosition(), sound = false)
         }
         Sim.sound(SoundEvents.ENDERMAN_TELEPORT, 1f, 1f, position(), SoundSource.HOSTILE)

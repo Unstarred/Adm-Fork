@@ -1,6 +1,7 @@
 package com.engineerclient.waypoints
 
 import com.engineerclient.EngineerClient
+import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.odtheking.odin.OdinMod.mc
 import com.odtheking.odin.utils.sendCommand
@@ -9,6 +10,7 @@ import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
 import net.minecraft.network.chat.ClickEvent
 import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.HoverEvent
+import net.minecraft.network.chat.MutableComponent
 import kotlin.math.abs
 
 /**
@@ -183,7 +185,7 @@ object BrRoles {
     /** The free roles (and the door) as buttons, for anyone who hasn't taken one. */
     private fun offer(line: Component, you: Boolean) {
         if (you || mine != null || youOnDoor || count == 0) return
-        val parts = line as? net.minecraft.network.chat.MutableComponent ?: return
+        val parts = line as? MutableComponent ?: return
         parts.append(Component.literal(" §7— yours:"))
         for (r in 1..count) {
             val holder = taken.entries.firstOrNull { it.value == r }?.key
@@ -273,16 +275,16 @@ object BrRoles {
         fetched = true
     }
 
-    private fun read(rooms: com.google.gson.JsonObject): Map<String, Map<Pair<Int, Int>, Map<Int, Plan>>> =
+    private fun read(rooms: JsonObject): Map<String, Map<Pair<Int, Int>, Map<Int, Plan>>> =
         readBy(rooms) { door -> xz(door) }
 
     /** The doorer sets: each plan keyed "entry x,z>wither x,z". */
-    private fun readDoorer(rooms: com.google.gson.JsonObject): Map<String, Map<Pair<Pair<Int, Int>, Pair<Int, Int>>, Map<Int, Plan>>> =
+    private fun readDoorer(rooms: JsonObject): Map<String, Map<Pair<Pair<Int, Int>, Pair<Int, Int>>, Map<Int, Plan>>> =
         readBy(rooms) { key -> key.split('>').takeIf { it.size == 2 }?.let { (e, w) -> xz(e)?.let { a -> xz(w)?.let { b -> a to b } } } }
 
     private fun xz(s: String): Pair<Int, Int>? = s.split(',').mapNotNull { it.toIntOrNull() }.takeIf { it.size == 2 }?.let { it[0] to it[1] }
 
-    private fun <K> readBy(rooms: com.google.gson.JsonObject, key: (String) -> K?): Map<String, Map<K, Map<Int, Plan>>> {
+    private fun <K> readBy(rooms: JsonObject, key: (String) -> K?): Map<String, Map<K, Map<Int, Plan>>> {
         val out = HashMap<String, Map<K, Map<Int, Plan>>>()
         for ((room, doors) in rooms.entrySet()) {
             val byDoor = HashMap<K, Map<Int, Plan>>()

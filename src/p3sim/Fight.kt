@@ -1,13 +1,20 @@
 package com.engineerclient.p3sim
 
 import com.engineerclient.EngineerClient
+import com.engineerclient.splits.SplitTracker
+import com.odtheking.odin.features.impl.boss.ArrowsDevice
 import net.minecraft.network.protocol.common.ClientboundPingPacket
+import net.minecraft.network.protocol.game.ClientboundClearTitlesPacket
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.world.effect.MobEffectInstance
 import net.minecraft.world.effect.MobEffects
+import net.minecraft.world.entity.EquipmentSlot
 import net.minecraft.world.entity.ai.attributes.Attributes
 import net.minecraft.world.level.GameType
+import net.minecraft.world.phys.Vec3
+import java.util.ArrayDeque
+import java.util.UUID
 import kotlin.random.Random
 
 /**
@@ -50,7 +57,7 @@ object Fight {
         private set
 
     /** Where the ping ids start counting down from (recorded: about -700, varying per login). */
-    private val PING_BASE = 698 + kotlin.random.Random.nextInt(100)
+    private val PING_BASE = 698 + Random.nextInt(100)
 
     /** A queued action, and whose it is ([Sim.asPlayer]: a party player's click stays theirs when it lands). */
     private class Later(val at: Int, val what: String, val epoch: Int, val run: () -> Unit) {
@@ -123,19 +130,19 @@ object Fight {
         Sim.asPlayer(p) { lastRot = p.xRot to p.yRot }
     }
     /** Each player's recent positions (ns, where), for [seenPos]. */
-    private val posHistories = HashMap<java.util.UUID, java.util.ArrayDeque<Pair<Long, net.minecraft.world.phys.Vec3>>>()
+    private val posHistories = HashMap<UUID, ArrayDeque<Pair<Long, Vec3>>>()
 
     /**
      * Where the server sees [p]: where they were one one-way latency ago (its checks run on the
      * position packets that arrived, so about ping/2 late). Live position with no ping.
      */
-    fun seenPos(p: ServerPlayer): net.minecraft.world.phys.Vec3 = Sim.asPlayer(p, Sim.toAll) {
+    fun seenPos(p: ServerPlayer): Vec3 = Sim.asPlayer(p, Sim.toAll) {
         val live = p.position()
         val ms = P3Sim.ping / 2.0
         val posHistory = posHistories[p.uuid]
         if (ms <= 0.0 || posHistory == null || posHistory.isEmpty()) return@asPlayer live
         val target = System.nanoTime() - (ms * 1e6).toLong()
-        var prev: Pair<Long, net.minecraft.world.phys.Vec3>? = null
+        var prev: Pair<Long, Vec3>? = null
         for (e in posHistory) {
             if (e.first >= target) {
                 val a = prev ?: return@asPlayer e.second
@@ -176,7 +183,7 @@ object Fight {
     fun stop() {
         phase?.let { EngineerClient.safely("p3sim stop ${it.name}") { it.stop() } }
         // Whatever title the run left up ("The gate will open in 5 seconds!"...) goes with it.
-        Sim.players().forEach { it.connection.send(net.minecraft.network.protocol.game.ClientboundClearTitlesPacket(true)) }
+        Sim.players().forEach { it.connection.send(ClientboundClearTitlesPacket(true)) }
         phase = null
         epoch++
         later.clear()
@@ -290,7 +297,7 @@ object Fight {
     private fun resetI4Solver() = later(2, "i4 solver reset") { PartyClient.send("arrowsReset") }
 
     fun resetArrowsDevice() {
-        val c = com.odtheking.odin.features.impl.boss.ArrowsDevice::class.java
+        val c = ArrowsDevice::class.java
         fun field(name: String) = c.getDeclaredField(name).apply { isAccessible = true }
         (field("markedPositions").get(null) as? MutableSet<*>)?.clear()
         field("targetPosition").set(null, null)
@@ -303,7 +310,7 @@ object Fight {
      * adds nothing; the Racing Helmet adds 100 more.
      */
     fun speedStat(player: ServerPlayer): Int = Sim.asPlayer(player, Sim.toAll) {
-        val racing = SimItems.idOf(player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.HEAD)) == "RACING_HELMET"
+        val racing = SimItems.idOf(player.getItemBySlot(EquipmentSlot.HEAD)) == "RACING_HELMET"
         P3Sim.speed + (if (P3Sim.phoenix) 0 else 100) + (if (racing) 100 else 0)
     }
 
@@ -347,20 +354,20 @@ object Fight {
             Lava.reset()
         }
         Masks.reset()
-        refreshPhase = if (kotlin.random.Random.nextInt(36) < 21) 18 else 17
+        refreshPhase = if (Random.nextInt(36) < 21) 18 else 17
         Stats.runStart = if (what == Start.P1) serverTick else -1
         previous = null
         // Our splits: a fresh run from this phase, the ones before it at your Pace times. Queued on
         // the client before any of this fight's lines can reach it (it starts Odin's run too).
         val (split, termsDone) = when (what) {
-            Start.P1 -> com.engineerclient.splits.SplitTracker.MAXOR to 0
-            Start.P2 -> com.engineerclient.splits.SplitTracker.STORM to 0
-            Start.P3, Start.S1 -> com.engineerclient.splits.SplitTracker.TERMS to 0
-            Start.S2 -> com.engineerclient.splits.SplitTracker.TERMS to 1
-            Start.S3 -> com.engineerclient.splits.SplitTracker.TERMS to 2
-            Start.S4 -> com.engineerclient.splits.SplitTracker.TERMS to 3
-            Start.CORE -> com.engineerclient.splits.SplitTracker.GOLDOR to 0
-            Start.P4 -> com.engineerclient.splits.SplitTracker.NECRON to 0
+            Start.P1 -> SplitTracker.MAXOR to 0
+            Start.P2 -> SplitTracker.STORM to 0
+            Start.P3, Start.S1 -> SplitTracker.TERMS to 0
+            Start.S2 -> SplitTracker.TERMS to 1
+            Start.S3 -> SplitTracker.TERMS to 2
+            Start.S4 -> SplitTracker.TERMS to 3
+            Start.CORE -> SplitTracker.GOLDOR to 0
+            Start.P4 -> SplitTracker.NECRON to 0
         }
         // Practice: no splits (its own timer is the one that counts); the last run's are cleared.
         if (practice) PartyClient.send("splitsStop") else PartyClient.send("splitsStart", termsDone, split)
@@ -428,7 +435,7 @@ object Fight {
         }
         val now = System.nanoTime()
         for (pl in Sim.players()) {
-            val h = posHistories.getOrPut(pl.uuid) { java.util.ArrayDeque() }
+            val h = posHistories.getOrPut(pl.uuid) { ArrayDeque() }
             h.addLast(now to pl.position())
             while (h.size > 40) h.removeFirst()
         }

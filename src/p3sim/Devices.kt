@@ -1,11 +1,15 @@
 package com.engineerclient.p3sim
 
 import com.engineerclient.practice.SimonSaysDevice
-import net.minecraft.world.entity.EntityTypes
+import net.minecraft.ChatFormatting
 import net.minecraft.core.BlockPos
 import net.minecraft.core.Direction
+import net.minecraft.server.level.ServerPlayer
 import net.minecraft.sounds.SoundEvents
+import net.minecraft.sounds.SoundSource
+import net.minecraft.world.entity.Entity
 import net.minecraft.world.entity.EntityType
+import net.minecraft.world.entity.EntityTypes
 import net.minecraft.world.entity.decoration.ItemFrame
 import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.Items
@@ -13,6 +17,7 @@ import net.minecraft.world.level.block.ButtonBlock
 import net.minecraft.world.level.block.LeverBlock
 import net.minecraft.world.level.block.RedstoneLampBlock
 import net.minecraft.world.level.block.state.BlockState
+import net.minecraft.world.level.block.state.properties.AttachFace
 import net.minecraft.world.phys.Vec3
 import kotlin.random.Random
 import net.minecraft.world.level.block.Blocks as B
@@ -59,10 +64,10 @@ class Devices(val phase: GoldorPhase) {
         private val START = BlockPos(110, 121, 91)
         private fun buttonAt(cell: Int) = BlockPos(110, 123 - cell / 4, 92 + cell % 4)
         private fun lampAt(cell: Int) = BlockPos(111, 123 - cell / 4, 92 + cell % 4)
-        private val BUTTON: BlockState get() = B.STONE_BUTTON.defaultBlockState().setValue(ButtonBlock.FACE, net.minecraft.world.level.block.state.properties.AttachFace.WALL).setValue(ButtonBlock.FACING, Direction.WEST)
+        private val BUTTON: BlockState get() = B.STONE_BUTTON.defaultBlockState().setValue(ButtonBlock.FACE, AttachFace.WALL).setValue(ButtonBlock.FACING, Direction.WEST)
 
         /** Each presser by name, to complete the device as them (their own section times and lines). */
-        private val pressers = HashMap<String, net.minecraft.server.level.ServerPlayer?>()
+        private val pressers = HashMap<String, ServerPlayer?>()
 
         private val device = SimonSaysDevice(object : SimonSaysDevice.Io {
             override fun newSequence() = this@SimonSays.newSequence().toIntArray()
@@ -210,7 +215,7 @@ class Devices(val phase: GoldorPhase) {
                     if (!left) {
                         if (!on.remove(k)) on += k
                         draw(if (Random.nextInt(6) == 0) 4 else 3)
-                        Sim.sound(SoundEvents.LEVER_CLICK, 0.3f, if (k in on) 0.5873016f else 0.4920635f, Vec3.atCenterOf(pos), net.minecraft.sounds.SoundSource.BLOCKS)
+                        Sim.sound(SoundEvents.LEVER_CLICK, 0.3f, if (k in on) 0.5873016f else 0.4920635f, Vec3.atCenterOf(pos), SoundSource.BLOCKS)
                     }
                     // In S2, or pre-done from S1 (as the bots do it).
                     credit = phase.section in 1..2 && (wasLit || (!left && allLit()))
@@ -265,7 +270,7 @@ class Devices(val phase: GoldorPhase) {
                 Fight.later(delay++, "arrows solve") {
                     if (phase !== Fight.phase || !frames.containsValue(f)) return@later
                     f.setRotation(solution[i])
-                    Sim.sound(SoundEvents.ITEM_FRAME_ROTATE_ITEM, 1f, 1f, f.position(), net.minecraft.sounds.SoundSource.PLAYERS)
+                    Sim.sound(SoundEvents.ITEM_FRAME_ROTATE_ITEM, 1f, 1f, f.position(), SoundSource.PLAYERS)
                 }
             }
         }
@@ -279,17 +284,17 @@ class Devices(val phase: GoldorPhase) {
                 // An extra (Start/End) frame turns as well; it never counts toward the solution.
                 if (solution[i] < 0) {
                     frame.setRotation((frame.rotation + 1) % 8)
-                    Sim.sound(SoundEvents.ITEM_FRAME_ROTATE_ITEM, 1f, 1f, frame.position(), net.minecraft.sounds.SoundSource.PLAYERS)
+                    Sim.sound(SoundEvents.ITEM_FRAME_ROTATE_ITEM, 1f, 1f, frame.position(), SoundSource.PLAYERS)
                     return@afterPing
                 }
                 frame.setRotation((frame.rotation + 1) % 8)
-                Sim.sound(SoundEvents.ITEM_FRAME_ROTATE_ITEM, 1f, 1f, frame.position(), net.minecraft.sounds.SoundSource.PLAYERS)
+                Sim.sound(SoundEvents.ITEM_FRAME_ROTATE_ITEM, 1f, 1f, frame.position(), SoundSource.PLAYERS)
                 if (phase.section in 1..3 && frames.all { (j, f) -> solution[j] < 0 || f.rotation == solution[j] }) { lightWall(); st.complete(Sim.me) }
             }
             return true
         }
 
-        fun owns(e: net.minecraft.world.entity.Entity) = frames.values.any { it === e }
+        fun owns(e: Entity) = frames.values.any { it === e }
     }
 
     // ------------------------------------------------------------------ the target
@@ -457,8 +462,8 @@ class Devices(val phase: GoldorPhase) {
                     f.setRotation(solution[i])
                 } else f.setItem(
                     // Hypixel names them: "Start" (green) on the lime wool, "End" (red) on the red, non-italic.
-                    if (wool == true) Terminals.named(Items.WOOL.lime(), "Start", color = net.minecraft.ChatFormatting.GREEN)
-                    else Terminals.named(Items.WOOL.red(), "End", color = net.minecraft.ChatFormatting.RED), false)
+                    if (wool == true) Terminals.named(Items.WOOL.lime(), "Start", color = ChatFormatting.GREEN)
+                    else Terminals.named(Items.WOOL.red(), "End", color = ChatFormatting.RED), false)
                 frames[i] = Sim.spawn(f)
             }
             for (i in 0 until 25) {

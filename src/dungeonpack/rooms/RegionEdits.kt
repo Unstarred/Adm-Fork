@@ -1,5 +1,6 @@
 package com.engineerclient.dungeonpack.rooms
 
+import com.engineerclient.dungeonpack.pack.doors.DoorPack
 import com.engineerclient.dungeonpack.pack.layouts.DoorKind
 import com.engineerclient.dungeonpack.pack.secrets.SecretPack
 
@@ -85,7 +86,7 @@ object RegionEdits {
     }
 
     /** A design's blocks in the gap column beside it ([com.engineerclient.dungeonpack.pack.doors.DoorPack.gapWalls]), turned with the room. */
-    fun gapWalls(rooms: List<RoomInstance>, pack: com.engineerclient.dungeonpack.pack.doors.DoorPack = com.engineerclient.dungeonpack.pack.doors.DoorPack.bundled): List<Edit> = buildList {
+    fun gapWalls(rooms: List<RoomInstance>, pack: DoorPack = DoorPack.bundled): List<Edit> = buildList {
         for (r in rooms) for (c in pack.gapWalls[r.design.id].orEmpty()) {
             val w = r.placement.toWorld(c.x, c.y, c.z)
             add(Edit(w.x, w.y, w.z, c.state, r.placement.quarterTurns))

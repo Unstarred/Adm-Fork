@@ -1,5 +1,8 @@
 package com.engineerclient.misc
 
+import com.engineerclient.DeadPlayers
+import com.engineerclient.practice.TermInfo
+import com.engineerclient.storm.StormCrush
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.HudElement
 import com.odtheking.odin.clickgui.settings.impl.NumberSetting
@@ -16,8 +19,7 @@ import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.world.entity.boss.wither.WitherBoss
 import net.minecraft.world.level.block.Blocks
-import com.engineerclient.DeadPlayers
-import com.engineerclient.storm.StormCrush
+import java.util.Locale
 
 /**
  * Countdowns through a run, each its own HUD, all counted in server ticks so lag doesn't run them
@@ -60,7 +62,7 @@ object Timers : Module(
     private val clearHud by HUD("Clear Countdown", "From blood opening, counts down 54 s to the boss (50 s camp, 4 s portal): green, yellow under 30, red under 20. Hidden if blood isn't done by 50 s; set to 4 s when the portal spawns.", true, 420, 200, 2f) { example ->
         val left = if (example) 41.3 else bossTicksLeft()?.let { it / 20.0 } ?: return@HUD 0 to 0
         val colour = when { left > 30 -> "§a"; left > 20 -> "§e"; else -> "§c" }
-        draw(colour + String.format(java.util.Locale.ROOT, "%.1f", left))
+        draw(colour + String.format(Locale.ROOT, "%.1f", left))
     }
     private val portalHud by HUD("Portal Text", "\"PORTAL\" in pink on screen for 1.8 s when the portal spawns.", true, 400, 160, 4f) { example ->
         if (!example && (!enabled || DungeonUtils.inBoss || portalUntil - serverTicks <= 0)) return@HUD 0 to 0
@@ -83,7 +85,7 @@ object Timers : Module(
         if (example) timer("Purple", 30, PAD_TOTAL, true) else padLeft(purpleReads())?.let { timer("Purple", it, PAD_TOTAL) } ?: (0 to 0)
     }
     private val sectionHud: HudElement by HUD("Section Time", "When a terminal section is done, how long it took, in purple. S1 from Goldor's first line, the rest from the last section's end.", true, 420, 330, 5f) { example ->
-        draw(if (example) "§514.35" else com.engineerclient.practice.TermInfo.sectionTime(sectionSeconds) ?: return@HUD 0 to 0)
+        draw(if (example) "§514.35" else TermInfo.sectionTime(sectionSeconds) ?: return@HUD 0 to 0)
     }
     private val sectionSeconds: Double by NumberSetting("Section Time Seconds", 1.5, 0.5..10.0, 0.5, desc = "How long a section's time stays up.", unit = "s").withDependency { sectionHud.enabled }
     private val necronHud by HUD("Necron DPS", "Counts down to Necron first taking damage, 4.45 s after his first line (\"You went further than any human before, congratulations.\").", true, 10, 175, 1.5f) { example ->
@@ -187,7 +189,7 @@ object Timers : Module(
         else -> "§c"
     }
 
-    private fun time(ticks: Int): String = String.format(java.util.Locale.ROOT, "%.2fs", ticks / 20.0)
+    private fun time(ticks: Int): String = String.format(Locale.ROOT, "%.2fs", ticks / 20.0)
 
     /** The time left; [label] only in the HUD editor ([example]), to tell the timers apart there. */
     private fun GuiGraphicsExtractor.timer(label: String, left: Int, total: Int, example: Boolean = false): Pair<Int, Int> =

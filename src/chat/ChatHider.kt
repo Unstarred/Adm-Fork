@@ -1,6 +1,7 @@
 package com.engineerclient.chat
 
 import com.engineerclient.EngineerClient
+import com.engineerclient.misc.RandomStuff
 import com.engineerclient.rotation.EcLog
 import net.minecraft.network.chat.Component
 import java.nio.file.Files
@@ -44,11 +45,11 @@ object ChatHider {
 
     /** Called from the chat GUI's single add-message funnel. True = do not display. */
     fun shouldHide(message: Component): Boolean {
-        if (!com.engineerclient.misc.RandomStuff.cleansChat()) return false
+        if (!RandomStuff.cleansChat()) return false
         if (!loaded) load(announce = false)
         val text = ChatRules.strip(message.string)
         val rule = rules.hides(text) ?: return false
-        if (com.engineerclient.misc.RandomStuff.logsHiddenChat()) EcLog.log("CHAT-HIDE", "$rule ⇐ ${text.replace("\n", "\\n")}")
+        if (RandomStuff.logsHiddenChat()) EcLog.log("CHAT-HIDE", "$rule ⇐ ${text.replace("\n", "\\n")}")
         return true
     }
 }

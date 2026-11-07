@@ -1,6 +1,5 @@
 package com.engineerclient.pov
 
-import net.minecraft.world.entity.EntityTypes
 import com.engineerclient.EngineerClient
 import com.engineerclient.OdinHuds
 import com.engineerclient.mixin.CameraAccessor
@@ -9,29 +8,34 @@ import com.engineerclient.rotation.EcLog
 import com.mojang.blaze3d.pipeline.RenderTarget
 import com.mojang.blaze3d.pipeline.TextureTarget
 import com.mojang.blaze3d.systems.RenderSystem
-import com.mojang.renderpearl.api.textures.FilterMode
 import com.mojang.renderpearl.api.GpuFormat
+import com.mojang.renderpearl.api.textures.FilterMode
 import com.odtheking.odin.features.ModuleManager
+import com.odtheking.odin.features.impl.dungeon.map.DungeonScan
+import com.odtheking.odin.utils.skyblock.dungeon.DungeonPlayer
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
-import net.minecraft.client.CameraType
-import net.minecraft.client.renderer.culling.Frustum
-import net.minecraft.client.renderer.state.level.LevelRenderState
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet
+import net.minecraft.client.CameraType
 import net.minecraft.client.DeltaTracker
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.render.TextureSetup
 import net.minecraft.client.renderer.RenderPipelines
+import net.minecraft.client.renderer.culling.Frustum
+import net.minecraft.client.renderer.feature.FeatureRenderDispatcher
 import net.minecraft.client.renderer.state.gui.BlitRenderState
-import com.odtheking.odin.features.impl.dungeon.map.DungeonScan
-import com.odtheking.odin.utils.skyblock.dungeon.DungeonPlayer
+import net.minecraft.client.renderer.state.level.LevelRenderState
 import net.minecraft.core.BlockPos
 import net.minecraft.world.entity.Entity
 import net.minecraft.world.entity.EntityType
+import net.minecraft.world.entity.EntityTypes
 import net.minecraft.world.entity.Marker
 import net.minecraft.world.entity.player.Player
 import net.minecraft.world.level.Level
 import org.joml.Matrix3x2f
+import org.joml.Matrix4fStack
 import org.joml.Vector4f
+import java.lang.reflect.Field
+import java.util.UUID
 
 /**
  * Renders the four teammate POV feeds and puts them on screen.
@@ -132,7 +136,7 @@ object PovCapture {
 
     /** What the state was before this quadrant's pass, so a `finally` can put it all back. */
     private class Saved(
-        val cameraEntity: net.minecraft.world.entity.Entity?,
+        val cameraEntity: Entity?,
         val windowWidth: Int,
         val windowHeight: Int,
         val cameraType: CameraType,
@@ -563,7 +567,7 @@ object PovCapture {
     private var standIn: Marker? = null
 
     /** Each teammate's entity uuid, from when it was last loaded: the key to their last sampled pose. */
-    private val seenAs = HashMap<String, java.util.UUID>()
+    private val seenAs = HashMap<String, UUID>()
 
     /**
      * How long a teammate who has just gone out of entity range keeps their last real pose. At the
@@ -662,9 +666,9 @@ object PovCapture {
     }
 
     /** JOML's `Matrix4fStack` keeps its depth in the private int `curr`; null when that can't be read. */
-    private val CURR_FIELD: java.lang.reflect.Field? by lazy {
+    private val CURR_FIELD: Field? by lazy {
         try {
-            org.joml.Matrix4fStack::class.java.getDeclaredField("curr").apply { isAccessible = true }
+            Matrix4fStack::class.java.getDeclaredField("curr").apply { isAccessible = true }
         } catch (t: Throwable) {
             EngineerClient.logger.warn("[ec] pov: can't read the model-view stack depth, a failed pass won't be unwound", t)
             null
@@ -696,7 +700,7 @@ object PovCapture {
      */
     private fun releasePreparedFrame() {
         val dispatcher = EngineerClient.mc.gameRenderer.featureRenderDispatcher()
-        val frame = FRAME_FIELD.get(dispatcher) as net.minecraft.client.renderer.feature.FeatureRenderDispatcher.PreparedFrame
+        val frame = FRAME_FIELD.get(dispatcher) as FeatureRenderDispatcher.PreparedFrame
         if (CONTEXT_FIELD.get(frame) == null) return
         try {
             frame.close()
@@ -708,9 +712,9 @@ object PovCapture {
         EngineerClient.logger.info("[ec] pov: freed the frame a failed pass left in use")
     }
 
-    private val FRAME_FIELD by lazy { net.minecraft.client.renderer.feature.FeatureRenderDispatcher::class.java.getDeclaredField("preparedFrame").apply { isAccessible = true } }
-    private val CONTEXT_FIELD by lazy { net.minecraft.client.renderer.feature.FeatureRenderDispatcher.PreparedFrame::class.java.getDeclaredField("context").apply { isAccessible = true } }
-    private val STORAGE_FIELD by lazy { net.minecraft.client.renderer.feature.FeatureRenderDispatcher.PreparedFrame::class.java.getDeclaredField("submitNodeStorage").apply { isAccessible = true } }
+    private val FRAME_FIELD by lazy { FeatureRenderDispatcher::class.java.getDeclaredField("preparedFrame").apply { isAccessible = true } }
+    private val CONTEXT_FIELD by lazy { FeatureRenderDispatcher.PreparedFrame::class.java.getDeclaredField("context").apply { isAccessible = true } }
+    private val STORAGE_FIELD by lazy { FeatureRenderDispatcher.PreparedFrame::class.java.getDeclaredField("submitNodeStorage").apply { isAccessible = true } }
 
     private fun fail(t: Throwable) {
         disabledForSession = true

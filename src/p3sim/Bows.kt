@@ -1,6 +1,7 @@
 package com.engineerclient.p3sim
 
 import com.engineerclient.EngineerClient
+import net.minecraft.core.particles.ParticleTypes
 import net.minecraft.network.chat.Component
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.sounds.SoundEvent
@@ -18,6 +19,7 @@ import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.Items
 import net.minecraft.world.level.ClipContext
 import net.minecraft.world.level.Level
+import net.minecraft.world.phys.AABB
 import net.minecraft.world.phys.BlockHitResult
 import net.minecraft.world.phys.EntityHitResult
 import net.minecraft.world.phys.HitResult
@@ -194,7 +196,7 @@ object Bows {
             val block = level.clip(ClipContext(from, at, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, owner ?: Sim.player!!))
             val end = if (block.type == HitResult.Type.MISS) at else block.location
             // The boss withers.
-            val boss = level.getEntitiesOfClass(LivingEntity::class.java, net.minecraft.world.phys.AABB(from, end).inflate(1.0)) { isBoss(it) }
+            val boss = level.getEntitiesOfClass(LivingEntity::class.java, AABB(from, end).inflate(1.0)) { isBoss(it) }
                 .filter { !immune(it) }
                 .mapNotNull { w -> w.boundingBox.inflate(0.3).clip(from, end).map { w to it }.orElse(null) }
                 .minByOrNull { it.second.distanceToSqr(from) }
@@ -227,7 +229,7 @@ object Bows {
      * Damage immunity of an arrow's target: vanilla's hurt window (invulnerableTime over half of 20). The sim's boss
      * withers are never damaged, so this never holds for them; the rebound path in [SimArrow] is generic.
      */
-    fun immune(e: Entity): Boolean = e is net.minecraft.world.entity.LivingEntity && e.invulnerableTime > 10
+    fun immune(e: Entity): Boolean = e is LivingEntity && e.invulnerableTime > 10
 
     private fun isBoss(e: Entity) = e is WitherBoss && e.isAlive && e.entityTags().contains(Sim.TAG)
 
@@ -248,7 +250,7 @@ object Bows {
     /** Explosive Shot: the blast where the arrow landed; within 2 blocks of a gate it blows it. */
     private fun explode(at: Vec3) {
         Sim.sound(SoundEvents.GENERIC_EXPLODE, 1f, 0.8f + Random.nextFloat() * 0.18f, at, SoundSource.MASTER)
-        Sim.level.sendParticles(net.minecraft.core.particles.ParticleTypes.EXPLOSION, at.x, at.y, at.z, 1, 0.0, 0.0, 0.0, 0.0)
+        Sim.level.sendParticles(ParticleTypes.EXPLOSION, at.x, at.y, at.z, 1, 0.0, 0.0, 0.0, 0.0)
         (Fight.phase as? GoldorPhase)?.let { g -> g.gateNear(at, 2.0).takeIf { it > 0 }?.let { g.blowGate(it, Sim.me) } }
     }
 

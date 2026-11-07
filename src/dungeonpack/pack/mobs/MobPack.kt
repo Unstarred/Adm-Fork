@@ -5,6 +5,9 @@ import com.engineerclient.dungeonpack.pack.rooms.checkHeader
 import com.google.gson.JsonObject
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Base64
+import java.util.SortedMap
+import java.util.TreeMap
 
 /*
  * The "Mob tables" data pack, version 1 (FORMAT-mobs.md): mob archetypes, name modifiers, the per-run HP scale, per-room
@@ -107,7 +110,7 @@ class RoomMobs(
 data class Miniboss(val room: String, val arch: Int, val cell: Pos?, val src: String?, val hpFactor: Double?, val loop: List<Pos>?)
 
 /** FORMAT-mobs 7: a melee-hit table. `quantiles` are percentiles 0..100 of the hit size (percent of max HP), `atoms` exact values with their probability. */
-class MeleeTable(val n: Int, val perMinute: Double, val quantiles: java.util.SortedMap<Double, Double>, val atoms: List<Atom>, val provisional: Boolean) {
+class MeleeTable(val n: Int, val perMinute: Double, val quantiles: SortedMap<Double, Double>, val atoms: List<Atom>, val provisional: Boolean) {
     data class Atom(val value: Double, val p: Double)
 }
 
@@ -245,7 +248,7 @@ class MobPack internal constructor(
         private fun parseSkin(s: JsonObject, withVariants: Boolean): MobSkin {
             val value = s.str("value")
             // The rebuilt textures property says "slim" in its metadata (a decoded value is not needed here: the pack writes it compactly).
-            val slim = value?.let { v -> try { String(java.util.Base64.getDecoder().decode(v), Charsets.UTF_8).contains("\"slim\"") } catch (e: Exception) { false } } ?: false
+            val slim = value?.let { v -> try { String(Base64.getDecoder().decode(v), Charsets.UTF_8).contains("\"slim\"") } catch (e: Exception) { false } } ?: false
             val variants = if (withVariants) s.arr("variants").objects().map { parseSkin(it, withVariants = false) } else emptyList()
             return MobSkin(s.str("id") ?: "", value, s.str("signature"), slim, variants)
         }
@@ -283,7 +286,7 @@ class MobPack internal constructor(
         private fun hit(o: JsonObject?): HitQuantiles? = o?.let { HitQuantiles(it.int("n") ?: 0, it.dbl("p10") ?: 0.0, it.dbl("p50") ?: 0.0, it.dbl("p90") ?: 0.0) }
 
         private fun meleeTable(o: JsonObject): MeleeTable {
-            val q = java.util.TreeMap<Double, Double>()
+            val q = TreeMap<Double, Double>()
             o.obj("quantiles")?.entrySet()?.forEach { (k, v) -> val kk = k.toDoubleOrNull(); val vv = v.asDoubleOrNull(); if (kk != null && vv != null) q[kk] = vv }
             return MeleeTable(o.int("n") ?: 0, o.dbl("perMinute") ?: 0.0, q,
                 o.arr("atoms").objects().mapNotNull { a -> MeleeTable.Atom(a.dbl("value") ?: return@mapNotNull null, a.dbl("p") ?: return@mapNotNull null) },
