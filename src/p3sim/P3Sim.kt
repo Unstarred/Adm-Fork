@@ -24,6 +24,7 @@ import net.fabricmc.fabric.api.client.screen.v1.Screens
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.TitleScreen
 import net.minecraft.network.chat.Component
+import net.minecraft.world.entity.decoration.Mannequin
 import com.mojang.blaze3d.platform.InputConstants
 
 /**
@@ -191,10 +192,14 @@ object P3Sim : Module(
     val hidePlayers: Boolean get() = com.odtheking.odin.features.impl.render.HidePlayers.enabled
     fun toggleHidePlayers() = com.odtheking.odin.features.impl.render.HidePlayers.toggle()
 
-    /** A bot (a mannequin in the sim) Odin's Hide Players would hide if it were a player. Client thread. */
+    /**
+     * A bot (a mannequin in the sim) Odin's Hide Players would hide if it were a player. Client thread, every entity
+     * every frame, everywhere: the type comes first because it is a plain check, while Hide Players and [inSim] read
+     * Odin state that in Odin 0.4.0 is Compose state (a snapshot lookup each).
+     */
     @JvmStatic
     fun hideBot(e: net.minecraft.world.entity.Entity): Boolean {
-        if (!hidePlayers || !inSim || e !is net.minecraft.world.entity.decoration.Mannequin) return false
+        if (e !is Mannequin || !hidePlayers || !inSim) return false
         val hp = com.odtheking.odin.features.impl.render.HidePlayers
         if ((hp.settings["Hide all"] as? BooleanSetting)?.value == true) return true
         val d = (hp.settings["Distance"] as? NumberSetting<*>)?.value?.toDouble() ?: 3.0

@@ -174,12 +174,13 @@ object RandomStuff : Module(
     fun logsHiddenChat(): Boolean = logHidden
 
     /**
-     * Whether text drawn at pose scale [scale] should be sampled smoothly (ClickGuiTextMixin): only in
-     * Odin's menu, and only where a font pixel doesn't land on a whole number of screen pixels.
+     * Whether text drawn with pose scale terms [m00] and [m01] should be sampled smoothly (ClickGuiTextMixin): only in
+     * Odin's menu, and only where a font pixel doesn't land on a whole number of screen pixels. This runs for every
+     * glyph of every frame, menu or not, so the screen comes first and the scale (a square root) only in the menu.
      */
-    fun smoothsGuiText(scale: Float): Boolean {
+    fun smoothsGuiText(m00: Float, m01: Float): Boolean {
         if (mc.gui.screen() !is com.odtheking.odin.clickgui.ClickGUI) return false
-        val px = scale * mc.window.guiScale
+        val px = kotlin.math.sqrt(m00 * m00 + m01 * m01) * mc.window.guiScale
         return kotlin.math.abs(px - kotlin.math.round(px)) > 0.01f
     }
 
@@ -218,6 +219,14 @@ object RandomStuff : Module(
             (key == InputConstants.KEY_RETURN || key == InputConstants.KEY_NUMPADENTER)
 
     /**
+     * No Enchant Glint, on and enabled, as a plain field: written each tick and cleared when the module turns off
+     * (as [ScoreboardLines.hideLines] is). [hidesGlint] reads it for every item layer drawn, and the module's enabled
+     * flag and the setting are Compose state in Odin 0.4.0, a snapshot lookup each: they were up to 0.75% of the
+     * render thread in the FPS bench (2026-11-06).
+     */
+    private var glintOff = false
+
+    /**
      * Whether the glint should be dropped for an item about to be drawn in [context].
      *
      * Called once per item layer whenever a model is resolved — every frame for items in the
@@ -225,7 +234,7 @@ object RandomStuff : Module(
      * allocation, no screen walk beyond the identity check Odin's terminal state already gives us.
      */
     fun hidesGlint(context: ItemDisplayContext): Boolean {
-        if (!enabled || !noGlint) return false
+        if (!glintOff) return false
         // The one exception, and it is not a toggle because turning it off only ever hurts: while a
         // terminal is open the glint is how you see which items you have already clicked. Odin's
         // solvers read the glint component rather than the render, so they are unaffected either way
@@ -292,6 +301,7 @@ object RandomStuff : Module(
 
     init {
         on<TickEvent.End> {
+            glintOff = enabled && noGlint
             ScoreboardLines.hideLines = enabled && hideSbLines
             ScoreboardLines.hideCatacombsLocation = hideSbCatacombs
             ScoreboardLines.hideTimeElapsed = hideSbElapsed
@@ -363,5 +373,6 @@ object RandomStuff : Module(
     override fun onDisable() {
         super.onDisable()
         ScoreboardLines.hideLines = false
+        glintOff = false
     }
 }

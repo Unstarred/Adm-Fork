@@ -640,7 +640,7 @@ object DungeonSplits : Module(
         val split = tracker.split(SplitTracker.STORM) ?: return emptyList()
         val now = now()
         val floor = DungeonUtils.floor?.name
-        val bests = bests(floor)
+        val bests = bestsView(floor)
         val steps = subs.forSplit(SplitTracker.STORM)
         val ids = subs.idsForSplit(SplitTracker.STORM)
         val graded = steps.mapIndexed { i, st ->
@@ -749,16 +749,19 @@ object DungeonSplits : Module(
     }
 
     /** A best kept here, for Odin's own splits too ([OdinSplitsLook]). */
-    fun bestOf(floor: String, id: String): Long? = validBest(id, bests(floor)[id], floor)
+    fun bestOf(floor: String, id: String): Long? = validBest(id, bestsView(floor)[id], floor)
 
     /**
      * Records a finished [value] of [id] as the best on [floor] when it is one. Never in a P3 Sim
      * run, whose earlier rows (Odin's too, via [SimOdinSplits]) are Pace targets, not times.
+     * Called for every split row every frame: the cached bests are compared first, and only a new best takes a copy.
      */
     fun recordBest(floor: String, id: String, value: Long, finished: Boolean) {
         if (!finished || !keepsTimes || !SubSplitGrades.canBeBest(id, value, floor)) return
+        if (value >= (validBest(id, bestsView(floor)[id], floor) ?: Long.MAX_VALUE)) return
         val bests = bests(floor)
-        if (value < (validBest(id, bests[id], floor) ?: Long.MAX_VALUE)) { bests[id] = value; saveBests(floor, bests) }
+        bests[id] = value
+        saveBests(floor, bests)
     }
 
     /** A kept best, unless it is under its step's floor (kept before the floor was raised): then none. */
@@ -813,8 +816,13 @@ object DungeonSplits : Module(
     }
     private var typicalCache: Pair<Map<String, List<SplitPace.Clocks>>, HashMap<String, SplitPace.Clocks?>> = emptyMap<String, List<SplitPace.Clocks>>() to HashMap()
 
-    private fun bests(floor: String?): MutableMap<String, Long> = SubSplitGrades.parseBests(
-        when (floor) { "F7" -> bestsF7; "M7" -> bestsM7; else -> "" })
+    private fun bestsText(floor: String?) = when (floor) { "F7" -> bestsF7; "M7" -> bestsM7; else -> "" }
+
+    /** The bests to read ([SubSplitGrades.bestsView]: cached, no copy). */
+    private fun bestsView(floor: String?): Map<String, Long> = SubSplitGrades.bestsView(bestsText(floor))
+
+    /** The bests to change and save: a copy. */
+    private fun bests(floor: String?): MutableMap<String, Long> = SubSplitGrades.parseBests(bestsText(floor))
 
     private fun saveBests(floor: String?, bests: Map<String, Long>) {
         val text = SubSplitGrades.formatBests(bests)

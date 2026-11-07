@@ -95,6 +95,9 @@ object PovCapture {
 
     private const val FEEDS = 4
 
+    /** How long [costLine] keeps its text: four readings a second. */
+    private const val COST_LINE_NANOS = 250_000_000L
+
     private val feeds = arrayOfNulls<RenderTarget>(FEEDS)
 
     /** Feed-sized stand-in for GameRenderer.hud3DTarget (26.3), shared by the passes. */
@@ -183,12 +186,25 @@ object PovCapture {
         freeFeedsNow()
     }
 
-    /** The debug HUD line, or null when there is nothing to say. */
+    /** [costLine] as last built, and when (System.nanoTime). */
+    private var costText: String? = null
+    private var costTextAt = 0L
+
+    /**
+     * The debug HUD line, or null when there is nothing to say. Rebuilt at most every [COST_LINE_NANOS]: a number that
+     * changes every frame can't be read, and formatting it every frame (then laying the new string out again) was the
+     * largest share of ADM's own time in the leap menu in the FPS bench (2026-11-06).
+     */
     fun costLine(): String? {
         if (!PovPreviews.showCost || !PovPreviews.wants()) return null
+        val now = System.nanoTime()
+        costText?.let { if (now - costTextAt < COST_LINE_NANOS) return it }
         val live = (0 until FEEDS).count { !empty[it] && !outOfRange[it] }
-        return "§7POV §f${"%.1f".format(lastCostMs)}§7ms  §f$live§7/4" +
+        val line = "§7POV §f${"%.1f".format(lastCostMs)}§7ms  §f$live§7/4" +
             (if (SodiumBridge.available && PovPreviews.recullTerrain) " §8recull" else "")
+        costText = line
+        costTextAt = now
+        return line
     }
 
     // --------------------------------------------------------------- GUI (extract phase)

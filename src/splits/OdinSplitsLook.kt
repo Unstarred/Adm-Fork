@@ -34,6 +34,9 @@ import net.minecraft.client.gui.GuiGraphicsExtractor
  */
 object OdinSplitsLook {
 
+    /** Minecraft's § formatting codes. Compiled once: [grade] runs for every split row, every frame. */
+    private val FORMATTING = Regex("§.")
+
     private enum class Look(private val label: String) { ODIN_SPLITS("Odin"), ENGINEER_SPLITS("ADM"); override fun toString() = label }
     private enum class PaceFloor { F7, M7 }
     enum class PaceFrom(private val label: String) { RECENT("Recent Runs"), TARGETS("Targets"); override fun toString() = label }
@@ -262,7 +265,7 @@ object OdinSplitsLook {
      * best (kept with the sub splits' bests), on M7 gold only.
      */
     private fun grade(name: String, ms: Long, ticks: Long, over: Boolean, master: Boolean): String? {
-        val id = SubSplitGrades.MAIN_SPLITS[name.replace(Regex("§."), "").trim()] ?: return null
+        val id = SubSplitGrades.MAIN_SPLITS[name.replace(FORMATTING, "").trim()] ?: return null
         val floor = if (master) "M7" else "F7"
         val value = SubSplitGrades.value(id, ms, ticks)
         DungeonSplits.recordBest(floor, id, value, over)

@@ -24,14 +24,29 @@ object OdinOnScreen {
     @JvmStatic
     fun panelMaxY(odinMax: Int): Int = (odinMax - MIN_LIST).coerceAtLeast(0)
 
-    /** Runs [draw] (Odin drawing the HUDs in play) with each HUD inside the screen, then puts the saved places back. */
+    /**
+     * Each HUD's saved place while [hudsOnScreen] draws, x then y, kept between frames so a frame allocates nothing.
+     * Render thread only.
+     */
+    private var saved = IntArray(0)
+
+    /**
+     * Runs [draw] (Odin drawing the HUDs in play) with each HUD inside the screen, then puts the saved places back.
+     *
+     * Every HUD is clamped, drawn or not: one that is off doesn't draw, and asking would read its enabled flag, which
+     * in Odin 0.4.0 is Compose state (a snapshot lookup per HUD per frame). Positions and sizes are plain fields. This
+     * runs every frame in play: the filtered and mapped lists it used to build were ~2.5% of the render thread in the
+     * FPS bench (gametest/FpsGameTest, 2026-11-06).
+     */
     @JvmStatic
     fun hudsOnScreen(draw: Runnable) {
-        val huds = ModuleManager.hudSettingsCache.filter { it.isEnabled }.map { it.hud }
-        val saved = IntArray(huds.size * 2)
+        val settings = ModuleManager.hudSettingsCache
+        val count = settings.size
+        if (saved.size < count * 2) saved = IntArray(count * 2)
         val width = mc.window.guiScaledWidth
         val height = mc.window.guiScaledHeight
-        huds.forEachIndexed { i, hud ->
+        for (i in 0 until count) {
+            val hud = settings[i].hud
             saved[2 * i] = hud.x; saved[2 * i + 1] = hud.y
             // A minimised window has no size: leave every HUD where it is.
             if (width > 0 && height > 0) {
@@ -42,7 +57,10 @@ object OdinOnScreen {
         try {
             draw.run()
         } finally {
-            huds.forEachIndexed { i, hud -> hud.x = saved[2 * i]; hud.y = saved[2 * i + 1] }
+            for (i in 0 until minOf(count, settings.size)) {
+                val hud = settings[i].hud
+                hud.x = saved[2 * i]; hud.y = saved[2 * i + 1]
+            }
         }
     }
 }

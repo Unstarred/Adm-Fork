@@ -18,11 +18,13 @@ import com.odtheking.odin.features.impl.dungeon.LeapMenu
 import com.odtheking.odin.utils.Colors
 import com.odtheking.odin.utils.equalsOneOf
 import com.odtheking.odin.utils.render.text
-import com.odtheking.odin.utils.render.textDim
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
+import net.minecraft.locale.Language
+import net.minecraft.network.chat.FormattedText
+import net.minecraft.util.FormattedCharSequence
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket
 
 /**
@@ -154,10 +156,24 @@ object PovPreviews : Module(
         drawLine(this, line)
     }
 
+    /** The last line [drawLine] laid out, its visual order and width: the cost line changes a few times a second. */
+    private var laidOut: String? = null
+    private var laidOutText: FormattedCharSequence? = null
+    private var laidOutWidth = 0
+
+    /**
+     * Draws [line] once and says its size. Vanilla draws a String by laying it out first (`Language.getVisualOrder`, a
+     * bidi pass), every call, so the layout is kept per line. Odin's `textDim` is not a measure: it draws the text
+     * too, and this used to call it and then `text`, drawing the line twice a frame.
+     */
     private fun drawLine(gfx: GuiGraphicsExtractor, line: String): Pair<Int, Int> {
-        val width = gfx.textDim(line, 0, 0, Colors.WHITE).first
-        gfx.text(line, 0, 0, Colors.WHITE)
-        return width to 9
+        val laid = laidOutText?.takeIf { line == laidOut } ?: Language.getInstance().getVisualOrder(FormattedText.of(line)).also {
+            laidOut = line
+            laidOutText = it
+            laidOutWidth = Minecraft.getInstance().font.width(it)
+        }
+        gfx.text(laid, 0, 0, Colors.WHITE)
+        return laidOutWidth to 9
     }
 
     /**
