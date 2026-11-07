@@ -18,7 +18,6 @@ import net.fabricmc.fabric.api.event.player.UseItemCallback
 import net.minecraft.ChatFormatting
 import net.minecraft.core.BlockPos
 import net.minecraft.core.Direction
-import net.minecraft.core.Rotations
 import net.minecraft.core.component.DataComponentType
 import net.minecraft.core.component.DataComponents
 import net.minecraft.core.particles.ParticleTypes
@@ -26,18 +25,11 @@ import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.core.registries.Registries
 import net.minecraft.nbt.CompoundTag
 import net.minecraft.network.chat.Component
-import net.minecraft.network.protocol.game.ClientboundAddEntityPacket
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket
-import net.minecraft.network.protocol.game.ClientboundContainerClosePacket
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket
-import net.minecraft.network.protocol.game.ClientboundEntityEventPacket
 import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket
-import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket
-import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket
 import net.minecraft.network.protocol.game.ClientboundSetHeldSlotPacket
 import net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket
-import net.minecraft.network.protocol.game.ClientboundSoundPacket
-import net.minecraft.network.protocol.game.ClientboundSystemChatPacket
 import net.minecraft.resources.Identifier
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.server.level.ServerPlayer
@@ -45,33 +37,18 @@ import net.minecraft.sounds.SoundEvents
 import net.minecraft.sounds.SoundSource
 import net.minecraft.world.InteractionHand
 import net.minecraft.world.InteractionResult
-import net.minecraft.world.SimpleContainer
-import net.minecraft.world.SimpleMenuProvider
 import net.minecraft.world.effect.MobEffectInstance
 import net.minecraft.world.effect.MobEffects
 import net.minecraft.world.entity.Entity
-import net.minecraft.world.entity.EntityTypes
 import net.minecraft.world.entity.EquipmentSlot
-import net.minecraft.world.entity.LightningBolt
 import net.minecraft.world.entity.LivingEntity
 import net.minecraft.world.entity.Relative
-import net.minecraft.world.entity.ai.attributes.Attributes
 import net.minecraft.world.entity.boss.enderdragon.EndCrystal
-import net.minecraft.world.entity.boss.wither.WitherBoss
 import net.minecraft.world.entity.decoration.ArmorStand
 import net.minecraft.world.entity.decoration.ItemFrame
-import net.minecraft.world.entity.monster.Creeper
-import net.minecraft.world.entity.player.Inventory
 import net.minecraft.world.entity.player.Player
-import net.minecraft.world.entity.projectile.FireworkRocketEntity
-import net.minecraft.world.entity.projectile.FishingHook
 import net.minecraft.world.entity.projectile.Projectile
 import net.minecraft.world.entity.projectile.arrow.AbstractArrow
-import net.minecraft.world.inventory.AbstractContainerMenu
-import net.minecraft.world.inventory.ChestMenu
-import net.minecraft.world.inventory.ContainerInput
-import net.minecraft.world.inventory.ContainerSynchronizer
-import net.minecraft.world.inventory.MenuType
 import net.minecraft.world.item.BlockItem
 import net.minecraft.world.item.BowItem
 import net.minecraft.world.item.Item
@@ -79,8 +56,6 @@ import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.Items
 import net.minecraft.world.item.component.CustomData
 import net.minecraft.world.item.component.DyedItemColor
-import net.minecraft.world.item.component.FireworkExplosion
-import net.minecraft.world.item.component.Fireworks
 import net.minecraft.world.item.component.ItemLore
 import net.minecraft.world.item.component.ResolvableProfile
 import net.minecraft.world.item.component.Tool
@@ -89,9 +64,7 @@ import net.minecraft.world.item.enchantment.Enchantments
 import net.minecraft.world.item.enchantment.ItemEnchantments
 import net.minecraft.world.level.ClipContext
 import net.minecraft.world.level.Level
-import net.minecraft.world.level.block.AbstractBannerBlock
 import net.minecraft.world.level.block.AbstractCauldronBlock
-import net.minecraft.world.level.block.AbstractSkullBlock
 import net.minecraft.world.level.block.AnvilBlock
 import net.minecraft.world.level.block.BannerBlock
 import net.minecraft.world.level.block.BaseFireBlock
@@ -108,19 +81,14 @@ import net.minecraft.world.level.block.FaceAttachedHorizontalDirectionalBlock
 import net.minecraft.world.level.block.FireBlock
 import net.minecraft.world.level.block.FlowerPotBlock
 import net.minecraft.world.level.block.HopperBlock
-import net.minecraft.world.level.block.IronBarsBlock
 import net.minecraft.world.level.block.LadderBlock
 import net.minecraft.world.level.block.LeverBlock
-import net.minecraft.world.level.block.LightBlock
-import net.minecraft.world.level.block.LiquidBlock
 import net.minecraft.world.level.block.PipeBlock
 import net.minecraft.world.level.block.RedstoneWallTorchBlock
 import net.minecraft.world.level.block.RedstoneWireBlock
-import net.minecraft.world.level.block.SignBlock
 import net.minecraft.world.level.block.SkullBlock
 import net.minecraft.world.level.block.SnowLayerBlock
 import net.minecraft.world.level.block.StandingSignBlock
-import net.minecraft.world.level.block.TallGrassBlock
 import net.minecraft.world.level.block.TripWireBlock
 import net.minecraft.world.level.block.TripWireHookBlock
 import net.minecraft.world.level.block.VegetationBlock
@@ -140,16 +108,12 @@ import net.minecraft.world.phys.AABB
 import net.minecraft.world.phys.BlockHitResult
 import net.minecraft.world.phys.HitResult
 import net.minecraft.world.phys.Vec3
-import net.minecraft.world.phys.shapes.CollisionContext
-import java.util.Base64
 import java.util.LinkedHashSet
 import java.util.Locale
 import java.util.UUID
 import java.util.WeakHashMap
-import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.floor
-import kotlin.math.sign
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -160,10 +124,6 @@ import kotlin.random.Random
  * · 5 Pet Rod · 6 Infinileap · 7 Jerry-chine Gun · 8 Wither Cloak Sword · 9 SkyBlock Menu
  * (opens the sim menu); in the inventory Hyperion, an Aspect of the Void (etherwarp merged) and a
  * Terminator.
- *
- * Teleports follow Hypixel's measured rules: etherwarp is a voxel DDA
- * from the sneak eye over 61 blocks onto a block with room above (+0.5, +1.05, +0.5), blinks step
- * whole blocks (AOTV 12, Hyperion 10) checking every quarter; look kept, velocity zeroed.
  */
 object SimItems {
     // ------------------------------------------------------------------ the items
@@ -180,612 +140,6 @@ object SimItems {
         extra(tag)
         s.set(DataComponents.CUSTOM_DATA, CustomData.of(tag))
         return s
-    }
-
-    /** Hypixel's item text as recorded from the server; {UXXXX} stands for a private-use glyph, {T}/{SEC} for Terror's piece count and stack seconds. */
-    object Lore {
-        private val GLYPH = Regex("\\{U([0-9A-F]{4})\\}")
-        fun u(t: String) = GLYPH.replace(t) { it.groupValues[1].toInt(16).toChar().toString() }
-        private fun lines(raw: String) = raw.trim('\n').split('\n').map { u(it) }
-        /** The component-hiding list Hypixel sends on every item (the Dungeonbreaker's has 14). */
-        val HIDDEN = listOf("minecraft:jukebox_playable", "minecraft:painting/variant", "minecraft:map_id", "minecraft:fireworks", "minecraft:attribute_modifiers", "minecraft:unbreakable",
-            "minecraft:written_book_content", "minecraft:banner_patterns", "minecraft:trim", "minecraft:potion_contents", "minecraft:dyed_color", "minecraft:charged_projectiles")
-        val HIDDEN_BREAKER = listOf("minecraft:painting/variant", "minecraft:fireworks", "minecraft:attribute_modifiers", "minecraft:enchantments", "minecraft:stored_enchantments", "minecraft:trim",
-            "minecraft:charged_projectiles", "minecraft:jukebox_playable", "minecraft:map_id", "minecraft:unbreakable", "minecraft:written_book_content", "minecraft:banner_patterns", "minecraft:potion_contents", "minecraft:dyed_color")
-        val SUPERBOOM_TNT_NAME = u("§9Superboom TNT")
-        val SUPERBOOM_TNT = lines("""
-§7Blows up cracked brick walls and
-§7crypts, which are typically found in
-§cDungeons §7and the §5Crystal Hollows§7.
-
-§9§lRARE
-""")
-        val HYPERION_NAME = u("§dHeroic Hyperion §6✪✪✪✪✪")
-        val HYPERION = lines("""
-§7Gear Score: §d5000
-§7Damage: §c+2,195.2 §e(+30)
-§7Strength: §c+1,472 §e(+30) §9(+50)
-§7Crit Damage: §9+448%
-§7Attack Speed: §e+10.85% §9(+7%)
-§7Ferocity: §c+46.5
-§7Intelligence: §b+4,064 §9(+125) §d(+60)
-§7Gemstones: §6[§b{UE003}§6] §6[§b⚔§6]
-
-§d§lSwarm V, §9Bane of Arthropods VI, §9Champion X
-§9Cleave V, §9Critical VI, §9Cubism V
-§9Ender Slayer VI, §9Experience IV, §9Fire Aspect III
-§9First Strike IV, §9Giant Killer VII, §9Impaling III
-§9Lethality VI, §9Life Steal V, §9Looting IV
-§9Luck VI, §9Prosecute VI, §9Scavenger V
-§9Smite VII, §9Tabasco III, §9Thunderlord VI
-§9Vampirism VI, §9Venomous V
-
-§7Deals §c+50% §7damage to §8{UE085} Wither §7mobs.
-§7Grants §c+1 §c{UE050} Damage §7and §a+2 §b{UE003}
-§bIntelligence §7per §cCatacombs §7level.
-
-§aScroll Abilities:
-§b§l⦾ §6Ability: Wither Impact  §e§lRIGHT CLICK
-§7Teleport §a10 blocks§7 ahead of you
-§7dealing §c1,798,815.7 §7damage to nearby
-§7enemies. Also reduces your damage
-§7taken and grants an absorption
-§7shield for §e5 seconds§7.
-§8Mana Cost: §b270{UE003}
-
-§fKills: §61,304,218
-
-§d§la §d§lMYTHIC DUNGEON SWORD §d§la
-""")
-        val TERMINATOR_NAME = u("§dPrecise Terminator §6✪✪✪✪✪§c➎")
-        val TERMINATOR = lines("""
-§7Gear Score: §d4947
-§7Damage: §c+2,195.2 §e(+30)
-§7Strength: §c+761.6 §e(+30) §6[+5] §9(+34)
-§7Crit Chance: §9+46.5% §9(+15%)
-§7Crit Damage: §9+2,080% §9(+70%)
-§7Attack Speed: §e+62%
-§7Shot Cooldown: §a0.5s
-
-§d§lSoul Eater V, §9Chance V, §9Cubism V
-§9Flame II, §9Gravity VI, §9Impaling V
-§9Infinite Quiver X, §9Overload V, §9Piercing I
-§9Power VII, §9Snipe IV, §9Tabasco III
-§9Toxophilite X
-
-§7Shoots §b3 §7arrows at once.
-§7Can damage endermen.
-
-§cDivides your §9{UE02C} Crit Chance §cby 4!
-
-§6Ability: Salvation  §e§lLEFT CLICK
-§7Can be cast after landing §63 §7hits.
-§7Shoot a beam, penetrating up to §e5
-§7enemies.
-§7The beam always crits.
-§8Soulflow Cost: §31⸎
-
-§dShortbow: Instantly shoots!
-
-§fKills: §6157,045
-
-§9Precise Bonus
-§7Deal §a+10% §7extra damage when
-§7arrows hit the head of a mob.
-
-§8§l* §8Co-op Soulbound §8§l*
-§d§la §d§lMYTHIC DUNGEON BOW §d§la
-""")
-        val WITHER_CLOAK_NAME = u("§6Odd Wither Cloak Sword")
-        val WITHER_CLOAK = lines("""
-§7Gear Score: §d4964
-§7Defense: §a+1,475
-§7Damage: §c+1,121
-§7Strength: §c+796.5
-§7Crit Chance: §9+26.25% §9(+25%)
-§7Crit Damage: §9+177% §9(+30%)
-§7Intelligence: §b-295 §9(-50)
-
-§c§l⦾ §6Ability: Creeper Veil  §e§lRIGHT CLICK
-§7Spawns a layered veil that negates
-§7damage for §a10s§7, as follows:
-
-§8➤ §7Lose a layer on hit, consuming
-§430§4{UE028} Vitality §7and block up to §c5,850
-§7damage.
-§8➤ §7The damage blocked scales with
-§7your §5Dungeon Stat Boost §7while in §cThe
-§cCatacombs§7.
-§8➤ §7When the damage exceeds a
-§7layer's limit, another layer is
-§7consumed, until all damage is
-§7accounted for.
-§8➤ §7When you run out of §4{UE028} Vitality§7,
-§7consume all §4{UE028} Vitality §7and take slight
-§7knockback.
-§8➤ §7You cannot attack or regenerate
-§4{UE028} Vitality §7while the veil is up.
-
-§e§lRIGHT CLICK §7while active to
-§7deactivate. Cooldown is halved on
-§7deactivation.
-§8Vitality Cost: §430{UE028}
-§8Cooldown: §a10s
-
-§cThis item can be reclaimed! Use
-§e/reclaim §cto take back what's
-§crightfully yours!
-§6§la §6§lLEGENDARY DUNGEON SWORD §6§la
-""")
-        val ASPECT_OF_THE_VOID_NAME = u("§6Heroic Aspect of the Void")
-        val ASPECT_OF_THE_VOID = lines("""
-§7Damage: §c+120
-§7Strength: §c+140 §9(+40)
-§7Attack Speed: §e+5% §9(+5%)
-§7Intelligence: §b+100 §9(+100)
-§7Gemstones: §8[§7{UE003}§8]
-
-§d§lUltimate Wise V
-§7Reduces the ability mana cost of this
-§7item by §a50%§7.
-
-§b§l⦾ §6Ability: Instant Transmission  §e§lRIGHT CLICK
-§7Teleport §a12 blocks§7 ahead of you and
-§7gain §a+50 §f{UE022} Speed§7 for §a3 seconds§7.
-§8Mana Cost: §b18{UE003}
-
-§6Ability: Ether Transmission  §e§lSNEAK RIGHT CLICK
-§7Teleport to your targeted block up
-§7to §a61 blocks §7away.
-§8Soulflow Cost: §31
-§8Mana Cost: §b73{UE003}
-
-§6§la §6§lLEGENDARY SWORD §6§la
-""")
-        val JERRY_STAFF_NAME = u("§6Heroic Jerry-chine Gun §6✪✪✪✪✪")
-        val JERRY_STAFF = lines("""
-§7Damage: §c+88
-§7Strength: §c+40 §9(+40)
-§7Attack Speed: §e+5% §9(+5%)
-§7Intelligence: §b+320 §9(+100)
-
-§d§lUltimate Wise V
-§7Reduces the ability mana cost of this
-§7item by §a50%§7.
-
-§c§l⦾ §6Ability: Rapid-fire  §e§lRIGHT CLICK
-§7Shoots a Jerry bullet, dealing
-§c1,347.2 §7damage on impact and
-§7knocking you back.
-
-§7Each shot costs §3+14 mana §7more than
-§7the previous, resetting after §a4s §7of
-§7not firing.
-
-§8§l* §8Co-op Soulbound §8§l*
-§6§la §6§lLEGENDARY SWORD §6§la
-""")
-        val MOSQUITO_BOW_NAME = u("§6Mosquito Shortbow")
-        val MOSQUITO_BOW = lines("""
-§7Damage: §c+319
-§7Strength: §c+151
-§7Crit Damage: §9+39%
-§7Vitality: §4+20
-§7Shot Cooldown: §a0.5s
-
-§d§lDuplex I
-§7Shoot an extra arrow dealing §c4% §7of the
-§7first arrow's damage.
-§7Targets hit take §c1.1x §7fire damage
-§7for §a60s§7.
-§9Flame II
-§7Arrows ignite your enemies for §a4s§7,
-§7dealing §a6% §7of your damage per
-§7second.
-
-§6Ability: Eggsecute 
-§7Arrows fired from this weapon deal
-§c3x §7damage to §aEgg Sacs §7spawned by
-§7the §cTarantula Broodfather§7!
-
-§6Ability: Nasty Bite  §e§lLEFT CLICK
-§7Shoot an enhanced shot, healing you
-§7for §c189❤ Health §7on hit.
-§8Vitality Cost: §410{UE028}
-
-§6Shortbow: Instantly shoots!
-
-§8This item can be reforged!
-§6§lLEGENDARY BOW
-""")
-        val ENDER_PEARL_NAME = u("§fEnder Pearl")
-        val ENDER_PEARL = lines("""
-§8Collection Item
-
-§f§lCOMMON
-""")
-        val SKYBLOCK_MENU_NAME = u("§aSkyBlock Menu §7(Click)")
-        val SKYBLOCK_MENU = lines("""
-§7View all of your SkyBlock progress,
-§7including your Skills, Collections,
-§7Recipes, and more!
-
-§eClick to open!
-""")
-        val INFINITE_SPIRIT_LEAP_NAME = u("§5Infinileap")
-        val INFINITE_SPIRIT_LEAP = lines("""
-§c§l⦾ §6Ability: Spirit Leap  §e§lRIGHT CLICK
-§7Allows you to teleport to any teammate! Grants
-§a1 §7second of immunity after teleporting,
-§7immunity is cancelled upon dealing damage.
-§8Cooldown: §a2s
-
-§cDungeons only!
-
-§5§lEPIC DUNGEON ITEM
-""")
-        val FISHING_ROD_NAME = u("§fFishing Rod")
-        val FISHING_ROD = lines("""
-§7Damage: §c+15
-§7Strength: §c+15
-§7Fishing Speed: §b+5
-§7Sea Creature Chance: §3+1%
-
-§9ථ Hook §8§lNONE
-§9ꨃ Line §8§lNONE
-§9࿉ Sinker §8§lNONE
-
-§7Talk to §2Roddy §7in the §2Backwater
-§2Bayou §7to apply parts to this rod.
-
-§8This item can be reforged!
-§f§lCOMMON FISHING ROD
-""")
-        val STARRED_SPIRIT_MASK_NAME = u("§d{UE068} Necrotic Spirit Mask §6✪✪✪✪✪")
-        val STARRED_SPIRIT_MASK = lines("""
-§7Gear Score: §d2569
-§7Health: §c+857.6
-§7Defense: §a+480
-§7Intelligence: §b+1,440 §9(+200)
-§7Health Regen: §c+15.75
-§7Speed: §f+160
-§7Respiration: §3+384
-
-§d§lWisdom V, §9Hecatomb VIII, §9Respiration IV
-§9Respite V, §9Transylvanian V, §9Vampiric Vitality X
-
-§6Ability: Second Wind 
-§7Instead of dying, gain §f+50{UE022} Speed
-§7and damage immunity for §a3 §7seconds.
-§7Also heals you for §a10% §7of your §c❤
-§cHealth §7over §a5 §7seconds.
-§8Cooldown: §a30s
-
-§d§la §d§lMYTHIC DUNGEON HELMET §d§la
-""")
-        val STARRED_BONZO_MASK_NAME = u("§5{UE068} Sunny Bonzo's Mask §6✪✪✪✪✪")
-        val STARRED_BONZO_MASK = lines("""
-§7Gear Score: §d2730
-§7Health: §c+960
-§7Defense: §a+640
-§7Intelligence: §b+960
-§7Health Regen: §c+15.75
-§7Speed: §f+38.4 §9(+6)
-§7Farming Wisdom: §3+6.2 §9(+4)
-
-§d§lWisdom V, §9Hecatomb V, §9Respite V
-§9Transylvanian V, §9Vampiric Vitality X
-
-§6Ability: Clownin' Around 
-§7Instead of dying, gain damage
-§7immunity and §a+40 §c{UE00D} Strength §7for §a3s
-§7and fully replenish your health. The
-§7cooldown and Strength bonus you
-§7receive improve based on your
-§aDungeoneering Skill §7level. This ability
-§7only works while in §cThe Catacombs§7!
-§8Cooldown: §a180s
-
-§5§la §5§lEPIC DUNGEON HELMET §5§la
-""")
-        val TERROR_CHESTPLATE_NAME = u("§6Spiked Terror Chestplate")
-        val TERROR_CHESTPLATE = lines("""
-§7Health: §c+238 §9(+8)
-§7Defense: §a+73 §9(+8)
-§7Strength: §c+10 §9(+10)
-§7Crit Chance: §9+10% §9(+10%)
-§7Crit Damage: §9+60% §9(+10%)
-§7Attack Speed: §e+14% §9(+14%)
-§7Intelligence: §b+15 §9(+10)
-§7Speed: §f+13 §9(+1)
-§7Gemstones: §8[§8⚔§8] §8[§8⚔§8]
-
-§7Mana Regeneration II§7, §7Vitality II
-
-§6Tiered Bonus: Hydra Strike ({T}/4)
-§7Every §a0.2s§7, arrow attacks grant §c1§7
-§7stack of §6⁑ Hydra Strike§7. §8Lose 1 stack
-§8after {SEC}s of not gaining a stack.
-§7
-§7Each stack grants §c+{DMG}% Damage§7 and §b+1%
-§bArrow Speed§7.
-§7
-§7At §c10§7 stacks shoot §a+2§7 arrows that deal §c20%
-§cArrow Damage§8.
-
-§6§lLEGENDARY CHESTPLATE
-""")
-        val TERROR_LEGGINGS_NAME = u("§6Spiked Terror Leggings")
-        val TERROR_LEGGINGS = lines("""
-§7Health: §c+213 §9(+8)
-§7Defense: §a+63 §9(+8)
-§7Strength: §c+10 §9(+10)
-§7Crit Chance: §9+10% §9(+10%)
-§7Crit Damage: §9+60% §9(+10%)
-§7Attack Speed: §e+14% §9(+14%)
-§7Intelligence: §b+15 §9(+10)
-§7Speed: §f+13 §9(+1)
-§7Gemstones: §8[§8⚔§8] §8[§8⚔§8]
-
-§7Breeze II§7, §7Speed I
-
-§6Tiered Bonus: Hydra Strike ({T}/4)
-§7Every §a0.2s§7, arrow attacks grant §c1§7
-§7stack of §6⁑ Hydra Strike§7. §8Lose 1 stack
-§8after {SEC}s of not gaining a stack.
-§7
-§7Each stack grants §c+{DMG}% Damage§7 and §b+1%
-§bArrow Speed§7.
-§7
-§7At §c10§7 stacks shoot §a+2§7 arrows that deal §c20%
-§cArrow Damage§8.
-
-§6§lLEGENDARY LEGGINGS
-""")
-        val TERROR_BOOTS_NAME = u("§6Spiked Terror Boots")
-        val TERROR_BOOTS = lines("""
-§7Health: §c+138 §9(+8)
-§7Defense: §a+48 §9(+8)
-§7Strength: §c+10 §9(+10)
-§7Crit Chance: §9+10% §9(+10%)
-§7Crit Damage: §9+60% §9(+10%)
-§7Attack Speed: §e+14% §9(+14%)
-§7Intelligence: §b+15 §9(+10)
-§7Speed: §f+13 §9(+1)
-§7Gemstones: §8[§8⚔§8] §8[§8⚔§8]
-
-§7Blazing Resistance I§7, §7Experience I
-
-§6Tiered Bonus: Hydra Strike ({T}/4)
-§7Every §a0.2s§7, arrow attacks grant §c1§7
-§7stack of §6⁑ Hydra Strike§7. §8Lose 1 stack
-§8after {SEC}s of not gaining a stack.
-§7
-§7Each stack grants §c+{DMG}% Damage§7 and §b+1%
-§bArrow Speed§7.
-§7
-§7At §c10§7 stacks shoot §a+2§7 arrows that deal §c20%
-§cArrow Damage§8.
-
-§6§lLEGENDARY BOOTS
-""")
-        val SPEED_WITHER_BOOTS_NAME = u("§dAncient Maxor's Boots §6✪✪✪✪✪§c➎")
-        val SPEED_WITHER_BOOTS = lines("""
-§7Gear Score: §d4935
-§7Health: §c+2,188.8 §e(+60) §c[+40] §9(+7)
-§7Defense: §a+812.8 §e(+30) §9(+7)
-§7Strength: §c+428.8 §9(+35) §d(+32)
-§7Crit Chance: §9+23.25% §9(+15%)
-§7Crit Damage: §9+608% §9(+50%)
-§7Intelligence: §b+224 §9(+25)
-§7Health Regen: §c+15.75
-§7Speed: §f+230.4
-§7Gemstones: §6[§d⚔§6] §6[§d⚔§6]
-
-§d§lLegion V, §9Depth Strider III, §9Feather Falling X
-§9Growth VI, §9Protection VI, §9Respite V
-§9Sugar Rush III, §9Vivacious Vitality VIII
-
-§7Reduces the damage you take from
-§7withers by §c10% §7and increases your
-§7arrow damage by §c5%§7.
-
-§6Full Set Bonus: Witherborn §7(0/4)
-§7Spawns a wither minion every §e30
-§7seconds up to a maximum §a1 §7wither.
-§7Your withers will travel to and
-§7explode on nearby enemies.
-
-§9Ancient Bonus
-§7Grants §a+1 §9{UE007} Crit Damage §7per
-§cCatacombs §7level.
-
-§d§la §d§lMYTHIC DUNGEON BOOTS §d§la
-""")
-        val SPEED_WITHER_LEGGINGS_NAME = u("§dNecrotic Maxor's Leggings §6✪✪✪✪✪")
-        val SPEED_WITHER_LEGGINGS = lines("""
-§7Gear Score: §d4015
-§7Health: §c+1,472
-§7Defense: §a+672
-§7Crit Damage: §9+288%
-§7Intelligence: §b+1,888 §9(+200) §d(+60)
-§7Health Regen: §c+15.75
-§7Speed: §f+192
-§7Gemstones: §6[§b⚔§6] §6[§b⚔§6]
-
-§d§lWisdom V, §9Respite V, §9Smarty Pants V
-§9Vampiric Vitality V
-
-§7Reduces the damage you take from
-§7withers by §c10% §7and increases your
-§7arrow damage by §c5%§7.
-
-§6Full Set Bonus: Witherborn §7(0/4)
-§7Spawns a wither minion every §e30
-§7seconds up to a maximum §a1 §7wither.
-§7Your withers will travel to and
-§7explode on nearby enemies.
-
-§d§la §d§lMYTHIC DUNGEON LEGGINGS §d§la
-""")
-        val MITHRIL_COAT_NAME = u("§6Necrotic Mithril Coat")
-        val MITHRIL_COAT = lines("""
-§7Defense: §a+125
-§7Intelligence: §b+150 §9(+150)
-§7Speed: §f+15
-
-§6Ability: Mithril's Protection 
-§7Any damage taken is max §a40% §7of the wearer's
-§c❤ Health§7. Gain §cRegeneration §7when this ability
-§7activates.
-
-§6§la §6§lLEGENDARY CHESTPLATE §6§la
-""")
-        val WISE_WITHER_BOOTS_NAME = u("§dNecrotic Storm's Boots §6✪✪✪✪✪")
-        val WISE_WITHER_BOOTS = lines("""
-§7Gear Score: §d4175
-§7Health: §c+1,408
-§7Defense: §a+544
-§7Intelligence: §b+3,264 §9(+200) §d(+60)
-§7Health Regen: §c+15.75
-§7Speed: §f+38.4
-§7Gemstones: §6[§b{UE003}§6] §6[§b⚔§6]
-
-§d§lWisdom V, §9Depth Strider III, §9Feather Falling X
-§9Growth V, §9Protection V, §9Respite V
-§9Sugar Rush III, §9Vampiric Vitality V
-
-§7Reduces the damage you take from
-§7withers by §c10%§7.
-
-§6Full Set Bonus: Witherborn §7(3/4)
-§7Spawns a wither minion every §e30
-§7seconds up to a maximum §a1 §7wither.
-§7Your withers will travel to and
-§7explode on nearby enemies.
-
-§d§la §d§lMYTHIC DUNGEON BOOTS §d§la
-""")
-        val WISE_WITHER_LEGGINGS_NAME = u("§dNecrotic Storm's Leggings §6✪✪✪✪✪")
-        val WISE_WITHER_LEGGINGS = lines("""
-§7Gear Score: §d5000
-§7Health: §c+2,336 §e(+60)
-§7Defense: §a+992 §e(+30)
-§7Intelligence: §b+3,424 §9(+200) §d(+60)
-§7Health Regen: §c+15.75
-§7Gemstones: §6[§b{UE003}§6] §6[§b⚔§6]
-
-§d§lWisdom V, §9Growth V, §9Protection V
-§9Respite V, §9Smarty Pants V
-
-§7Reduces the damage you take from
-§7withers by §c10%§7.
-
-§6Full Set Bonus: Witherborn §7(3/4)
-§7Spawns a wither minion every §e30
-§7seconds up to a maximum §a1 §7wither.
-§7Your withers will travel to and
-§7explode on nearby enemies.
-
-§d§la §d§lMYTHIC DUNGEON LEGGINGS §d§la
-""")
-        val WISE_WITHER_CHESTPLATE_NAME = u("§dLoving Storm's Chestplate §6✪✪✪✪✪")
-        val WISE_WITHER_CHESTPLATE = lines("""
-§7Gear Score: §d5000
-§7Health: §c+2,617.6 §e(+60) §9(+14)
-§7Defense: §a+1,177.6 §e(+30) §9(+14)
-§7True Defense: §f+15.5
-§7Intelligence: §b+2,816 §9(+120) §d(+60)
-§7Health Regen: §c+15.75
-§7Gemstones: §6[§b{UE003}§6] §6[§b⚔§6]
-
-§d§lWisdom V, §9Growth V, §9Protection V
-§9Reflection V, §9Respite V, §9True Protection I
-
-§7Reduces the damage you take from
-§7withers by §c10%§7.
-
-§6Full Set Bonus: Witherborn §7(3/4)
-§7Spawns a wither minion every §e30
-§7seconds up to a maximum §a1 §7wither.
-§7Your withers will travel to and
-§7explode on nearby enemies.
-
-§9Loving Bonus
-§7Increases ability damage by §a5%§7.
-
-§d§la §d§lMYTHIC DUNGEON CHESTPLATE §d§la
-""")
-        val WISE_WITHER_HELMET_NAME = u("§dShiny Ancient Storm's Helmet §6✪✪✪✪✪§c➊")
-        val WISE_WITHER_HELMET = lines("""
-§7Gear Score: §d5000
-§7Health: §c+1,932.8 §9(+7)
-§7Defense: §a+684.8 §9(+7)
-§7Strength: §c+224 §9(+35)
-§7Crit Chance: §9+23.25% §9(+15%)
-§7Crit Damage: §9+396.8% §9(+50%) §d(+12%)
-§7Intelligence: §b+3,072 §9(+25) §d(+30)
-§7Health Regen: §c+5.25
-§7Gemstones: §6[§b{UE003}§6] §6[§8⚔§6]
-
-§d§lLegion V, §9Big Brain V, §9Growth V
-§9Hecatomb X, §9Protection V, §9Rejuvenate V
-§9Strong Vitality V
-
-§7Reduces the damage you take from
-§7withers by §c10%§7.
-
-§6Full Set Bonus: Witherborn §7(3/4)
-§7Spawns a wither minion every §e30
-§7seconds up to a maximum §a1 §7wither.
-§7Your withers will travel to and
-§7explode on nearby enemies.
-
-§9Ancient Bonus
-§7Grants §a+1 §9{UE007} Crit Damage §7per
-§cCatacombs §7level.
-
-§d§la §d§lSHINY MYTHIC DUNGEON HELMET §d§la
-""")
-        val RACING_HELMET_NAME = u("§dRenowned Racing Helmet")
-        val RACING_HELMET = lines("""
-§7Health: §c+47 §9(+10)
-§7Defense: §a+10 §9(+10)
-§7Strength: §c+12 §9(+12)
-§7Crit Chance: §9+12% §9(+12%)
-§7Crit Damage: §9+12% §9(+12%)
-§7Attack Speed: §e+15% §9(+15%)
-§7Intelligence: §b+12 §9(+12)
-§7Speed: §f+400 §9(+1)
-
-§d§lWisdom V
-§7Gain §b5 §7Intelligence for every §b5
-§7levels of exp you have on you.
-§7Capped at §b100 §7Intelligence.
-§9Hecatomb IX §894
-§7Gain §a+0.92% §cCatacombs §7XP & §a+1.84% §3Class §7XP,
-§7doubled §7on §b§lS+ §7runs.
-§7Grants §c+7.4{UE010} §7per 10 §cCatacombs §7levels.
-§8100 S runs to tier up!
-
-§7Grants §f+100{UE022} Speed Cap§7.
-
-§8When horses are not fast enough,
-§8use a Racing Helmet instead.
-
-§7Purchased by: §6[MVP§9++§6] Player§f
-§7Purchased for: §64,545,454,545 Coins
-
-§8Auction #18
-§8Bid #2
-§8September 2025
-
-§9Renowned Bonus
-§7Increases all §cCombat §7stats and §b{UE01A}
-§bMagic Find §7by §a+1%§7.
-
-§d§la §d§lMYTHIC HELMET §d§la
-""")
     }
 
     /**
@@ -1317,7 +671,7 @@ object SimItems {
         if (Sim.isHost(p) && (Practice.clickRestarts() || Practice.active && (id == "INFINITE_SPIRIT_LEAP" || held == "INFINITE_SPIRIT_LEAP"))) { Practice.restart(); return }
         // Stopped (no phase running): the Bonzo's Staff's left click is the AOTV's, to get around the arena (sneaking: an etherwarp, else a 12-block teleport).
         // Never in a clear: Hypixel's does nothing there (DR: 71 lone left clicks of a Bonzo's Staff in the clears, not one teleport).
-        if (Fight.phase == null && id == "STARRED_BONZO_STAFF") { val sneak = p.isShiftKeyDown; asClicked(p, "bonzo aotv") { if (sneak) etherwarp(p) else blink(p, 12) }; return }
+        if (Fight.phase == null && id == "STARRED_BONZO_STAFF") { val sneak = p.isShiftKeyDown; asClicked(p, "bonzo aotv") { if (sneak) Teleports.etherwarp(p) else Teleports.blink(p, 12) }; return }
         // As Mage, a sword's left click is a Mage Beam (and three quick ones a Guided Sheep).
         if (Mage.isMage() && Mage.beamItem(id)) { Fight.afterPing("mage beam") { Mage.click(p) }; return }
         if (id in Bows.SHORTBOWS) Bows.click(p, id!!, left = true)
@@ -1369,7 +723,8 @@ object SimItems {
     }
 
     /** While an [asClicked] action runs: the player's position at the click (the last move packet's). */
-    private var clickPos: Vec3? = null
+    internal var clickPos: Vec3? = null
+        private set
 
     /** The server tick of each player's last item teleport ([tpKeepLook]). */
     private val itemTpAt = HashMap<UUID, Int>()
@@ -1378,7 +733,7 @@ object SimItems {
      * A teleport that keeps the look: [Sim.tp] sends an absolute rotation, which with any latency snaps the camera
      * back to an old look. Hypixel's teleport marks the rotation relative, so a 0 delta leaves each client's own.
      */
-    private fun tpKeepLook(p: ServerPlayer, x: Double, y: Double, z: Double) {
+    internal fun tpKeepLook(p: ServerPlayer, x: Double, y: Double, z: Double) {
         itemTpAt[p.uuid] = Fight.serverTick
         p.teleportTo(Sim.level, x, y, z, Relative.ROTATION, 0f, 0f, false)
         p.deltaMovement = Vec3.ZERO
@@ -1386,15 +741,15 @@ object SimItems {
     }
 
     /** The cloak and the arrows: nothing carries over from an earlier sim server. */
-    fun reset() { itemTpAt.clear(); Mage.reset(); rapidLast = -1000; resetBreaker(); cloakUntil = 0; cloakReady = 0; vitality = 0; discardVeil(); lastHype = -100; lastCure = -1000; bonzoLast = -100; jerryTick = -1; leapReady = 0; pearlLeapReady = 0; volleyReady = 0; blockFired = null; quiverArrows = QUIVER_START; breakerHeld = null; Bows.reset() }
+    fun reset() { itemTpAt.clear(); Mage.reset(); MovementItems.rapidLast = -1000; resetBreaker(); MovementItems.cloakUntil = 0; MovementItems.cloakReady = 0; MovementItems.vitality = 0; MovementItems.discardVeil(); Teleports.lastHype = -100; Teleports.lastCure = -1000; MovementItems.bonzoLast = -100; MovementItems.jerryTick = -1; SpiritLeap.leapReady = 0; SpiritLeap.pearlLeapReady = 0; volleyReady = 0; blockFired = null; quiverArrows = QUIVER_START; breakerHeld = null; Bows.reset() }
 
     /** What isn't any one player's: the arrows being traced, the pushes, the rockets (gone from every game). */
     fun resetShared() {
-        arrows.clear(); lastMotion.clear(); lastPos.clear(); pendingMotion.clear()
-        if (liveRockets.isNotEmpty()) {
-            val ids = IntArrayList(liveRockets)
+        arrows.clear(); lastMotion.clear(); lastPos.clear(); MovementItems.pendingMotion.clear()
+        if (MovementItems.liveRockets.isNotEmpty()) {
+            val ids = IntArrayList(MovementItems.liveRockets)
             Sim.players().forEach { it.connection.send(ClientboundRemoveEntitiesPacket(ids)) }
-            liveRockets.clear()
+            MovementItems.liveRockets.clear()
         }
     }
 
@@ -1403,28 +758,28 @@ object SimItems {
         (Fight.phase as? P1Maxor)?.let { if (it.usePylon(p.position())) return InteractionResult.SUCCESS }
         if (id == "HYPERION") (Fight.phase as? P2Storm)?.beam()
         when (id) {
-            "ASPECT_OF_THE_VOID" -> { val sneak = p.isShiftKeyDown; asClicked(p, "aotv") { if (sneak) etherwarp(p) else blink(p, 12) } }
-            "HYPERION" -> { val cast = replayCast?.invoke(); asClicked(p, "hype") {
-                if (cast?.also { if (it) lastHype = Fight.serverTick } ?: hypeReady()) {
+            "ASPECT_OF_THE_VOID" -> { val sneak = p.isShiftKeyDown; asClicked(p, "aotv") { if (sneak) Teleports.etherwarp(p) else Teleports.blink(p, 12) } }
+            "HYPERION" -> { val cast = Teleports.replayCast?.invoke(); asClicked(p, "hype") {
+                if (cast?.also { if (it) Teleports.lastHype = Fight.serverTick } ?: Teleports.hypeReady()) {
                     // The boss never teleports a cast (the clear's 10-block blink is the rebuild's).
-                    implode(p)
+                    Teleports.implode(p)
                 }
             } }
             // The boss room refuses a pearl: one off the stack, red line, no entity.
             "ENDER_PEARL" -> { p.mainHandItem.shrink(1); Sim.chat("§cA mystical force in this room prevents you from using that ability!") }
-            "STARRED_BONZO_STAFF" -> asClicked(p, "bonzo") { bonzo(p) }
-            "JERRY_STAFF" -> asClicked(p, "jerry", prior = !fromBlock) { jerry(p) }
-            "WITHER_CLOAK" -> asClicked(p, "cloak") { cloak(p) }
+            "STARRED_BONZO_STAFF" -> asClicked(p, "bonzo") { MovementItems.bonzo(p) }
+            "JERRY_STAFF" -> asClicked(p, "jerry", prior = !fromBlock) { MovementItems.jerry(p) }
+            "WITHER_CLOAK" -> asClicked(p, "cloak") { MovementItems.cloak(p) }
             SCEPTRE -> asClicked(p, "sceptre") { sceptre(p) }
-            ClearItems.INFINILEAP, ClearItems.SPIRIT_LEAP -> openLeap(p, id)
+            ClearItems.INFINILEAP, ClearItems.SPIRIT_LEAP -> SpiritLeap.openLeap(p, id)
             // The secret items whose ability is not simulated: eat the click so vanilla never throws, spawns or splashes anything.
             in ClearItems.INERT -> inertItem(p, id)
-            "HAUNT_ABILITY" -> openHaunt(p)
+            "HAUNT_ABILITY" -> SpiritLeap.openHaunt(p)
             // A right click in the air does nothing: Hypixel needs a block target.
             "SUPERBOOM_TNT" -> {}
             in Bows.SHORTBOWS -> Bows.click(p, id, left = false)
             // Main: the cast lands one tick after the use_item, stand, splash, abilities, Autopet line and bobber together.
-            "PET_ROD" -> Fight.afterPing("pet rod") { Fight.later(1, "pet rod cast") { if (!p.isRemoved) castRod(p) } }
+            "PET_ROD" -> Fight.afterPing("pet rod") { Fight.later(1, "pet rod cast") { if (!p.isRemoved) MovementItems.castRod(p) } }
             else -> return InteractionResult.PASS
         }
         // Keep the client's copy of the stack (the Infinileap is a head, a block item it may think it placed).
@@ -1455,7 +810,7 @@ object SimItems {
     @Volatile var replayPearl: ((ServerPlayer) -> Pair<Int, Vec3>?)? = null
 
     /** Sends the held slot back as the server has it (an item the client used in its own prediction has one fewer there than the server's). */
-    private fun resyncHeld(p: ServerPlayer) {
+    internal fun resyncHeld(p: ServerPlayer) {
         p.connection.send(ClientboundContainerSetSlotPacket(0, p.inventoryMenu.incrementStateId(), 36 + p.inventory.selectedSlot, p.mainHandItem.copy()))
     }
 
@@ -1556,612 +911,6 @@ object SimItems {
         if (e is ItemFrame || e is ArmorStand) return InteractionResult.SUCCESS
         if (e.entityTags().contains(Sim.TAG)) return InteractionResult.SUCCESS
         return InteractionResult.PASS
-    }
-
-    // ------------------------------------------------------------------ teleports
-
-    private fun look(p: Player): Vec3 {
-        val yaw = Math.toRadians(p.yRot.toDouble()); val pitch = Math.toRadians(p.xRot.toDouble())
-        return Vec3(-sin(yaw) * cos(pitch), -sin(pitch), cos(yaw) * cos(pitch))
-    }
-
-    private fun state(x: Int, y: Int, z: Int): BlockState = Sim.level.getBlockState(BlockPos(x, y, z))
-
-    private fun collides(s: BlockState, pos: BlockPos) = !s.getCollisionShape(Sim.level, pos, CollisionContext.empty()).isEmpty
-
-    /** The top of a cell's collision under its centre (0 = none). */
-    private fun top(x: Int, y: Int, z: Int): Double {
-        val pos = BlockPos(x, y, z)
-        val shape = state(x, y, z).getCollisionShape(Sim.level, pos, CollisionContext.empty())
-        if (shape.isEmpty) return 0.0
-        var best = 0.0
-        for (b in shape.toAabbs()) if (b.minX <= 0.5 && b.maxX >= 0.5 && b.minZ <= 0.5 && b.maxZ >= 0.5) best = maxOf(best, b.maxY)
-        return if (best > 0) best else shape.max(Direction.Axis.Y)
-    }
-
-    private fun passThrough(s: BlockState) = s.block is SkullBlock || s.block is WallSkullBlock || s.block is LadderBlock || s.block is FlowerPotBlock || s.block is ButtonBlock || s.block is LeverBlock
-    private fun stopsAnyway(s: BlockState) = s.block is SignBlock || s.block is AbstractBannerBlock || s.block is TripWireHookBlock
-
-    /** Etherwarp's ray stops at this cell. */
-    private fun rayStops(x: Int, y: Int, z: Int): Boolean {
-        val s = state(x, y, z)
-        if (passThrough(s)) return false
-        if (stopsAnyway(s)) return true
-        return collides(s, BlockPos(x, y, z))
-    }
-
-    /** A body fits in this cell. */
-    private fun bodyPasses(x: Int, y: Int, z: Int): Boolean {
-        val s = state(x, y, z)
-        if (stopsAnyway(s)) return true
-        if (s.block is SkullBlock || s.block is WallSkullBlock || s.block is LadderBlock || s.block is FlowerPotBlock) return false
-        return !collides(s, BlockPos(x, y, z))
-    }
-
-    fun etherwarp(p: ServerPlayer, range: Double = 61.0) {
-        // Cast from where you clicked: Hypixel reads the use packet after the move packets sent before it, never after the ones that
-        // follow. A client that moves you at once (Odin's zero-ping etherwarp) has already sent the landing spot when the delayed cast
-        // runs, so a position taken then was a second warp from there.
-        val seen = clickPos ?: p.position()
-        val eye = Vec3(seen.x, seen.y + 1.27, seen.z)
-        val dir = look(p)
-        val hit = dda(eye, dir, range)
-        if (hit == null) { etherwarpRefused?.invoke("no block within ${range.toInt()}"); return }
-        val (x, y, z) = hit
-        val s = state(x, y, z)
-        val above = state(x, y + 1, z)
-        // A standing banner is a floor to warp onto (2026-10-03_02-36-19 k1770: onto a black banner, landing on its cell + 1.05).
-        val banner = s.block is BannerBlock
-        val bad = (stopsAnyway(s) && !banner) || s.block is SkullBlock || s.block is LadderBlock || s.block is FlowerPotBlock ||
-            above.block is SkullBlock || above.block is WallSkullBlock || above.block is LadderBlock || above.block is FlowerPotBlock || (top(x, y, z) < 0.03 && !banner)
-        val need = if (top(x, y, z) > 1.0) 3 else 2
-        // A chest is room enough to warp into (2026-10-03_01-39-09 k1239, 2026-10-16_22-15-09 k337: onto the block under one; no refusal seen).
-        fun room(cy: Int) = bodyPasses(x, cy, z) || state(x, cy, z).block is ChestBlock
-        // A refused warp is silent: of 578 sneaking AOTV clicks that did not warp (ADR and the Dungeon Recorder, 139 F7 runs), 576 said nothing.
-        val why = when {
-            bad -> "the target ${s.block.descriptionId.substringAfterLast('.')} or above it ${above.block.descriptionId.substringAfterLast('.')}"
-            (1..need).any { !room(y + it) } -> "no room above ${s.block.descriptionId.substringAfterLast('.')}: " + (1..need).joinToString { state(x, y + it, z).block.descriptionId.substringAfterLast('.') }
-            rayStops(floor(eye.x).toInt(), floor(eye.y).toInt(), floor(eye.z).toInt()) -> "your eye in a block"
-            else -> null
-        }
-        if (why != null) { etherwarpRefused?.invoke("$why at $x $y $z"); return }
-        etherPuff(p.position())
-        tpKeepLook(p, x + 0.5, y + 1.05, z + 0.5)
-        // Etherwarp is ender_dragon.hurt 1/0.54 only, HOSTILE; enderman.teleport is the blink's.
-        Sim.sound(SoundEvents.ENDER_DRAGON_HURT, 1f, 0.54f, p.position(), SoundSource.HOSTILE)
-    }
-
-    /** Amanatides-Woo DDA with the corner guard; the cell the ray stops in, or null. */
-    private fun dda(eye: Vec3, dir: Vec3, range: Double): Triple<Int, Int, Int>? {
-        var bx = floor(eye.x).toInt(); var by = floor(eye.y).toInt(); var bz = floor(eye.z).toInt()
-        val sx = sign(dir.x).toInt(); val sy = sign(dir.y).toInt(); val sz = sign(dir.z).toInt()
-        val dx = if (dir.x != 0.0) abs(1 / dir.x) else Double.MAX_VALUE
-        val dy = if (dir.y != 0.0) abs(1 / dir.y) else Double.MAX_VALUE
-        val dz = if (dir.z != 0.0) abs(1 / dir.z) else Double.MAX_VALUE
-        fun first(o: Double, b: Int, s: Int, d: Double) = if (s > 0) (b + 1 - o) * d else if (s < 0) (o - b) * d else Double.MAX_VALUE
-        var tx = first(eye.x, bx, sx, dx); var ty = first(eye.y, by, sy, dy); var tz = first(eye.z, bz, sz, dz)
-        repeat(250) {
-            val t = minOf(tx, ty, tz)
-            if (t > range) return null
-            val cx = tx <= t + 1e-4; val cy = ty <= t + 1e-4; val cz = tz <= t + 1e-4
-            if ((if (cx) 1 else 0) + (if (cy) 1 else 0) + (if (cz) 1 else 0) >= 2) {
-                if (cx && rayStops(bx + sx, by, bz)) return Triple(bx + sx, by, bz)
-                if (cy && rayStops(bx, by + sy, bz)) return Triple(bx, by + sy, bz)
-                if (cz && rayStops(bx, by, bz + sz)) return Triple(bx, by, bz + sz)
-            }
-            if (cx) { bx += sx; tx += dx }
-            if (cy) { by += sy; ty += dy }
-            if (cz) { bz += sz; tz += dz }
-            if (rayStops(bx, by, bz)) return Triple(bx, by, bz)
-        }
-        return null
-    }
-
-    private fun blinkBlocks(x: Int, y: Int, z: Int): Boolean {
-        val s = state(x, y, z)
-        if (s.block is SignBlock || s.block is AbstractBannerBlock) return false
-        if (rayStops(x, y, z) && top(x, y, z) >= 0.5) return true
-        return top(x, y - 1, z) > 1.0
-    }
-
-    private fun feetPass(x: Int, y: Int, z: Int) = (bodyPasses(x, y, z) || top(x, y, z) < 0.5) && top(x, y - 1, z) <= 1.0
-
-    /** AOTV (12) / Hyperion (10): whole-block steps, every quarter checked; "There are blocks in the way!" when cut short. */
-    fun blink(p: ServerPlayer, range: Int) {
-        val eye = (clickPos ?: p.position()).add(0.0, p.eyeHeight.toDouble(), 0.0)
-        val dir = look(p)
-        var last = 0
-        var px = floor(eye.x).toInt(); var pz = floor(eye.z).toInt()
-        var cut = false
-        loop@ for (i in 1..range) {
-            for (k in 1..4) {
-                val q = eye.add(dir.scale((i - 1) + k * 0.25))
-                if (blinkBlocks(floor(q.x).toInt(), floor(q.y).toInt(), floor(q.z).toInt())) { cut = true; break@loop }
-            }
-            val c = eye.add(dir.scale(i.toDouble()))
-            val cx = floor(c.x).toInt(); val cy = floor(c.y).toInt(); val cz = floor(c.z).toInt()
-            if (cx != px && cz != pz && blinkBlocks(px, cy, cz) && blinkBlocks(cx, cy, pz)) { cut = true; break }
-            last = i; px = cx; pz = cz
-        }
-        // A landing needs room for the whole body: under a 1-high roof (a hole one block tall) the server stops at the sample before it
-        // (PrecisionSnipes' blink lab, "roof1": both casts short of the roofed cell).
-        fun feetAt(i: Int): Int { val c = eye.add(dir.scale(i.toDouble())); val cx = floor(c.x).toInt(); val cy = floor(c.y).toInt(); val cz = floor(c.z).toInt(); return if (feetPass(cx, cy - 1, cz)) cy - 1 else cy }
-        fun roomy(i: Int): Boolean {
-            val c = eye.add(dir.scale(i.toDouble())); val cx = floor(c.x).toInt(); val cz = floor(c.z).toInt(); val f = feetAt(i)
-            // The head's part of the body (feet + 1 to + 1.8, 0.6 wide) clear of every collision.
-            return Sim.level.noCollision(p, AABB(cx + 0.2, f + 1.0, cz + 0.2, cx + 0.8, f + 1.8, cz + 0.8).deflate(1e-3))
-        }
-        while (last > 0 && !roomy(last)) { last--; cut = true }
-        if (last == 0) { Sim.chat("§cThere are blocks in the way!"); return }
-        val c = eye.add(dir.scale(last.toDouble()))
-        val cx = floor(c.x).toInt(); val cz = floor(c.z).toInt()
-        val feetY = feetAt(last)
-        if (cx == floor(p.x).toInt() && cz == floor(p.z).toInt() && (feetY == floor(p.y + 0.05).toInt() || Vec3(cx + 0.5, feetY.toDouble(), cz + 0.5).distanceTo(p.position()) < 1.5)) {
-            Sim.chat("§cThere are blocks in the way!"); return
-        }
-        if (cut) Sim.chat("§cThere are blocks in the way!")
-        tpKeepLook(p, cx + 0.5, feetY.toDouble(), cz + 0.5)
-        Sim.sound(SoundEvents.ENDERMAN_TELEPORT, 1f, 1f, p.position(), SoundSource.HOSTILE)
-    }
-
-
-
-    /**
-     * Wither Impact casts at most every other server tick: a click the tick after a cast is discarded, blink and Implosion both (the
-     * AOTV answers every tick's click). DR clears: every run of a click each tick cast every other tick (72..75 cast 73 and 76); over
-     * 598 clusters of clicks 1-3 ticks apart, casts counted by your explode sounds, "2 ticks apart" misses by 149 casts in all,
-     * "each tick" by 245 and "3 ticks apart" by 236. The rest is Hypixel's ticks drifting from yours.
-     */
-    private var lastHype by perPlayer { -100 }
-
-    /**
-     * Set by a replay: whether Hypixel cast for the Hyperion click being handled (the recording's explode at you), or null for the rule.
-     * Which of two clicks a tick apart Hypixel takes depends on how its ticks fell against yours, which a replay can only read.
-     */
-    @Volatile var replayCast: (() -> Boolean?)? = null
-
-    /** Set by a replay: told why an etherwarp did not warp (for its report). */
-    @Volatile var etherwarpRefused: ((String) -> Unit)? = null
-
-    /** Set by a replay: whether the Hyperion click being handled, made inside an entity it also clicked, cast without its teleport. */
-    @Volatile var replayStill: (() -> Boolean)? = null
-
-    private fun hypeReady(): Boolean {
-        val now = Fight.serverTick
-        if (now - lastHype < 2) return false
-        lastHype = now
-        return true
-    }
-
-    /**
-     * A Hyperion Implosion's hit on a boss wither, for the chat line (no damage model in the sim):
-     * real one-enemy lines are ~30-43M (median ~34M; 2 enemies 64-84M).
-     */
-    private const val IMPLOSION_DAMAGE = 34_000_000.0
-
-    private var lastCure by perPlayer { -1000 }
-
-    /** Wither Shield: absorption back to 16 two ticks on; every ~5 s the cure sound and a ring of 16 witch particles. */
-    private fun witherShield(p: ServerPlayer) {
-        Fight.later(2, "wither shield") {
-            if (p.isRemoved) return@later
-            // 26.1.2 clamps absorption to MAX_ABSORPTION: make room for the 16 first.
-            p.getAttribute(Attributes.MAX_ABSORPTION)?.let { if (it.baseValue < 16.0) it.baseValue = 16.0 }
-            p.absorptionAmount = 16f
-        }
-        val now = Fight.serverTick
-        if (now - lastCure < 100) return
-        lastCure = now
-        Sim.sound(SoundEvents.ZOMBIE_VILLAGER_CURE, 1f, 0.6984127f, p.position(), SoundSource.HOSTILE)
-        val look = p.lookAngle
-        var right = Vec3(-look.z, 0.0, look.x)
-        right = if (right.lengthSqr() < 1e-6) Vec3(1.0, 0.0, 0.0) else right.normalize()
-        val up = look.cross(right).normalize()
-        val c = Vec3(p.x, p.y + 1.5, p.z).add(look.scale(0.5))
-        for (i in 0 until 16) {
-            val a = i * Math.PI * 2 / 16
-            val q = c.add(right.scale(0.7 * Math.cos(a))).add(up.scale(0.7 * Math.sin(a)))
-            Fight.later(Random.nextInt(0, 5), "shield ring") { Sim.level.sendParticles(ParticleTypes.WITCH, q.x, q.y, q.z, 1, 0.0, 0.0, 0.0, 0.0) }
-        }
-    }
-
-    /**
-     * Implosion: at your final position, every mob whose hitbox is within
-     * ±6 x/z, +7 up and -6 down of your eye, through walls, full damage each. The boss withers are
-     * the only mobs here; with none in the box there is no message.
-     */
-    private fun implode(p: ServerPlayer) {
-        // Main's Implosion puff: 8 explosion at your feet, speed 8, no spread, override limiter + always show.
-        Sim.level.sendParticles(ParticleTypes.EXPLOSION, true, true, p.x, p.y, p.z, 8, 0.0, 0.0, 0.0, 8.0)
-        Sim.sound(SoundEvents.GENERIC_EXPLODE, 1f, 1f, p.position(), SoundSource.BLOCKS)
-        witherShield(p)
-        // A P3 cast never hits Goldor on Hypixel (no hit line, even with him in range).
-        if (Fight.phase is GoldorPhase) return
-        val box = AABB(p.x - 6, p.eyeY - 6, p.z - 6, p.x + 6, p.eyeY + 7, p.z + 6)
-        val n = Sim.level.getEntitiesOfClass(WitherBoss::class.java, box) { it.isAlive }.size
-        if (n == 0) return
-        // The hit's ding (experience_orb.pickup 1.0/1.492 on the tp tick).
-        Sim.sound(SoundEvents.EXPERIENCE_ORB_PICKUP, 1f, 1.492f, p.position(), SoundSource.PLAYERS)
-        // Hypixel's exact line: "§7Your Implosion hit §r§c1 §r§7enemy for §r§c32,710,591.3 §r§7damage.", a whole number without ".0".
-        val dmg = (1..n).sumOf { IMPLOSION_DAMAGE * (0.9 + Random.nextDouble() * 0.25) }
-        val shown = "%,.1f".format(Locale.ROOT, dmg).removeSuffix(".0")
-        Sim.chat("§7Your Implosion hit §r§c$n §r§7${if (n == 1) "enemy" else "enemies"} for §r§c$shown §r§7damage.")
-    }
-
-    // ------------------------------------------------------------------ movement items
-
-    /**
-     * Sets [p]'s motion to [v] (a SET, as Hypixel's). The packet goes straight to the player at the end of this
-     * [Fight.tick], the burst's own tick: hurtMarked would wait for the next tick's entity tracker. Several pushes in
-     * one tick are one packet carrying the last vector. hurtMarked stays off, so no duplicate.
-     */
-    private fun push(p: ServerPlayer, v: Vec3) {
-        p.deltaMovement = v
-        pendingMotion[p] = v
-    }
-
-    private val pendingMotion = LinkedHashMap<ServerPlayer, Vec3>()
-
-    /** Sends this tick's [push]es (Fight.tick's last step). */
-    fun flushMotion() {
-        if (pendingMotion.isEmpty()) return
-        pendingMotion.forEach { (p, v) -> if (!p.isRemoved) p.connection.send(ClientboundSetEntityMotionPacket(p.id, v)) }
-        pendingMotion.clear()
-    }
-
-    /**
-     * Bonzo's Staff, as measured on Hypixel: a hidden projectile flies from feet+1.0+0.2d
-     * at 0.75 a tick (no gravity), drawn as a marker stand 1.5 below it; the firework bursts on the first 0.75
-     * lattice point whose block cell isn't passable, k+1 ticks after the stand, and in that tick your motion is
-     * *replaced* by 1.5 flat away from it and 0.5 up iff it is within 3.5 of feet+1.5. Hard 4-tick gate.
-     * The burst's sound is the client's own.
-     */
-    private fun bonzo(p: ServerPlayer) {
-        // Hard 4-tick gate: never 1-3 ticks apart; a refused click sets nothing.
-        val gap = Fight.serverTick - bonzoLast
-        if (gap < 4) { EngineerClient.logger.info("[ec] bonzo: refused, {} ticks after the last (4-tick gate)", gap); return }
-        // The held item is sent again on ~77% of accepted clicks, by idle time: ~50% under 8 ticks since the last
-        // balloon, ~81% over 10. First, before the stand bundle.
-        val resend = when { gap < 8 -> 0.5; gap > 10 -> 0.81; else -> 0.65 }
-        bonzoLast = Fight.serverTick
-        if (Random.nextDouble() < resend) p.connection.send(ClientboundContainerSetSlotPacket(0, p.inventoryMenu.incrementStateId(), 36 + p.inventory.selectedSlot, p.getItemInHand(InteractionHand.MAIN_HAND).copy()))
-        // P = the last move packet's position (the server's at the click, asClicked), d = the look the click aims with:
-        // a block click's is the last move packet's (use_item_on has none), an air click's the use_item's.
-        val pos = clickPos ?: p.position()
-        val dir = look(p)
-        // Projectile pos(k) = P + (0,1,0) + 0.2d + 0.75k d, feet+1.0 sneaking too.
-        val o = pos.add(0.0, 1.0, 0.0).add(dir.scale(0.2))
-        // Stand S0 = floor32(P + 0.2d - 0.5y) = pos(0) - 1.5y, a marker (flags 32/18),
-        // rotated to the look the server used.
-        val s0 = floor32(pos.add(dir.scale(0.2)).add(0.0, -0.5, 0.0))
-        val stand = ArmorStand(Sim.level, s0.x, s0.y, s0.z)
-        stand.isInvisible = true
-        stand.isSilent = true
-        stand.setNoGravity(true)
-        Station.setMarker(stand)
-        Station.setLeverFlags(stand)
-        stand.yRot = p.yRot; stand.xRot = p.xRot
-        stand.setItemSlot(EquipmentSlot.HEAD, balloonHead())
-        Sim.spawn(stand)
-        // Then the ghast sound, at P (after the bundle, same tick).
-        Sim.sound(SoundEvents.GHAST_AMBIENT, 1f, (88 + Random.nextInt(26)) / 63f, pos, SoundSource.HOSTILE)
-        // The burst lattice index k: first k >= 1 whose cell isn't passable; k = 2 when pos(0)'s cell is already
-        // solid (e.g. fired from inside a ghost block). Overshoot is the lattice, 0..0.75.
-        // Each cell is tested in its own flight tick, so a block that changes mid-flight counts (a gate, a Dungeonbreaker
-        // hole); on a still world it's the same k as testing them all at the click.
-        val startsInside = bonzoSolid(o)
-        fun fly(j: Int) {
-            Fight.later(1, "bonzo flight") {
-                if (stand.isRemoved) return@later
-                // Step k = j - 1 bursts in tick j: k+1 ticks after the stand (no clamp).
-                val k = j - 1
-                if (k >= 1 && k <= BONZO_STEPS && (if (startsInside) k == 2 else bonzoSolid(o.add(dir.scale(BONZO_SPEED * k))))) {
-                    bonzoBurst(p, o.add(dir.scale(BONZO_SPEED * k)), stand); return@later
-                }
-                // No block within ~128: the stand flies on and goes with no burst.
-                if (j > BONZO_STEPS) { EngineerClient.logger.info("[ec] bonzo: no block within reach, no burst"); stand.discard(); return@later }
-                // Drawn 1.5 below the projectile (the vanilla tracker sends updates on its 3-tick cadence, the
-                // first about spawn+4, as Hypixel's).
-                val q = o.add(dir.scale(BONZO_SPEED * j))
-                stand.setPos(q.x, q.y - 1.5, q.z)
-                fly(j + 1)
-            }
-        }
-        fly(1)
-    }
-
-    /**
-     * The balloon bursts at [bTrue]: firework at floor32(bTrue) with one entity_event 17 and no server sound,
-     * gone with the stand at burst+1; your boost in the same tick from the unquantised point.
-     */
-    private fun bonzoBurst(p: ServerPlayer, bTrue: Vec3, stand: ArmorStand) {
-        val colours = { Random.nextInt(0x1000000) }
-        val rocket = ItemStack(Items.FIREWORK_ROCKET)
-        rocket.set(DataComponents.FIREWORKS, Fireworks(0, listOf(FireworkExplosion(
-            FireworkExplosion.Shape.SMALL_BALL, IntArrayList(intArrayOf(colours(), colours())), IntArrayList(), false, false))))
-        val b32 = floor32(bTrue)
-        // The rocket is packets to you only, never a level entity: a firework's tracking range (64) dropped far
-        // bursts, and a ticking one launches and explodes by itself. Add (zero motion), its item, event 17 exactly once
-        // (the client draws the burst and plays the blast itself), and gone with the stand at burst+1.
-        val fw = FireworkRocketEntity(Sim.level, b32.x, b32.y, b32.z, rocket)
-        val conn = p.connection
-        conn.send(ClientboundAddEntityPacket(fw.id, fw.uuid, b32.x, b32.y, b32.z, 0f, 0f,
-            EntityTypes.FIREWORK_ROCKET, 0, Vec3.ZERO, 0.0))
-        fw.entityData.nonDefaultValues?.let { conn.send(ClientboundSetEntityDataPacket(fw.id, it)) }
-        conn.send(ClientboundEntityEventPacket(fw, 17.toByte()))
-        liveRockets += fw.id
-        Fight.later(1, "bonzo cleanup") { liveRockets.rem(fw.id); conn.send(ClientboundRemoveEntitiesPacket(fw.id)); stand.discard() }
-        // The server's position of you (from the move packets that arrived), for the gate and the push.
-        val pos = Fight.seenPos(p)
-        // Boost iff the burst is within 3.5 of feet+1.5 (no random roll).
-        val dist = bTrue.distanceTo(pos.add(0.0, 1.5, 0.0))
-        EngineerClient.logger.info("[ec] bonzo: burst at {} {} {}, {} from you (seen {} {} {}, live {} {} {}): {}",
-            "%.2f".format(bTrue.x), "%.2f".format(bTrue.y), "%.2f".format(bTrue.z), "%.2f".format(dist),
-            "%.2f".format(pos.x), "%.2f".format(pos.y), "%.2f".format(pos.z), "%.2f".format(p.x), "%.2f".format(p.y), "%.2f".format(p.z),
-            if (dist > 3.5) "no boost (over 3.5)" else "boost")
-        if (dist > 3.5) return
-        // SET 1.5 * unit(P.xz - B.xz), vy 0.5; exactly over it: (0, 0.5, 0).
-        val dx = pos.x - bTrue.x; val dz = pos.z - bTrue.z
-        val h = Math.sqrt(dx * dx + dz * dz)
-        push(p, if (h > 0.0) Vec3(1.5 * dx / h, 0.5, 1.5 * dz / h) else Vec3(0.0, 0.5, 0.0))
-    }
-
-    /** floor(v*32)/32 per axis: the 1/32 grid Hypixel's packets put stand and firework on. */
-    private fun floor32(v: Vec3) = Vec3(floor(v.x * 32) / 32, floor(v.y * 32) / 32, floor(v.z * 32) / 32)
-
-    /**
-     * A balloon cell that stops it: cell level, so stairs, slabs and walls are solid. Passable:
-     * air, liquids, fire, levers, buttons, signs, torches, tripwire, pressure plates, carpet, heads, grass, light,
-     * ladders and vines (TNT, plants, doors and bars unresolved). Glass panes stop it, a whole cell as any block.
-     */
-    private fun bonzoSolid(at: Vec3): Boolean {
-        val s = state(floor(at.x).toInt(), floor(at.y).toInt(), floor(at.z).toInt())
-        val b = s.block
-        if (s.isAir || b is LiquidBlock || b is BaseFireBlock || b is LeverBlock || b is ButtonBlock ||
-            b is SignBlock || b is BaseTorchBlock || b is TripWireBlock ||
-            b is TripWireHookBlock || b is BasePressurePlateBlock || b is CarpetBlock ||
-            b is AbstractSkullBlock || b is TallGrassBlock ||
-            b is LightBlock || b is LadderBlock || b is VineBlock) return false
-        return true
-    }
-
-    /** A glass pane (any colour): the balloon and the Jerry bullet stop in its whole cell, not just its thin post. */
-    private fun isGlassPane(s: BlockState) =
-        s.block is IronBarsBlock && BuiltInRegistries.BLOCK.getKey(s.block).path.endsWith("glass_pane")
-
-    /** One of the 9 balloon heads, uniformly random. */
-    private val BALLOON_HASHES = listOf(
-        "f1f99e7c394e13d199d1d22cb082d209068cd7a4de6ca09edff3fc61660ae5cf", "52dd11da04252f76b6934bc26612f54f264f30eed74df89941209e191bebc0a2",
-        "7c6cc5aed49056977d89348978c0aaaaa54c968a3b411bbaba5c9970b405297", "7399ff9c40fdfb7b115addddff59c344eaa11acb0c64c6839b5f8407e36d239d",
-        "a2dd1389a97fd4c86b11a1a2abad61389404d837d2caf097c91d27768363dc5a", "ac96d34a3cced4e4bba25119f74ea31f50f43f90cca2fbcbc6bae8625d60dede",
-        "28c544b288f899d494f953ace7743a15fdb22d24f58f9ca298f35429fdc27b63", "cc5ec2dfbf2cf4e21bd011c784d9fc4ad7a88182bed27afd91b53b4513ce0aba",
-        "3491c8fb426979da2d6327b3705a4cb9c91c2d5536223233addde21d5f58c940")
-
-    private fun balloonHead(): ItemStack {
-        val hash = BALLOON_HASHES[Random.nextInt(BALLOON_HASHES.size)]
-        val json = "{\"textures\":{\"SKIN\":{\"url\":\"http://textures.minecraft.net/texture/$hash\"}}}"
-        val s = head(Base64.getEncoder().encodeToString(json.toByteArray()), "Player Head")
-        s.remove(DataComponents.CUSTOM_NAME)
-        return s
-    }
-
-    private var bonzoLast by perPlayer { -100 }
-    /** Packet-only rockets not yet removed (a stop drops their cleanup: [reset] removes them). */
-    private val liveRockets = IntArrayList()
-    private const val BONZO_SPEED = 0.75
-    /** ~170 lattice steps (127.5 blocks) with no block: no burst. */
-    private const val BONZO_STEPS = 170
-
-    /**
-     * Jerry-chine Gun, as measured on Hypixel: an invisible bullet from F+1.1 along the last
-     * move packet's look, B_k = O + (0.25 + 0.75k)u at tick k, bursts at the first B_k inside a block (or k = 30).
-     * The burst plays villager.yes, then *replaces* your motion with vy 0.6 and 0.5 x the flat part of the unit
-     * vector from it to your eye iff it is within 4.0 of feet+1.62, then a poof. Nothing is random but the pitch.
-     */
-    private fun jerry(p: ServerPlayer) {
-        // At most 3 bullets a server tick (a 4-click tick still fires 3).
-        if (jerryTick != Fight.serverTick) { jerryTick = Fight.serverTick; jerryShots = 0 }
-        if (++jerryShots > 3) return
-        // F = the last move packet's position (asClicked's click position), u = its look (asClicked prior on a
-        // use_item, the player's own on a block click).
-        val f = clickPos ?: p.position()
-        val u = look(p)
-        val o = f.add(0.0, 1.1, 0.0)
-        fun bullet(k: Int) = o.add(u.scale(0.25 + 0.75 * k))
-        // The bullet's visual: invisible silent marker stand, Villager head, head pose = pitch, at F + u - 0.5y = B_1 - 1.6y;
-        // shared flags 33 (invisible + bit 0) and armor-stand flags 18, as Hypixel's.
-        val stand = JerryStand(Sim.level, f.x + u.x, f.y + u.y - 0.5, f.z + u.z)
-        stand.isInvisible = true
-        stand.setSharedFlagOnFire(true)
-        stand.isSilent = true
-        stand.setNoGravity(true)
-        Station.setMarker(stand)
-        Station.setLeverFlags(stand)
-        stand.yRot = p.yRot; stand.xRot = p.xRot
-        stand.setHeadPose(Rotations(p.xRot, 0f, 0f))
-        stand.setItemSlot(EquipmentSlot.HEAD, villagerHead())
-        Sim.spawn(stand)
-        // villager.trade NEUTRAL 0.5, pitch k/63 for k = 88..113, at your feet in the click tick, after the stand bundle.
-        Sim.sound(SoundEvents.VILLAGER_TRADE, 0.5f, (88 + Random.nextInt(26)) / 63f, f, SoundSource.NEUTRAL)
-        rapidFire(p)
-        fun fly(k: Int) {
-            Fight.later(1, "jerry bullet") {
-                if (p.isRemoved) { stand.discard(); return@later }
-                val b = bullet(k)
-                // Check-then-move (max life 30).
-                if (k < JERRY_LIFE && !jerrySolid(b)) {
-                    val next = bullet(k + 1)
-                    stand.setPos(next.x, next.y - 1.6, next.z)
-                    fly(k + 1); return@later
-                }
-                jerryBurst(p, b)
-                Fight.later(1, "jerry stand gone") { stand.discard() }
-            }
-        }
-        fly(1)
-    }
-
-    /** A bullet bursts at [b]: yes, then the push iff in range, then one poof; the last burst of a tick wins. */
-    private fun jerryBurst(p: ServerPlayer, b: Vec3) {
-        // villager.yes MASTER 0.35 pitch 1 at floor(B)+0.5, out of range too: straight to you,
-        // as a level sound at volume 0.35 reaches only 5.6 blocks and far bursts were silent.
-        p.connection.send(ClientboundSoundPacket(BuiltInRegistries.SOUND_EVENT.wrapAsHolder(SoundEvents.VILLAGER_YES),
-            SoundSource.MASTER, floor(b.x) + 0.5, floor(b.y) + 0.5, floor(b.z) + 0.5, 0.35f, 1f, Random.nextLong()))
-        // d = (feet + 1.62) - B, the eye constant sneaking too; boost iff |d| <= 4.0.
-        // Feet = the server's position of you at the burst.
-        val d = Fight.seenPos(p).add(0.0, 1.62, 0.0).subtract(b)
-        val len = d.length()
-        if (len <= 4.0 && len > 0.0) push(p, Vec3(0.5 * d.x / len, 0.6, 0.5 * d.z / len))
-        // One poof, count 1, at the exact burst point.
-        Sim.level.sendParticles(ParticleTypes.POOF, true, true, b.x, b.y, b.z, 1, 0.0, 0.0, 0.0, 0.0)
-    }
-
-    /** A bullet point inside a block's collision shape, or anywhere in a glass pane's cell (Hypixel's exact solidity rule is unverified). */
-    private fun jerrySolid(b: Vec3): Boolean {
-        val pos = BlockPos.containing(b)
-        val s = Sim.level.getBlockState(pos)
-        if (isGlassPane(s)) return true
-        val shape = s.getCollisionShape(Sim.level, pos, CollisionContext.empty())
-        return !shape.isEmpty && shape.toAabbs().any { it.move(pos).contains(b) }
-    }
-
-    /** The Jerry stand's head: Hypixel's "Villager" profile skin. */
-    private fun villagerHead(): ItemStack {
-        val json = "{\"textures\":{\"SKIN\":{\"url\":\"http://textures.minecraft.net/texture/41b830eb4082acec836bc835e40a11282bb51193315f91184337e8d3555583\"}}}"
-        val s = head(Base64.getEncoder().encodeToString(json.toByteArray()), "Villager")
-        s.remove(DataComponents.CUSTOM_NAME)
-        return s
-    }
-
-    private var jerryTick by perPlayer { -1 }
-    private var jerryShots by perPlayer { 0 }
-    private const val JERRY_LIFE = 30
-
-    private var rapidShots by perPlayer { 0 }
-    private var rapidLast by perPlayer { -1000 }
-
-    /** The Rapid-fire action bar: 14 x the shot in the burst, reset after 4 s idle. */
-    private fun rapidFire(p: ServerPlayer) {
-        val now = Fight.serverTick
-        if (now - rapidLast > 80) rapidShots = 0
-        rapidShots++; rapidLast = now
-        // A system_chat overlay, as Hypixel sends it, not a set_action_bar_text.
-        p.connection.send(ClientboundSystemChatPacket(
-            Component.literal("§b-${14 * rapidShots} Mana (§6Rapid-fire§b)"), true))
-    }
-
-    /** The Jerry bullet's stand: Hypixel's carries shared flag bit 0 (33 = invisible + 1) for its whole life; vanilla's baseTick would clear it. */
-    class JerryStand(level: Level, x: Double, y: Double, z: Double) : ArmorStand(level, x, y, z) {
-        override fun setSharedFlagOnFire(onFire: Boolean) = super.setSharedFlagOnFire(true)
-    }
-
-    /**
-     * Creeper Veil as Hypixel runs it: it stays up until you right-click again, run out of vitality, or die
-     * (no 10 s expiry, despite the lore). It does NOT stop death ticks (GoldorPhase.deathTick).
-     * Vitality: 122, 30 a hit; a hit with under 30 left ends it ("Not enough vitality!"). Cooldown ~5 s from the end.
-     */
-    var cloakUntil by perPlayer { 0 }
-        private set
-    private var cloakReady by perPlayer { 0 }
-    val cloaked get() = Fight.serverTick < cloakUntil
-    private var vitality by perPlayer { 0 }
-    private const val VEIL_VITALITY = 122
-    private const val VEIL_HIT = 30
-    private const val VEIL_COOLDOWN = 100
-
-    /** The 6 invisible powered creepers: a hexagon, radius 1.5, ~3 degrees a tick, at your feet. */
-    private val veil: ArrayList<Creeper> by perPlayer { ArrayList() }
-    private var veilAngle by perPlayer { 0.0 }
-
-    /** A creeper that stays in the peaceful sim world and can't be hit, pushed or aimed at. */
-    class VeilCreeper(level: Level) : Creeper(EntityTypes.CREEPER, level) {
-        override fun checkDespawn() {}
-        override fun isPickable() = false
-        override fun isPushable() = false
-        override fun canBeCollidedWith(other: Entity?) = false
-    }
-
-    private fun veilPos(p: ServerPlayer, i: Int): Vec3 {
-        val a = Math.toRadians(veilAngle + 60.0 * i)
-        return Vec3(p.x + 1.5 * Math.cos(a), p.y, p.z + 1.5 * Math.sin(a))
-    }
-
-    private fun spawnVeil(p: ServerPlayer) {
-        discardVeil()
-        veilAngle = 0.0
-        for (i in 0 until 6) {
-            val e = VeilCreeper(Sim.level)
-            e.setNoAi(true); e.isSilent = true; e.isPermanentlyInvulnerable = true; e.setNoGravity(true); e.isInvisible = true
-            // Vanilla clears a mob's invisible flag without the effect: a permanent effect keeps it (no particles).
-            e.addEffect(MobEffectInstance(MobEffects.INVISIBILITY, -1, 0, false, false))
-            // Powered, as on Hypixel: the lightning hit sets the flag; its fire is put out again.
-            e.thunderHit(Sim.level, LightningBolt(EntityTypes.LIGHTNING_BOLT, Sim.level))
-            e.clearFire()
-            val g = veilPos(p, i)
-            e.snapTo(g.x, g.y, g.z, 0f, 0f)
-            veil += Sim.spawn(e)
-        }
-    }
-
-    private fun discardVeil() { veil.forEach { it.discard() }; veil.clear() }
-
-    /** The veil's end: the hurt sound at you, the creepers gone 2 ticks after the chat. [chat] null = ended by death (no line). */
-    private fun endVeil(p: ServerPlayer?, chat: String?, soundNow: Boolean = false) {
-        val now = Fight.serverTick
-        cloakUntil = now; cloakReady = now + VEIL_COOLDOWN; vitality = 0
-        if (chat != null) Sim.chat(chat)
-        val sound = { Sim.sound(SoundEvents.SKELETON_HURT, 4f, 1.1904762f, null, SoundSource.HOSTILE) }
-        if (soundNow) sound() else Fight.later(1, "veil end sound") { sound() }
-        val gone = ArrayList(veil)
-        veil.clear()
-        Fight.later(2, "veil gone") { gone.forEach { it.discard() } }
-    }
-
-    /** A hit on you: true when the veil took it. 30 vitality a hit; too little ends the veil. */
-    fun veilAbsorbs(): Boolean {
-        if (!cloaked) return false
-        if (vitality >= VEIL_HIT) { vitality -= VEIL_HIT; return true }
-        endVeil(Sim.player, "§cNot enough vitality! §r§dCreeper Veil §r§cDe-activated!")
-        return true
-    }
-
-    private fun tickVeil(p: ServerPlayer) {
-        if (!cloaked) { if (veil.isNotEmpty() && veil.none { !it.isRemoved }) veil.clear(); return }
-        // Dead (a death tick goes through the veil): it ends a tick later with the sound only.
-        if (Masks.ghost) { endVeil(p, null, soundNow = true); return }
-        veilAngle += 3.0
-        veil.forEachIndexed { i, e -> val g = veilPos(p, i); e.snapTo(g.x, g.y, g.z, 0f, 0f) }
-    }
-
-    private fun cloak(p: ServerPlayer) {
-        val now = Fight.serverTick
-        if (cloaked) { endVeil(p, "§dCreeper Veil §r§cDe-activated!"); return }
-        if (now < cloakReady) { Sim.chat("§cThis ability is on cooldown for ${(cloakReady - now + 19) / 20}s."); return }
-        cloakUntil = Int.MAX_VALUE; vitality = VEIL_VITALITY
-        Sim.chat("§dCreeper Veil §r§aActivated!")
-        spawnVeil(p)
-    }
-
-    /**
-     * A Pet Rod cast as main sends it: an invisible armour stand where the bobber starts, the silent splash (to you
-     * only), player_abilities with the new pet's walking speed, the Autopet line ([Masks.swapPet]), then your fishing_bobber
-     * thrown at 1.5 along your look (its motion sent with it), gone ~6 ticks on (2..11 measured).
-     */
-    private fun castRod(p: ServerPlayer) {
-        val hook = FishingHook(p, Sim.level, 0, 0)
-        hook.deltaMovement = p.lookAngle.scale(1.5)
-        val stand = ArmorStand(Sim.level, hook.x, hook.y, hook.z)
-        stand.isInvisible = true
-        stand.isSilent = true
-        stand.setNoGravity(true)
-        Station.setMarker(stand)
-        Sim.spawn(stand)
-        p.connection.send(ClientboundSoundPacket(SoundEvents.PLAYER_SPLASH.let { BuiltInRegistries.SOUND_EVENT.wrapAsHolder(it) },
-            SoundSource.PLAYERS, 200.0, 300.0, 400.0, 0f, 0f, Random.nextLong()))
-        Masks.swapPet(p)
-        Sim.spawn(hook)
-        p.connection.send(ClientboundSetEntityMotionPacket(hook.id, hook.deltaMovement))
-        Fight.later(6, "pet bobber gone") { hook.discard(); stand.discard() }
     }
 
     // ------------------------------------------------------------------ Superboom, Dungeonbreaker, bows
@@ -2398,7 +1147,7 @@ object SimItems {
         // Each player's own: charges, veil, Mage's sheep, slot 9, the held slot's effects.
         Sim.forEachPlayer { p ->
             tickBreaker()
-            EngineerClient.safely("p3sim veil") { tickVeil(p) }
+            EngineerClient.safely("p3sim veil") { MovementItems.tickVeil(p) }
             EngineerClient.safely("p3sim mage") { Mage.tick() }
             EngineerClient.safely("p3sim slot 9") { tickSlot9(p) }
             EngineerClient.safely("p3sim mining effects") { miningEffects(p) }
@@ -2429,170 +1178,4 @@ object SimItems {
     }
 
     private val lastPos = HashMap<AbstractArrow, Vec3>()
-
-    // ------------------------------------------------------------------ Spirit Leap
-
-    /** The InfiniLeap's 2 s cooldown. */
-    private var leapReady by perPlayer { 0 }
-
-    /** The Spirit Leap floor item's own 5 s cooldown (the item's lore; each item keeps its own, as an ability's cooldown is per item). */
-    private var pearlLeapReady by perPlayer { 0 }
-
-    /** The server tick the leap item [id] can be used again. */
-    private fun leapReadyAt(id: String): Int = if (id == ClearItems.SPIRIT_LEAP) pearlLeapReady else leapReady
-
-    /** The Spirit Leap window for the leap item [id] (the InfiniLeap, or the Spirit Leap stack a room's floor gives). */
-    private fun openLeap(p: ServerPlayer, id: String = ClearItems.INFINILEAP) {
-        // The floor item is an ender pearl to the client, which counts one off the stack as if it had thrown it: the stack is only used up by a leap.
-        if (id == ClearItems.SPIRIT_LEAP) resyncHeld(p)
-        val now = Fight.serverTick
-        val ready = leapReadyAt(id)
-        if (now < ready) {
-            // Cooldown: enderman.teleport HOSTILE vol 8.0 pitch 0.0 at you, then the chat line.
-            Sim.sound(SoundEvents.ENDERMAN_TELEPORT, 8f, 0f, p.position(), SoundSource.HOSTILE)
-            Sim.chat("§cThis ability is on cooldown for ${(ready - now + 19) / 20}s."); return
-        }
-        // Practice: no bots, but every class is there to leap to (Practice.leapSpot). In a party: the players and bots.
-        val mates = Party.mates(p).filter { Practice.active || it.here }.map { LeapRow.of(it) }
-        // The menu opens one RTT after the use.
-        Fight.afterPing("leapOpen") { p.openMenu(SimpleMenuProvider({ windowId, inv, _ -> LeapMenu(windowId, inv, mates, id) }, Component.literal("Spirit Leap"))) }
-    }
-
-    /**
-     * One row of the leap or Haunt window: a head with a name, and where it takes you. A boss-sim mate ([of]).
-     */
-    class LeapRow(
-        val name: String, val clazz: DungeonClass?, val profile: GameProfile, val posNow: () -> Vec3, val yaw: Float, val pitch: Float,
-        /** The colour code of the name when the member's rank is known (a run's bots carry theirs); null: a colour drawn from the name. */
-        val colour: String? = null,
-    ) {
-        val pos: Vec3 get() = posNow()
-        /** The name's colour code (`§b`). */
-        val nameColour: String get() = colour ?: rankColour(name)
-        companion object {
-            fun of(m: Party.Mate) = LeapRow(m.name, m.clazz, m.profile, { m.pos }, m.yaw, m.pitch)
-        }
-    }
-
-    /** The ghost's Haunt: the "Teleport to Player" menu, opened one RTT after the click. */
-    private fun openHaunt(p: ServerPlayer) {
-        val mates = Party.mates(p).filter { it.here }.map { LeapRow.of(it) }
-        Fight.afterPing("hauntOpen") { if (Masks.ghost) p.openMenu(SimpleMenuProvider({ id, inv, _ -> HauntMenu(id, inv, mates) }, Component.literal("Teleport to Player"))) }
-    }
-
-    /** Hypixel's ghost teleport window: teammates' heads in slots 11-15, a click teleports you to them (no cooldown). */
-    class HauntMenu(id: Int, inv: Inventory, val bots: List<LeapRow>) : ChestMenu(MenuType.GENERIC_9x4, id, inv, SimpleContainer(36), 4) {
-        init {
-            for (i in 0 until 36) container.setItem(i, ItemStack.EMPTY)
-            bots.forEachIndexed { i, b ->
-                val h = ItemStack(Items.PLAYER_HEAD)
-                h.set(DataComponents.PROFILE, ResolvableProfile.createResolved(b.profile))
-                h.set(DataComponents.CUSTOM_NAME, Component.literal("${b.nameColour}${b.name}").withStyle { it.withItalic(false) })
-                h.set(DataComponents.LORE, ItemLore(listOf("§7Click to teleport to this player!", "", "§7Health: §a100%", "", "§eClick to teleport!").map { Component.literal(it).withStyle { st -> st.withItalic(false) } }))
-                container.setItem(listOf(11, 12, 14, 15).getOrElse(i) { 16 }, h)
-            }
-        }
-
-        override fun clicked(slot: Int, button: Int, input: ContainerInput, p: Player) {
-            if (slot !in 11..16) return
-            val name = ChatFormatting.stripFormatting(container.getItem(slot).hoverName.string)
-            val bot = bots.firstOrNull { it.name == name } ?: return
-            val sp = p as ServerPlayer
-            Fight.afterPing("haunt") {
-                sp.closeContainer()
-                val e = bot.pos
-                Sim.tp(sp, e.x, e.y, e.z, bot.yaw, bot.pitch)
-                Sim.sound(SoundEvents.ENDERMAN_TELEPORT, 1f, 1.095f, sp.position(), SoundSource.HOSTILE)
-                Sim.chatStyled("§aTeleported you to ${bot.name}!")
-            }
-        }
-
-        override fun quickMoveStack(p: Player, slot: Int): ItemStack = ItemStack.EMPTY
-        override fun stillValid(p: Player) = true
-    }
-
-    /** Hypixel's Spirit Leap window: teammates' heads in slots 11-15, a click leaps (8 ticks, as measured). */
-    class LeapMenu(id: Int, inv: Inventory, val bots: List<LeapRow>, private val item: String = ClearItems.INFINILEAP) : ChestMenu(MenuType.GENERIC_9x4, id, inv, SimpleContainer(36), 4) {
-        private val owner = inv.player
-        init {
-            for (i in 0 until 36) container.setItem(i, Terminals.FILLER)
-            // In the plan's leap slot order: slots 1-4 = chest slots 11, 12, 14, 15.
-            bots.forEachIndexed { i, b ->
-                val h = ItemStack(Items.PLAYER_HEAD)
-                // The teammate's own head (the menu shows each one's skin): the bot's profile, a player's own.
-                h.set(DataComponents.PROFILE, ResolvableProfile.createResolved(b.profile))
-                // The name in its rank colour, one yellow "Click to teleport!" line.
-                val colour = ChatFormatting.getByCode(b.nameColour[1]) ?: ChatFormatting.GREEN
-                h.set(DataComponents.CUSTOM_NAME, Component.literal(b.name).withStyle { it.withItalic(false).withColor(colour) })
-                h.set(DataComponents.LORE, ItemLore(listOf(Component.literal("Click to teleport!").withStyle { it.withItalic(false).withColor(ChatFormatting.YELLOW) })))
-                container.setItem(listOf(11, 12, 14, 15).getOrElse(i) { 16 }, h)
-            }
-        }
-
-        /** The window's contents arrive as one container_set_slot per slot, as main sends them. */
-        override fun setSynchronizer(synchronizer: ContainerSynchronizer) =
-            super.setSynchronizer((owner as? ServerPlayer)?.let { PerSlotSync(synchronizer, it) } ?: synchronizer)
-
-        private var inClick = false
-
-        override fun clicked(slot: Int, button: Int, input: ContainerInput, p: Player) {
-            if (slot !in 11..16) return
-            val name = ChatFormatting.stripFormatting(container.getItem(slot).hoverName.string)
-            val bot = bots.firstOrNull { it.name == name } ?: return
-            val sp = p as ServerPlayer
-            inClick = true
-            try {
-                Fight.afterPing("leap") {
-                    // At no ping this runs inside the click's own packet handler, which then hands the click's cursor to
-                    // whatever window is open: leaping there would close onto the inventory and draw a set_cursor_item.
-                    // Run it at the head of the next server tick instead (the same tick for the client).
-                    if (inClick) Fight.later(0, "leap") { leap(sp, bot) } else leap(sp, bot)
-                }
-            } finally { inClick = false }
-        }
-
-        /** Main's tail: container_close(N), player_position, the sound, the chat line, then container_close(0). */
-        private fun leap(sp: ServerPlayer, bot: LeapRow) {
-            // A second click (a double click, or another head) arrives after the first leap closed this window: nothing.
-            if (sp.isRemoved || sp.containerMenu !== this) return
-            sp.closeContainer()
-            val e = bot.pos
-            // The cooldown is the item's own (2 s for the InfiniLeap, 5 s for the floor item); the floor item is used up by the leap.
-            val cooldownEnd = Fight.serverTick + ClearItems.leapCooldownTicks(item, mage = false, doubled = false)
-            if (item == ClearItems.SPIRIT_LEAP) pearlLeapReady = cooldownEnd else leapReady = cooldownEnd
-            if (ClearItems.leapConsumes(item)) useUpLeapItem(sp)
-            // You land on them exactly, facing as they face. Practice: where that class normally is in this section; a custom
-            // practice's leap waypoint for that class's quadrant (top left, top right, bottom left, bottom right) first.
-            val ps = if (Practice.active && bot.clazz != null) Practice.leapWaypoint(P3Plan.botOrder().indexOf(bot.clazz)) ?: Practice.leapSpot(bot.clazz) else null
-            if (ps != null) Sim.tp(sp, ps.x, ps.y, ps.z, ps.yaw, ps.pitch)
-            else Sim.tp(sp, e.x, e.y, e.z, bot.yaw, bot.pitch)
-            Sim.sound(SoundEvents.ENDERMAN_TELEPORT, 1f, 1f, sp.position(), SoundSource.HOSTILE)
-            Sim.chatStyled("§aYou have teleported to §r${bot.nameColour}${bot.name}§r§a!")
-            sp.connection.send(ClientboundContainerClosePacket(0))
-            if (Sim.isHost(sp)) GhostCapture.event("leap", bot.clazz?.name ?: bot.name)
-        }
-
-        override fun quickMoveStack(p: Player, slot: Int): ItemStack = ItemStack.EMPTY
-        override fun stillValid(p: Player) = true
-    }
-
-    /** One Spirit Leap off the first stack of them [sp] carries (the hotbar first), then the inventory shown again. */
-    private fun useUpLeapItem(sp: ServerPlayer) {
-        val inv = sp.inventory
-        val order = (0 until 9) + (9 until inv.containerSize)
-        val slot = order.firstOrNull { idOf(inv.getItem(it)) == ClearItems.SPIRIT_LEAP } ?: return
-        inv.getItem(slot).shrink(1)
-        sp.inventoryMenu.broadcastChanges()
-    }
-
-    /**
-     * Sends a window's opening (and full re-send) contents as one container_set_slot per slot, stateId counting up, instead
-     * of vanilla's single container_set_content: Hypixel's way for the Spirit Leap and Loadouts windows. The rest is vanilla's.
-     */
-    class PerSlotSync(private val base: ContainerSynchronizer, private val sp: ServerPlayer) : ContainerSynchronizer by base {
-        override fun sendInitialData(container: AbstractContainerMenu, slotItems: List<ItemStack>, carried: ItemStack, dataSlots: IntArray) {
-            for ((i, s) in slotItems.withIndex()) sp.connection.send(ClientboundContainerSetSlotPacket(container.containerId, container.incrementStateId(), i, s))
-            for ((i, v) in dataSlots.withIndex()) base.sendDataChange(container, i, v)
-        }
-    }
 }

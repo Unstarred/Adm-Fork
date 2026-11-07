@@ -370,7 +370,7 @@ class P2Storm : Fight.Phase("P2") {
         Sim.sound(SoundEvents.LIGHTNING_BOLT_THUNDER, 2f, 1.4f)
         // Each player takes it unless under a pillar.
         Sim.forEachPlayer { p ->
-            if (pillars.none { it.under(p.position()) } && !SimItems.cloaked) StormFx.hit("Giga Lightning", gigaDamage, trueDamage = true)
+            if (pillars.none { it.under(p.position()) } && !MovementItems.cloaked) StormFx.hit("Giga Lightning", gigaDamage, trueDamage = true)
         }
     }
 
@@ -395,7 +395,7 @@ class P2Storm : Fight.Phase("P2") {
         val free = crushes == 1 && !pinnedUntilBeam
         if (free && nextSkull >= 0 && t >= nextSkull) { skulls(); nextSkull = t + 5 }
         if (free && t % 10 == frenzyPhase) Sim.forEachPlayer { p ->
-            if (p.position().distanceTo(storm.pos.add(0.0, 1.5, 0.0)) <= 6.3 && !SimItems.cloaked) {
+            if (p.position().distanceTo(storm.pos.add(0.0, 1.5, 0.0)) <= 6.3 && !MovementItems.cloaked) {
                 val v = if (Random.nextDouble() < 0.7) Random.nextDouble(1990.0, 2170.0) else Random.nextDouble(2170.0, 14000.0)
                 StormFx.hit("Frenzy", Math.round(v * 10) / 10.0)
             }
@@ -419,7 +419,7 @@ class P2Storm : Fight.Phase("P2") {
         if (Fight.phase !== this) return
         StormFx.burst(at)
         Sim.forEachPlayer { p ->
-            if (p.position().add(0.0, 0.9, 0.0).distanceTo(at) <= 3.5 && !SimItems.cloaked) StormFx.hit("Lightning Fireball", 75000.0)
+            if (p.position().add(0.0, 0.9, 0.0).distanceTo(at) <= 3.5 && !MovementItems.cloaked) StormFx.hit("Lightning Fireball", 75000.0)
         }
         if (Random.nextDouble() < 0.55) fields += Field(at, Random.nextDouble() < 0.55, t)
     }
@@ -462,7 +462,7 @@ class P2Storm : Fight.Phase("P2") {
                 Sim.forEachPlayer { pl ->
                     val p = pl.position()
                     val name = pl.gameProfile.name
-                    if (name !in hit && Math.hypot(b.x - p.x, b.z - p.z) <= 3.0 && Math.abs(b.y - p.y) < 3 && !SimItems.cloaked) {
+                    if (name !in hit && Math.hypot(b.x - p.x, b.z - p.z) <= 3.0 && Math.abs(b.y - p.y) < 3 && !MovementItems.cloaked) {
                         hit += name
                         StormFx.hit("Static Field", 10800.0)
                     }

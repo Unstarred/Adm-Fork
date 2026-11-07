@@ -287,7 +287,7 @@ object Loadouts {
         init { draw() }
 
         /** As main sends it: one container_set_slot per slot, not one container_set_content. */
-        override fun setSynchronizer(synchronizer: ContainerSynchronizer) = super.setSynchronizer(SimItems.PerSlotSync(synchronizer, sp))
+        override fun setSynchronizer(synchronizer: ContainerSynchronizer) = super.setSynchronizer(SpiritLeap.PerSlotSync(synchronizer, sp))
 
         fun refresh() { draw(); broadcastFullState() }
 

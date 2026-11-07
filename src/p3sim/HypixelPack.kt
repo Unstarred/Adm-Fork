@@ -40,7 +40,7 @@ object HypixelPack {
     private const val LOAD_TIMEOUT_S = 60L
 
     /**
-     * Hypixel's private-use glyphs in ADS's text, each identified by the lore around it (`SimItems.Lore`,
+     * Hypixel's private-use glyphs in ADS's text, each identified by the lore around it (`Lore`,
      * `loadouts.json`), as the symbol Hypixel used for it before its pack. An empty string drops the glyph and the
      * space after it: the mob-type icons have no symbol, and the text reads the same without them.
      */

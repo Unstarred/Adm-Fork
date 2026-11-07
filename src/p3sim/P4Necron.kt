@@ -220,7 +220,7 @@ class P4Necron(val fromP3: Boolean = false) : Fight.Phase("P4") {
         Sim.sound(SoundEvents.GENERIC_EXPLODE, 30f, 31 / 63f, necron.pos)
         Sim.sound(SoundEvents.WITHER_AMBIENT, 30f, 44 / 63f, necron.pos)
         Sim.forEachPlayer { p ->
-            if (p.position().distanceTo(MID) <= FRENZY_RANGE && !SimItems.cloaked) Sim.chat("§cNecron's§r§7 Nuclear Frenzy hit you for §r§c57,600§r§7 damage.")
+            if (p.position().distanceTo(MID) <= FRENZY_RANGE && !MovementItems.cloaked) Sim.chat("§cNecron's§r§7 Nuclear Frenzy hit you for §r§c57,600§r§7 damage.")
         }
     }
 

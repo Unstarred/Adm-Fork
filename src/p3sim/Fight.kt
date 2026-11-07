@@ -447,13 +447,13 @@ object Fight {
         Sim.forEachPlayer { EngineerClient.safely("p3sim bows") { Bows.tick() } }
         Sim.forEachPlayer { pl -> if (P3Sim.lava) EngineerClient.safely("p3sim lava") { Lava.tick(pl) } }
         val p = phase
-        if (p == null) { Recorder.finish(); SimItems.flushMotion(); return }
+        if (p == null) { Recorder.finish(); MovementItems.flushMotion(); return }
         // The run recorder covers P1-P3 and stops at Necron; his phase still has to tick.
         if (p is P4Necron) Recorder.finish()
         EngineerClient.safely("p3sim ${p.name}") { p.tick() }
         p.t++
         if (p !is P4Necron) EngineerClient.safely("p3sim recorder") { Recorder.tick(serverTick) }
-        // This tick's knockback, straight to the player in the burst's own tick (SimItems.push).
-        SimItems.flushMotion()
+        // This tick's knockback, straight to the player in the burst's own tick (MovementItems.push).
+        MovementItems.flushMotion()
     }
 }

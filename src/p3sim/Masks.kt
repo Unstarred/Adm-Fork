@@ -61,9 +61,9 @@ object Masks {
     private const val SPIRIT_TEX = "eyJ0aW1lc3RhbXAiOjE1MDUyMjI5OTg3MzQsInByb2ZpbGVJZCI6IjBiZTU2MmUxNzIyODQ3YmQ5MDY3MWYxNzNjNjA5NmNhIiwicHJvZmlsZU5hbWUiOiJ4Y29vbHgzIiwic2lnbmF0dXJlUmVxdWlyZWQiOnRydWUsInRleHR1cmVzIjp7IlNLSU4iOnsibWV0YWRhdGEiOnsibW9kZWwiOiJzbGltIn0sInVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvOWJiZTcyMWQ3YWQ4YWI5NjVmMDhjYmVjMGI4MzRmNzc5YjUxOTdmNzlkYTRhZWEzZDEzZDI1M2VjZTlkZWMyIn19fQ=="
 
     // Names and lore as Hypixel sends them; the "Cooldown: Ns" line stays for Odin's timer.
-    val SPIRIT_MASK get() = mask(SPIRIT_TEX, "STARRED_SPIRIT_MASK", SimItems.Lore.STARRED_SPIRIT_MASK_NAME, SimItems.Lore.STARRED_SPIRIT_MASK, "mythic")
+    val SPIRIT_MASK get() = mask(SPIRIT_TEX, "STARRED_SPIRIT_MASK", Lore.STARRED_SPIRIT_MASK_NAME, Lore.STARRED_SPIRIT_MASK, "mythic")
     // Odin's invincibility timer reads Bonzo's cooldown from "Cooldown: Ns".
-    val BONZO_MASK get() = mask(BONZO_TEX, "STARRED_BONZO_MASK", SimItems.Lore.STARRED_BONZO_MASK_NAME, SimItems.Lore.STARRED_BONZO_MASK, "epic")
+    val BONZO_MASK get() = mask(BONZO_TEX, "STARRED_BONZO_MASK", Lore.STARRED_BONZO_MASK_NAME, Lore.STARRED_BONZO_MASK, "epic")
 
     private fun mask(tex: String, id: String, name: String, lore: List<String>, style: String): ItemStack {
         val s = SimItems.head(tex, name)
@@ -207,7 +207,7 @@ object Masks {
         // The speed update lands 2-3 ticks after the Autopet chat (about evenly); the swap itself is silent
         // bar one vol-0 splash at (200,300,400).
         Fight.later(2 + Random.nextInt(2), "pet speed") { Fight.applySpeed(p) }
-        // The splash goes to you alone (SimItems.castRod); then main's player_abilities with the new pet's walking speed,
+        // The splash goes to you alone (MovementItems.castRod); then main's player_abilities with the new pet's walking speed,
         // ahead of the movement_speed attribute that follows 2-3 ticks on.
         p.abilities.setWalkingSpeed(Fight.speedStat(p).coerceAtLeast(100) / 1000f)
         p.onUpdateAbilities()
@@ -325,7 +325,7 @@ object Masks {
         // [goldor]: Goldor's line and its quiet wither.ambient, which come after the death/proc chat and sounds.
         if (covered()) { goldor?.invoke(); return }
         // A named hit meets the Creeper Veil first (death ticks, by == null, go through it).
-        if (by != null && SimItems.veilAbsorbs()) return
+        if (by != null && MovementItems.veilAbsorbs()) return
         if (tryProc(p)) { goldor?.invoke(); return }
         die(p, by)
         goldor?.invoke()
