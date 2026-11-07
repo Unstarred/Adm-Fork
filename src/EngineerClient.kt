@@ -128,32 +128,7 @@ object EngineerClient : ClientModInitializer {
         // subscription lifecycle. This is Odin's documented addon path.
         ModuleManager.registerModules(ModuleConfig("adm.json"), *MODULES.toTypedArray())
 
-        // Additions to Odin's own modules (e.g. the Engineer Splits look on Odin's Splits) go in
-        // before anything saves the configs, which would drop saved values for settings that don't
-        // exist yet.
-        safely("ss solver") { OdinSimonSays.install() }
-        safely("masks used") { OdinMasksUsed.install() }
-        safely("tick timers") { OdinTickTimers.install() }
-        safely("highlight look") { OdinHighlightLook.install() }
-        safely("splits look") { OdinSplitsLook.install() }
-        safely("sub splits tracking") { DungeonSplits.install() }
-        safely("term info") { TermInfo.init() }
-        safely("terminal hitboxes settings") { TerminalHitboxes.adoptTermInfoSettings() }
-        // Room Prediction and LCM Style (with LCM Colors): settings on Odin's own Dungeon Map, and Map Info's LCM Style
-        // (from Ascent Client, same names, so saved values carry over); Odin's configs are read again so they apply
-        // (reading never writes the file).
-        safely("lcm style") { LcmStyle.install() }
-        safely("lcm map info") { LcmMapInfo.install() }
-        safely("map prediction") { OdinMapPrediction.install() }
-        // Team TP Maze: settings on Odin's Puzzle Solvers (its TP Maze), the party's shared maze map over Odin's websocket.
-        safely("team tp maze") { TeamTpMaze.install() }
-        safely("map configs") { ModuleManager.loadConfigurations() }
-        safely("hover terms") { TermsimExtras.install() }
-        safely("click limit") { OdinClickLimit.install() }
-        safely("odin term times") { OdinTermTimes.install() }
-        safely("launch stats") { LaunchStats.install() }
-        safely("leap order") { LeapOrder.install() }
-        safely("p3sim") { P3Sim.init() }
+        installOdinAdditions()
 
         // Modules default OFF and only ModuleConfig.load() toggles saved state — on a
         // fresh install nothing has saved state yet, so turn these on once.
@@ -195,6 +170,37 @@ object EngineerClient : ClientModInitializer {
         registerCommand()
 
         logger.info("[ec] initialized — class stash=${EcConfig.data.lastKnownClass}")
+    }
+
+    /**
+     * Additions to Odin's own modules (e.g. the Engineer Splits look on Odin's Splits) go in
+     * before anything saves the configs, which would drop saved values for settings that don't
+     * exist yet.
+     */
+    private fun installOdinAdditions() {
+        safely("ss solver") { OdinSimonSays.install() }
+        safely("masks used") { OdinMasksUsed.install() }
+        safely("tick timers") { OdinTickTimers.install() }
+        safely("highlight look") { OdinHighlightLook.install() }
+        safely("splits look") { OdinSplitsLook.install() }
+        safely("sub splits tracking") { DungeonSplits.install() }
+        safely("term info") { TermInfo.init() }
+        safely("terminal hitboxes settings") { TerminalHitboxes.adoptTermInfoSettings() }
+        // Room Prediction and LCM Style (with LCM Colors): settings on Odin's own Dungeon Map, and Map Info's LCM Style
+        // (from Ascent Client, same names, so saved values carry over); Odin's configs are read again so they apply
+        // (reading never writes the file).
+        safely("lcm style") { LcmStyle.install() }
+        safely("lcm map info") { LcmMapInfo.install() }
+        safely("map prediction") { OdinMapPrediction.install() }
+        // Team TP Maze: settings on Odin's Puzzle Solvers (its TP Maze), the party's shared maze map over Odin's websocket.
+        safely("team tp maze") { TeamTpMaze.install() }
+        safely("map configs") { ModuleManager.loadConfigurations() }
+        safely("hover terms") { TermsimExtras.install() }
+        safely("click limit") { OdinClickLimit.install() }
+        safely("odin term times") { OdinTermTimes.install() }
+        safely("launch stats") { LaunchStats.install() }
+        safely("leap order") { LeapOrder.install() }
+        safely("p3sim") { P3Sim.init() }
     }
 
     /** Every handler that runs inside Odin's bus or a coroutine must not be able to take Odin down with it. */
