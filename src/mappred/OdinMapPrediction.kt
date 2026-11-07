@@ -408,28 +408,10 @@ object OdinMapPrediction {
         secretsAt = d.secretsAt
         // the last rooms the secret total leaves only one size and place for: in full, named when only one name fits
         val exact = BooleanArray(W * W)
-        // (every room, discovered ones nobody has opened too, once the map is known for sure)
-        if (exactRooms.value) for (names in d.namedGroups) {
-            val tiles = names[0].tiles
-            if (names.sumOf { it.chance.toDouble() } < SURE) continue
-            if (tiles.all { known[it] }) { if (!namedOnMap(tiles[0])) roomText(g, tiles, names); continue }
-            if (tiles.any { known[it] || exact[it] || it in blood }) continue
-            for (t in tiles) exact[t] = true
-            exactRoom(g, tiles, names)
-        }
+        drawNamedRooms(g, d, known, exact, blood)
         // anything shown at 100% (a room's size and place), named or not: drawn in full in its type's colour (or the
         // kinds a dead end can still be), keeping the split's label on its door's tile
-        if (exactRooms.value) for (tiles in d.certain) {
-            if (tiles.any { known[it] || exact[it] || it in blood }) continue
-            for (t in tiles) exact[t] = true
-            val q = p.probs[tiles[0]] ?: p.raw[tiles[0]]
-            val types = if (tiles.size > 1 || q == null) listOf(-1) else {
-                val room = q.sum()
-                (0 until Cls.COUNT).filter { q[it] >= 0.05f * room }.sortedByDescending { q[it] }.take(3).map { if (it == Cls.NORMAL || it == Cls.BIG) -1 else it }.distinct()
-            }
-            exactFill(g, tiles, types)
-            for (t in tiles) splits[t]?.let { overlay(g, (t % W) * TILE, (t / W) * TILE, it, null, false) }
-        }
+        drawCertainRooms(g, p, d, known, exact, blood, splits)
         // the big rooms it's sure of, greyed out at their whole size (likeliest first, never two on one tile)
         val inBig = arrayOfNulls<BigRoom>(W * W)
         val bigAt = bigChance.value / 100f
@@ -452,40 +434,7 @@ object OdinMapPrediction {
                 if (split != null || t in hints) overlay(g, x, y, split, room.chance, true)
                 continue
             }
-            val shownCls = SPECIALS.filter { probs[it] >= min }.sortedByDescending { probs[it] }.take(3)
-            val split = splits[t]
-            // dead end (puzzle, trap, yellow, rare), blood or fairy, or a normal 1x1: each on its own slider, the likeliest that passes
-            val deadEnd = probs[Cls.PUZZLE] + probs[Cls.TRAP] + probs[Cls.YELLOW] + probs[Cls.RARE]
-            val one = probs[Cls.NORMAL]
-            val bfCls = if (probs[Cls.BLOOD] >= probs[Cls.FAIRY]) Cls.BLOOD else Cls.FAIRY
-            val bf = probs[bfCls]
-            val isDeadEnd = deadEnd > 0f && deadEnd >= deadEndAt
-            val isOne = one > 0f && one >= oneAt
-            val isBloodFairy = bf > 0f && bf >= bloodFairyAt
-            val best = maxOf(if (isDeadEnd) deadEnd else 0f, if (isOne) one else 0f, if (isBloodFairy) bf else 0f)
-            if (isBloodFairy && bf >= best) {
-                // Odin's guess look in the room's colour, as Odin draws a "?" behind the blood door
-                g.fill(x, y, x + ROOM, y + ROOM, dim(bfCls))
-                overlay(g, x, y, null, bf, true)
-            } else if (isDeadEnd && deadEnd >= best) {
-                deadEndGuess(g, x, y, probs, deadEnd)
-                overlay(g, x, y, null, deadEnd, true)
-            } else if (isOne) {
-                // a normal 1x1, greyed out like the big rooms; a door's tile keeps the split label
-                greyRoom(g, intArrayOf(t))
-                overlay(g, x, y, split, one, split != null)
-            } else if (split != null || t in hints) {
-                // the "?" tile: its chances as bands across it, the rest grey (a door the prediction doesn't know
-                // yet: the chances it gave the tile so far, no split label)
-                g.fill(x, y, x + ROOM, y + ROOM, if (lcm) LcmStyle.UNOPENED else DungeonMap.unknownRoomColor.rgba)
-                var at = x.toFloat()
-                for (c in shownCls) {
-                    val wdt = probs[c] * ROOM
-                    g.fill(at.roundToInt(), y, (at + wdt).roundToInt().coerceAtMost(x + ROOM), y + ROOM, dim(c))
-                    at += wdt
-                }
-                overlay(g, x, y, split, shownCls.firstOrNull()?.let { probs[it] }, true)
-            }
+            drawPredictedTile(g, t, x, y, probs, splits, hints, min, deadEndAt, oneAt, bloodFairyAt)
         }
         // the doors it's sure of between unknown tiles, over everything else
         val doorAt = doorChance.value / 100f
@@ -494,6 +443,72 @@ object OdinMapPrediction {
             door(g, d)
         }
         return true
+    }
+
+    /** The rooms whose names are sure: named where the map shows them unnamed, else drawn in full ([exactRoom]) and marked in [exact]. */
+    private fun drawNamedRooms(g: GuiGraphicsExtractor, d: Derived, known: BooleanArray, exact: BooleanArray, blood: Set<Int>) {
+        // (every room, discovered ones nobody has opened too, once the map is known for sure)
+        if (exactRooms.value) for (names in d.namedGroups) {
+            val tiles = names[0].tiles
+            if (names.sumOf { it.chance.toDouble() } < SURE) continue
+            if (tiles.all { known[it] }) { if (!namedOnMap(tiles[0])) roomText(g, tiles, names); continue }
+            if (tiles.any { known[it] || exact[it] || it in blood }) continue
+            for (t in tiles) exact[t] = true
+            exactRoom(g, tiles, names)
+        }
+    }
+
+    /** The shapes shown at 100% that nothing else has drawn: in full ([exactFill]), marked in [exact]. */
+    private fun drawCertainRooms(g: GuiGraphicsExtractor, p: Prediction, d: Derived, known: BooleanArray, exact: BooleanArray, blood: Set<Int>, splits: Map<Int, Split>) {
+        if (exactRooms.value) for (tiles in d.certain) {
+            if (tiles.any { known[it] || exact[it] || it in blood }) continue
+            for (t in tiles) exact[t] = true
+            val q = p.probs[tiles[0]] ?: p.raw[tiles[0]]
+            val types = if (tiles.size > 1 || q == null) listOf(-1) else {
+                val room = q.sum()
+                (0 until Cls.COUNT).filter { q[it] >= 0.05f * room }.sortedByDescending { q[it] }.take(3).map { if (it == Cls.NORMAL || it == Cls.BIG) -1 else it }.distinct()
+            }
+            exactFill(g, tiles, types)
+            for (t in tiles) splits[t]?.let { overlay(g, (t % W) * TILE, (t / W) * TILE, it, null, false) }
+        }
+    }
+
+    /** An unknown tile no big room covers: blood or fairy, a dead end's guess, a normal 1x1, or the "?" tile with its chances. */
+    private fun drawPredictedTile(g: GuiGraphicsExtractor, t: Int, x: Int, y: Int, probs: FloatArray, splits: Map<Int, Split>, hints: Set<Int>, min: Float, deadEndAt: Float, oneAt: Float, bloodFairyAt: Float) {
+        val shownCls = SPECIALS.filter { probs[it] >= min }.sortedByDescending { probs[it] }.take(3)
+        val split = splits[t]
+        // dead end (puzzle, trap, yellow, rare), blood or fairy, or a normal 1x1: each on its own slider, the likeliest that passes
+        val deadEnd = probs[Cls.PUZZLE] + probs[Cls.TRAP] + probs[Cls.YELLOW] + probs[Cls.RARE]
+        val one = probs[Cls.NORMAL]
+        val bfCls = if (probs[Cls.BLOOD] >= probs[Cls.FAIRY]) Cls.BLOOD else Cls.FAIRY
+        val bf = probs[bfCls]
+        val isDeadEnd = deadEnd > 0f && deadEnd >= deadEndAt
+        val isOne = one > 0f && one >= oneAt
+        val isBloodFairy = bf > 0f && bf >= bloodFairyAt
+        val best = maxOf(if (isDeadEnd) deadEnd else 0f, if (isOne) one else 0f, if (isBloodFairy) bf else 0f)
+        if (isBloodFairy && bf >= best) {
+            // Odin's guess look in the room's colour, as Odin draws a "?" behind the blood door
+            g.fill(x, y, x + ROOM, y + ROOM, dim(bfCls))
+            overlay(g, x, y, null, bf, true)
+        } else if (isDeadEnd && deadEnd >= best) {
+            deadEndGuess(g, x, y, probs, deadEnd)
+            overlay(g, x, y, null, deadEnd, true)
+        } else if (isOne) {
+            // a normal 1x1, greyed out like the big rooms; a door's tile keeps the split label
+            greyRoom(g, intArrayOf(t))
+            overlay(g, x, y, split, one, split != null)
+        } else if (split != null || t in hints) {
+            // the "?" tile: its chances as bands across it, the rest grey (a door the prediction doesn't know
+            // yet: the chances it gave the tile so far, no split label)
+            g.fill(x, y, x + ROOM, y + ROOM, if (lcm) LcmStyle.UNOPENED else DungeonMap.unknownRoomColor.rgba)
+            var at = x.toFloat()
+            for (c in shownCls) {
+                val wdt = probs[c] * ROOM
+                g.fill(at.roundToInt(), y, (at + wdt).roundToInt().coerceAtMost(x + ROOM), y + ROOM, dim(c))
+                at += wdt
+            }
+            overlay(g, x, y, split, shownCls.firstOrNull()?.let { probs[it] }, true)
+        }
     }
 
     /** A predicted door where Odin draws doors (renderDoors): in the gap between its tiles, in the colour of its kind. */

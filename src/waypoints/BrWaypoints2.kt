@@ -220,59 +220,9 @@ object BrWaypoints2 : Module(
             if (rushing && updated.block == Blocks.BARRIER && old.block != Blocks.BARRIER) barriers += pos.x to pos.z
         }
 
-        on<TickEvent.End> {
-            drawnThisTick = null
-            BrRoles.settingKilling = killers.ordinal + 2
-            BrRoles.settingRole = when (myRole.ordinal) { 0 -> null; 1 -> 0; else -> myRole.ordinal - 1 }
-            BrRoles.doorKills = doorKills
-            BrRoles.dropBottom = dropBottom
-            wandUser?.tick()
-            if (!DungeonUtils.inDungeons) return@on
-            wasInDungeon = true
-            ticks++
-            if (barriers.size >= DoorBlocks.DOOR_BLOCKS) for (d in DoorBlocks.doors(barriers)) doorFalling(tileRoom(d.a), tileRoom(d.b), d)
-            barriers.clear()
-            if (ticks % 10 == 0) mapPath()
-            trackMyDoor()
-            // Walking into fairy on the rush: it has been reached, whether its doors were seen falling or not.
-            if (rushing && beforeFairy == null) DungeonUtils.currentRoom?.takeIf { it.type == RoomType.FAIRY && onRush(it.name) }?.let { reachFairy() }
-            if (debug && (rushing || allRooms)) DungeonUtils.currentRoom?.name?.let { if (it != lastRoom) { lastRoom = it; debugRoom(it) } }
-            if (debug) traceRoom()
-            loadRooms()
-            if (DungeonUtils.inClear) findStarred()
-            watchDeaths()
-        }
+        on<TickEvent.End> { onTickEnd() }
 
-        on<RenderExtractEvent> {
-            if (!DungeonUtils.inDungeons) return@on
-
-            val drawn = drawnThisTick ?: drawn().also { drawnThisTick = it }
-            for (d in drawn) {
-                val bb = d.bb
-                // Done (Recolor Done Boxes): a whole box in Done Color, number greyed, never "next".
-                if (d.done && recolorDone) {
-                    drawFilledBox(bb, doneColor.withAlpha(opacity), depth = false)
-                    drawWireFrameBox(bb, doneColor, depth = false)
-                    drawText(d.doneLabel, d.labelAt, 1.5f, false)
-                    continue
-                }
-                // Seen through walls; the faces faint enough to walk through without noticing, the
-                // next one of yours to kill filled in more.
-                drawFilledBox(bb, d.colour.withAlpha(if (d.next) (opacity * 3).coerceIn(opacity + 0.15f, 1f) else opacity), depth = false)
-                drawWireFrameBox(bb, d.colour, depth = false)
-                drawText(d.label, d.labelAt, 1.5f, false)
-            }
-
-            if (spawnMarkers) {
-                val colour = (Highlight.settings["Highlight color"] as? ColorSetting)?.value ?: Colors.WHITE
-                val style = (Highlight.settings["Render Style"] as? SelectorSetting<*>)?.value as? BoxStyle ?: BoxStyle.OUTLINE
-                for (mob in mobs) {
-                    // Flat on the floor, lifted a hair so it does not flicker into the block.
-                    val y = mob.y + 0.02
-                    drawStyledBox(AABB(mob.x - 0.5, y, mob.z - 0.5, mob.x + 0.5, y, mob.z + 0.5), colour, style, true)
-                }
-            }
-        }
+        on<RenderExtractEvent> { onRenderExtract() }
     }
 
     init {
@@ -286,6 +236,62 @@ object BrWaypoints2 : Module(
                     BrRoles.claim(IntegerArgumentType.getInteger(ctx, "killing"), IntegerArgumentType.getInteger(ctx, "role"))
                     1
                 })))
+        }
+    }
+
+    /** Each client tick: the settings over to [BrRoles], the wand, and in a dungeon the rush, its doors, the rooms and the starred mobs. */
+    private fun TickEvent.End.onTickEnd() {
+        drawnThisTick = null
+        BrRoles.settingKilling = killers.ordinal + 2
+        BrRoles.settingRole = when (myRole.ordinal) { 0 -> null; 1 -> 0; else -> myRole.ordinal - 1 }
+        BrRoles.doorKills = doorKills
+        BrRoles.dropBottom = dropBottom
+        wandUser?.tick()
+        if (!DungeonUtils.inDungeons) return
+        wasInDungeon = true
+        ticks++
+        if (barriers.size >= DoorBlocks.DOOR_BLOCKS) for (d in DoorBlocks.doors(barriers)) doorFalling(tileRoom(d.a), tileRoom(d.b), d)
+        barriers.clear()
+        if (ticks % 10 == 0) mapPath()
+        trackMyDoor()
+        // Walking into fairy on the rush: it has been reached, whether its doors were seen falling or not.
+        if (rushing && beforeFairy == null) DungeonUtils.currentRoom?.takeIf { it.type == RoomType.FAIRY && onRush(it.name) }?.let { reachFairy() }
+        if (debug && (rushing || allRooms)) DungeonUtils.currentRoom?.name?.let { if (it != lastRoom) { lastRoom = it; debugRoom(it) } }
+        if (debug) traceRoom()
+        loadRooms()
+        if (DungeonUtils.inClear) findStarred()
+        watchDeaths()
+    }
+
+    /** In a dungeon: the boxes to draw, and with Starred Mobs Spawn where each starred mob was first seen. */
+    private fun RenderExtractEvent.onRenderExtract() {
+        if (!DungeonUtils.inDungeons) return
+
+        val drawn = drawnThisTick ?: drawn().also { drawnThisTick = it }
+        for (d in drawn) {
+            val bb = d.bb
+            // Done (Recolor Done Boxes): a whole box in Done Color, number greyed, never "next".
+            if (d.done && recolorDone) {
+                drawFilledBox(bb, doneColor.withAlpha(opacity), depth = false)
+                drawWireFrameBox(bb, doneColor, depth = false)
+                drawText(d.doneLabel, d.labelAt, 1.5f, false)
+                continue
+            }
+            // Seen through walls; the faces faint enough to walk through without noticing, the
+            // next one of yours to kill filled in more.
+            drawFilledBox(bb, d.colour.withAlpha(if (d.next) (opacity * 3).coerceIn(opacity + 0.15f, 1f) else opacity), depth = false)
+            drawWireFrameBox(bb, d.colour, depth = false)
+            drawText(d.label, d.labelAt, 1.5f, false)
+        }
+
+        if (spawnMarkers) {
+            val colour = (Highlight.settings["Highlight color"] as? ColorSetting)?.value ?: Colors.WHITE
+            val style = (Highlight.settings["Render Style"] as? SelectorSetting<*>)?.value as? BoxStyle ?: BoxStyle.OUTLINE
+            for (mob in mobs) {
+                // Flat on the floor, lifted a hair so it does not flicker into the block.
+                val y = mob.y + 0.02
+                drawStyledBox(AABB(mob.x - 0.5, y, mob.z - 0.5, mob.x + 0.5, y, mob.z + 0.5), colour, style, true)
+            }
         }
     }
 

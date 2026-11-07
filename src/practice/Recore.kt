@@ -234,13 +234,22 @@ object Recore : Module(
         for (t in targets) drawTarget(gfx, t, drawnAreas, targets.size > 1)
     }
 
+    /** The highlight's fade this frame, from Fade In and Pulse: set at the top of [drawTarget], read by [faded]. */
+    private var fade = 1f
+    /** Where a name in the middle of the area goes: set in [drawTarget], moved by the style drawn, read by [drawName]. */
+    private var midX = 0
+    private var midY = 0
+
+    /** This colour at the highlight's [fade]. */
+    private fun Color.faded() = Color(rgba, alphaFloat * fade)
+
     /**
      * One [Target]'s highlight. [drawnAreas] holds the Side / Top / Bottom halves already filled, so a half two
      * targets share isn't filled twice (twice as strong); with [several], a name goes in its own quarter there.
      */
     private fun drawTarget(gfx: GuiGraphicsExtractor, t: Target, drawnAreas: MutableSet<Int>, several: Boolean) {
         val now = System.currentTimeMillis()
-        var fade = 1f
+        fade = 1f
         if (fadeIn > 0) fade *= ((now - t.since) / fadeIn.toFloat()).coerceIn(0f, 1f)
         if (pulse) {
             val p = ((Math.sin(now / 1000.0 * pulseSpeed * 2 * Math.PI) + 1) / 2).toFloat()
@@ -248,7 +257,6 @@ object Recore : Module(
             fade *= low + (1 - low) * p
         }
         if (fade <= 0f) return
-        fun Color.faded() = Color(rgba, alphaFloat * fade)
         val c = color.faded()
 
         val i = t.i
@@ -266,71 +274,90 @@ object Recore : Module(
         val qy0 = if (bottom) cy + g else 0
         val qy1 = if (bottom) h else cy - g
         // Where a name in the middle of the area goes.
-        var midX = (qx0 + qx1) / 2
-        var midY = (qy0 + qy1) / 2
+        midX = (qx0 + qx1) / 2
+        midY = (qy0 + qy1) / 2
 
         when (style) {
-            Style.QUADRANT, Style.SIDE, Style.VERTICAL -> {
-                val x0 = if (style == Style.VERTICAL) 0 else qx0
-                val x1 = if (style == Style.VERTICAL) w else qx1
-                val y0 = if (style == Style.SIDE) 0 else qy0
-                val y1 = if (style == Style.SIDE) h else qy1
-                // Sharing a half with another target: the name stays in this one's quarter, so the two don't overlap.
-                if (!several || style == Style.QUADRANT) { midX = (x0 + x1) / 2; midY = (y0 + y1) / 2 }
-                val area = when (style) { Style.SIDE -> if (right) 1 else 0; Style.VERTICAL -> if (bottom) 2 else 0; else -> i }
-                if (drawnAreas.add(area)) {
-                    val ax = if (style == Style.VERTICAL) 0 else sx
-                    val ay = if (style == Style.SIDE) 0 else sy
-                    when (fill) {
-                        Fill.SOLID -> gfx.fill(x0, y0, x1, y1, c.rgba)
-                        Fill.TO_CENTRE -> fadeRect(gfx, x0, y0, x1, y1, c, ax, ay)
-                        Fill.TO_EDGE -> fadeRect(gfx, x0, y0, x1, y1, c, -ax, -ay)
-                    }
-                    if (outline) frame(gfx, x0, y0, x1, y1, outlineWidth, outlineColor.faded().rgba)
-                }
-            }
-            Style.EDGE_GLOW -> {
-                val d = (minOf(w, h) * glowDepth / 100f).toInt().coerceAtLeast(2)
-                val x0 = if (right) cx else 0
-                val x1 = if (right) w else cx
-                val y0 = if (bottom) cy else 0
-                val y1 = if (bottom) h else cy
-                if (bottom) fadeRect(gfx, x0, h - d, x1, h, c, 0, 1) else fadeRect(gfx, x0, 0, x1, d, c, 0, -1)
-                if (right) fadeRect(gfx, w - d, y0, w, y1, c, 1, 0) else fadeRect(gfx, 0, y0, d, y1, c, -1, 0)
-                midX = (x0 + x1) / 2; midY = (y0 + y1) / 2
-            }
-            Style.BRACKET -> {
-                // An L whose corner points into the quadrant, its arms running back toward the crosshair.
-                val l = bracketSize
-                val bt = bracketWidth
-                val px = cx + sx * (g + l)
-                val py = cy + sy * (g + l)
-                gfx.fill(minOf(px, px - sx * l), minOf(py, py - sy * bt), maxOf(px, px - sx * l), maxOf(py, py - sy * bt), c.rgba)
-                // The second arm starts past the first, so the corner is not drawn twice.
-                gfx.fill(minOf(px, px - sx * bt), minOf(py - sy * bt, py - sy * l), maxOf(px, px - sx * bt), maxOf(py - sy * bt, py - sy * l), c.rgba)
-                midX = px + sx * 12; midY = py + sy * 12
-            }
+            Style.QUADRANT, Style.SIDE, Style.VERTICAL -> drawArea(gfx, i, drawnAreas, several, c, w, h, right, bottom, sx, sy, qx0, qx1, qy0, qy1)
+            Style.EDGE_GLOW -> drawEdgeGlow(gfx, c, w, h, cx, cy, right, bottom)
+            Style.BRACKET -> drawBracket(gfx, c, cx, cy, sx, sy, g)
             Style.LEAP_BOX -> {
-                // Odin's box for that player: 24px off the centre, its Render Scale from the near corner.
-                val bw = LeapMenu.BOX_WIDTH
-                val bh = LeapMenu.BOX_HEIGHT
-                val lx = if (right) 0 else -bw
-                val ly = if (bottom) 0 else -bh
-                val scale = OdinLeapScale.get()
-                gfx.pose().pushMatrix()
-                gfx.pose().translate((cx + sx * 24).toFloat(), (cy + sy * 24).toFloat())
-                gfx.pose().scale(scale, scale)
-                if (outline) gfx.roundedRectOutlined(lx, ly, lx + bw, ly + bh, c.rgba, outlineColor.faded().rgba, outlineWidth.toFloat(), 9f)
-                else gfx.roundedRect(lx, ly, lx + bw, ly + bh, c.rgba, 9f)
-                val face = (bh * 0.76).toInt()
-                PlayerFaceExtractor.extractRenderState(gfx, t.skin, lx + 9, ly + 9, face, ARGB.color((64 * fade).toInt(), 255, 255, 255))
-                gfx.text(t.name, lx + 15 + face, ly + (bh / 2.5).toInt(), c, shadow = false)
-                gfx.text(t.clazz, lx + 15 + face, ly + (bh / 1.7).toInt(), c, shadow = false)
-                gfx.pose().popMatrix()
+                drawLeapBox(gfx, t, c, cx, cy, right, bottom, sx, sy)
                 return
             }
         }
 
+        drawName(gfx, t, right, bottom, cx, cy)
+    }
+
+    /** Quadrant, Side or Top / Bottom: the area filled (a half two targets share, once) and its outline. */
+    private fun drawArea(gfx: GuiGraphicsExtractor, i: Int, drawnAreas: MutableSet<Int>, several: Boolean, c: Color, w: Int, h: Int, right: Boolean, bottom: Boolean, sx: Int, sy: Int, qx0: Int, qx1: Int, qy0: Int, qy1: Int) {
+        val x0 = if (style == Style.VERTICAL) 0 else qx0
+        val x1 = if (style == Style.VERTICAL) w else qx1
+        val y0 = if (style == Style.SIDE) 0 else qy0
+        val y1 = if (style == Style.SIDE) h else qy1
+        // Sharing a half with another target: the name stays in this one's quarter, so the two don't overlap.
+        if (!several || style == Style.QUADRANT) { midX = (x0 + x1) / 2; midY = (y0 + y1) / 2 }
+        val area = when (style) { Style.SIDE -> if (right) 1 else 0; Style.VERTICAL -> if (bottom) 2 else 0; else -> i }
+        if (drawnAreas.add(area)) {
+            val ax = if (style == Style.VERTICAL) 0 else sx
+            val ay = if (style == Style.SIDE) 0 else sy
+            when (fill) {
+                Fill.SOLID -> gfx.fill(x0, y0, x1, y1, c.rgba)
+                Fill.TO_CENTRE -> fadeRect(gfx, x0, y0, x1, y1, c, ax, ay)
+                Fill.TO_EDGE -> fadeRect(gfx, x0, y0, x1, y1, c, -ax, -ay)
+            }
+            if (outline) frame(gfx, x0, y0, x1, y1, outlineWidth, outlineColor.faded().rgba)
+        }
+    }
+
+    /** Edge Glow: a glow along the quarter's two outer edges. */
+    private fun drawEdgeGlow(gfx: GuiGraphicsExtractor, c: Color, w: Int, h: Int, cx: Int, cy: Int, right: Boolean, bottom: Boolean) {
+        val d = (minOf(w, h) * glowDepth / 100f).toInt().coerceAtLeast(2)
+        val x0 = if (right) cx else 0
+        val x1 = if (right) w else cx
+        val y0 = if (bottom) cy else 0
+        val y1 = if (bottom) h else cy
+        if (bottom) fadeRect(gfx, x0, h - d, x1, h, c, 0, 1) else fadeRect(gfx, x0, 0, x1, d, c, 0, -1)
+        if (right) fadeRect(gfx, w - d, y0, w, y1, c, 1, 0) else fadeRect(gfx, 0, y0, d, y1, c, -1, 0)
+        midX = (x0 + x1) / 2; midY = (y0 + y1) / 2
+    }
+
+    /** Corner Bracket: an L near the crosshair pointing at the quarter. */
+    private fun drawBracket(gfx: GuiGraphicsExtractor, c: Color, cx: Int, cy: Int, sx: Int, sy: Int, g: Int) {
+        // An L whose corner points into the quadrant, its arms running back toward the crosshair.
+        val l = bracketSize
+        val bt = bracketWidth
+        val px = cx + sx * (g + l)
+        val py = cy + sy * (g + l)
+        gfx.fill(minOf(px, px - sx * l), minOf(py, py - sy * bt), maxOf(px, px - sx * l), maxOf(py, py - sy * bt), c.rgba)
+        // The second arm starts past the first, so the corner is not drawn twice.
+        gfx.fill(minOf(px, px - sx * bt), minOf(py - sy * bt, py - sy * l), maxOf(px, px - sx * bt), maxOf(py - sy * bt, py - sy * l), c.rgba)
+        midX = px + sx * 12; midY = py + sy * 12
+    }
+
+    /** Leap Box: their leap menu box, as Odin draws it. */
+    private fun drawLeapBox(gfx: GuiGraphicsExtractor, t: Target, c: Color, cx: Int, cy: Int, right: Boolean, bottom: Boolean, sx: Int, sy: Int) {
+        // Odin's box for that player: 24px off the centre, its Render Scale from the near corner.
+        val bw = LeapMenu.BOX_WIDTH
+        val bh = LeapMenu.BOX_HEIGHT
+        val lx = if (right) 0 else -bw
+        val ly = if (bottom) 0 else -bh
+        val scale = OdinLeapScale.get()
+        gfx.pose().pushMatrix()
+        gfx.pose().translate((cx + sx * 24).toFloat(), (cy + sy * 24).toFloat())
+        gfx.pose().scale(scale, scale)
+        if (outline) gfx.roundedRectOutlined(lx, ly, lx + bw, ly + bh, c.rgba, outlineColor.faded().rgba, outlineWidth.toFloat(), 9f)
+        else gfx.roundedRect(lx, ly, lx + bw, ly + bh, c.rgba, 9f)
+        val face = (bh * 0.76).toInt()
+        PlayerFaceExtractor.extractRenderState(gfx, t.skin, lx + 9, ly + 9, face, ARGB.color((64 * fade).toInt(), 255, 255, 255))
+        gfx.text(t.name, lx + 15 + face, ly + (bh / 2.5).toInt(), c, shadow = false)
+        gfx.text(t.clazz, lx + 15 + face, ly + (bh / 1.7).toInt(), c, shadow = false)
+        gfx.pose().popMatrix()
+    }
+
+    /** The name (and class) on the highlight: in the middle of its area, or just off the crosshair toward it. */
+    private fun drawName(gfx: GuiGraphicsExtractor, t: Target, right: Boolean, bottom: Boolean, cx: Int, cy: Int) {
         if (!showName) return
         val lines = listOfNotNull(t.name, if (showClass) t.clazz.replaceFirstChar { it.uppercase() } else null)
         val s = nameScale.toFloat()

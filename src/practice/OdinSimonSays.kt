@@ -70,31 +70,7 @@ object OdinSimonSays {
         // relit in one tick) is how a skip's chain starts show, and Odin's BlockUpdateEvent skips it as no
         // change. Stamped with the server tick on arrival, and what the lamp was taken from the packets before
         // it (in arrival order), then handled on the client thread.
-        on<PacketEvent.Receive> {
-            val changes = when (val p = packet) {
-                is ClientboundBlockUpdatePacket -> if (onDevice(p.pos)) listOf(p.pos.immutable() to p.blockState) else return@on
-                is ClientboundSectionBlocksUpdatePacket -> ArrayList<Pair<BlockPos, BlockState>>().also { l ->
-                    p.runUpdates { pos, state -> if (onDevice(pos)) l += pos.immutable() to state }
-                }.ifEmpty { return@on }
-                else -> return@on
-            }
-            val at = tick
-            // A lamp not seen since the world loaded: taken as a change (packets come for changes, re-sends aside).
-            val lamps = changes.filter { it.first.x == 111 }.map { (pos, state) ->
-                val lit = state.block == Blocks.SEA_LANTERN
-                Triple(pos, lit, lampLit.put(pos, lit) ?: !lit)
-            }
-            for ((pos, _) in changes) if (pos.x == 110) buttonTick[pos] = at
-            if (lamps.isEmpty()) return@on
-            val handle = Runnable {
-                if (!active() || SimonSaysPractice.practicing || DungeonUtils.getF7Phase() != M7Phases.P3) return@Runnable
-                EngineerClient.safely("ss solver lamps") {
-                    for ((pos, lit, was) in lamps) solver.lamp(pos, lit, was, at)
-                    sync()
-                }
-            }
-            if (EngineerClient.mc.isSameThread) handle.run() else EngineerClient.mc.execute(handle)
-        }
+        on<PacketEvent.Receive> { onPacket() }
         on<TickEvent.End> {
             if (!active() || SimonSaysPractice.practicing || DungeonUtils.getF7Phase() != M7Phases.P3) return@on
             // A tick behind: that tick's lamp packets may still be on their way to this thread.
@@ -121,6 +97,33 @@ object OdinSimonSays {
             }
         }
         EventBus.subscribe(this)
+    }
+
+    /** A block packet's lamps and buttons on the device: stamped with the server tick, the lamps then handled on the client thread. */
+    private fun PacketEvent.Receive.onPacket() {
+        val changes = when (val p = packet) {
+            is ClientboundBlockUpdatePacket -> if (onDevice(p.pos)) listOf(p.pos.immutable() to p.blockState) else return
+            is ClientboundSectionBlocksUpdatePacket -> ArrayList<Pair<BlockPos, BlockState>>().also { l ->
+                p.runUpdates { pos, state -> if (onDevice(pos)) l += pos.immutable() to state }
+            }.ifEmpty { return }
+            else -> return
+        }
+        val at = tick
+        // A lamp not seen since the world loaded: taken as a change (packets come for changes, re-sends aside).
+        val lamps = changes.filter { it.first.x == 111 }.map { (pos, state) ->
+            val lit = state.block == Blocks.SEA_LANTERN
+            Triple(pos, lit, lampLit.put(pos, lit) ?: !lit)
+        }
+        for ((pos, _) in changes) if (pos.x == 110) buttonTick[pos] = at
+        if (lamps.isEmpty()) return
+        val handle = Runnable {
+            if (!active() || SimonSaysPractice.practicing || DungeonUtils.getF7Phase() != M7Phases.P3) return@Runnable
+            EngineerClient.safely("ss solver lamps") {
+                for ((pos, lit, was) in lamps) solver.lamp(pos, lit, was, at)
+                sync()
+            }
+        }
+        if (EngineerClient.mc.isSameThread) handle.run() else EngineerClient.mc.execute(handle)
     }
 
     private fun onDevice(pos: BlockPos) = (pos.x == 110 || pos.x == 111) && pos.y in 120..123 && pos.z in 92..95

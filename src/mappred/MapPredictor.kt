@@ -413,14 +413,7 @@ class MapPredictor(private val view: MapView, gameProcess: Boolean = true) {
         // predict until the map shows one (tryOne's door tree starts from these and read order[-1] without any).
         if (entries.isEmpty() && unknown.isNotEmpty()) bad = true
 
-        var entId = -1
-        for (i in view.kinds.indices) {
-            val c = clsOf(view.kinds[i], view.shapes[i])
-            found[c]++
-            if (view.shapes[i] != Shape.ONE) knownBig[view.shapes[i].ordinal]++
-            if (view.kinds[i] == Kind.ENTRANCE) { entId = i; entTile = view.roomTiles[i][0] }
-        }
-        if (entId >= 0) walkKnownPath(entId)
+        countFound()
         remP = maxOf(0, view.puzzles - found[Cls.PUZZLE])
         needDead = remP + (if (!rules.trap || found[Cls.TRAP] > 0) 0 else 1) + (if (found[Cls.YELLOW] > 0) 0 else 1) + (if (found[Cls.BLOOD] > 0) 0 else 1)
         topUp = rules.puzzleColumn && view.puzzles + (if (rules.trap) 1 else 0) + 1 <= rules.deadEndTarget
@@ -428,11 +421,7 @@ class MapPredictor(private val view: MapView, gameProcess: Boolean = true) {
         val pins = pinPuzzles()
         pinKeys = IntArray(pins.size) { pins[it][0] }; pinBefore = IntArray(pins.size) { pins[it][1] }
         setUpSecrets()
-        if (rules.bigTile != null && w == 6 && h == 6 && entTile >= 0) {
-            val ex = entTile % w; val ez = entTile / w
-            val f = SYM.firstOrNull { s -> val (x, z) = s(ex, ez); z == 0 && x <= 2 } ?: SYM[0]
-            for (t in 0 until n) { val (x, z) = f(t % w, t / w); frame[t] = z * w + x }
-        }
+        turnFrame()
         tally = Tally(cells.size, entries.size)
         // the game's own steps (every floor: held-out lower-floor maps score better by them than by the classic sampler
         // on each floor and at every stage, [GameSampler]); if setting it up throws, the classic sampler has the map from
@@ -448,6 +437,27 @@ class MapPredictor(private val view: MapView, gameProcess: Boolean = true) {
                 val g = make()
                 if (g.possible) { gameSampler = g; makeGame = make }
             } catch (e: Exception) { gameError = e }
+        }
+    }
+
+    /** The rooms the map shows, counted into [found] and [knownBig]; the known part of the wither path walked from the entrance. */
+    private fun countFound() {
+        var entId = -1
+        for (i in view.kinds.indices) {
+            val c = clsOf(view.kinds[i], view.shapes[i])
+            found[c]++
+            if (view.shapes[i] != Shape.ONE) knownBig[view.shapes[i].ordinal]++
+            if (view.kinds[i] == Kind.ENTRANCE) { entId = i; entTile = view.roomTiles[i][0] }
+        }
+        if (entId >= 0) walkKnownPath(entId)
+    }
+
+    /** F7's 6x6: [frame] takes each tile to the map turned so the entrance is on the top row, left half, as [FloorRules.bigTile] has it. */
+    private fun turnFrame() {
+        if (rules.bigTile != null && w == 6 && h == 6 && entTile >= 0) {
+            val ex = entTile % w; val ez = entTile / w
+            val f = SYM.firstOrNull { s -> val (x, z) = s(ex, ez); z == 0 && x <= 2 } ?: SYM[0]
+            for (t in 0 until n) { val (x, z) = f(t % w, t / w); frame[t] = z * w + x }
         }
     }
 
@@ -534,6 +544,11 @@ class MapPredictor(private val view: MapView, gameProcess: Boolean = true) {
             }
         }
         if (rooms.isEmpty()) return null
+        return typedNames(sn, rooms, pools, open, openChances)
+    }
+
+    /** The names [sn] fits to [rooms] over every typing of the [open] dead ends, each with its chance; null with too many typings or none that fits. */
+    private fun typedNames(sn: SecretNames, rooms: ArrayList<IntArray>, pools: ArrayList<Int>, open: ArrayList<Int>, openChances: ArrayList<FloatArray>): List<NamedRoom>? {
         // each way to type the open dead ends: as many of each kind as their chances add up to (a floor's count of
         // each is fixed), weighted by those chances
         val want = IntArray(Cls.COUNT) { c -> openChances.sumOf { it[c].toDouble() }.roundToInt() }

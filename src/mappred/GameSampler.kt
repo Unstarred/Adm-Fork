@@ -216,39 +216,11 @@ internal class GameSampler(
         }
         val a = ArrayList<Int>(); val b = ArrayList<Int>(); val k = ArrayList<Byte>()
         val wa = ArrayList<Int>(); val wb = ArrayList<Int>()
-        for (t in 0 until n) for (u in nb[t]) {
-            val e = view.edge(t, u)
-            if (e == Edge.NONE && u > t) { wa += t; wb += u }
-            if (!Edge.isDoor(e)) continue
-            touchesDoor[t] = true
-            if (u > t) { a += t; b += u; k += e }
-            if (view.roomAt[t] < 0 && view.roomAt[u] >= 0) doorIn[t] = true
-        }
+        shownEdges(a, b, k, wa, wb)
         shownA = a.toIntArray(); shownB = b.toIntArray(); shownKind = k.toByteArray()
         wallA = wa.toIntArray(); wallB = wb.toIntArray()
-        for (k in colTiles.indices) {
-            val c = colTiles[k]
-            colSide[k] = when { view.roomAt[c] >= 0 || Edge.isDoor(view.edge(c - 1, c)) -> 1; view.edge(c - 1, c) == Edge.NONE -> 0; else -> -1 }
-        }
-        for (i in 0 until nKnown) {
-            val shape = view.shapes[i]
-            if (!inMain(view.roomTiles[i][0])) {
-                // a room in the puzzle column (no part of the layout or the tree)
-                colKnown[when (view.kinds[i]) { Kind.TRAP -> T; Kind.YELLOW -> Y; Kind.PUZZLE -> P; else -> R }]++
-                continue
-            }
-            if (shape != Shape.ONE) knownBig[shape.ordinal]++
-            when (view.kinds[i]) {
-                Kind.TRAP -> knownSpecial[T]++
-                Kind.YELLOW -> knownSpecial[Y]++
-                Kind.PUZZLE -> knownSpecial[P]++
-                Kind.RARE -> knownSpecial[R]++
-                Kind.BLOOD -> if (knownBlood < 0) knownBlood = i
-                Kind.FAIRY -> if (knownFairy < 0) knownFairy = i
-                Kind.NORMAL -> if (shape == Shape.ONE && doorsOf(view.roomTiles[i][0]) == 1) knownSpecial[R]++
-                Kind.ENTRANCE -> {}
-            }
-        }
+        colSides()
+        countKnown()
         val ws = ArrayList<Double>()
         for (i in rules.gameMixes.indices) {
             val x = if (i < rules.gameMixRate.size) mixWeight(i, knownBig, rules.gameMixes, rules.gameMixRate) else 0.0
@@ -272,6 +244,49 @@ internal class GameSampler(
         sideMu = DoubleArray(n) { t -> if (entCell < 0) 1.0 else exp(-rule.mu * (abs(t % w - entCell % w) + abs(t / w - entCell / w))) }
         possible = gw <= w && gh <= h && inward >= 0 && mixTotal > 0 && cells.isNotEmpty()
         if (!possible) done = true
+    }
+
+    /** The doors and walls the map shows, into [a], [b] and [k] and into [wa] and [wb]; [touchesDoor] and [doorIn] marked. */
+    private fun shownEdges(a: ArrayList<Int>, b: ArrayList<Int>, k: ArrayList<Byte>, wa: ArrayList<Int>, wb: ArrayList<Int>) {
+        for (t in 0 until n) for (u in nb[t]) {
+            val e = view.edge(t, u)
+            if (e == Edge.NONE && u > t) { wa += t; wb += u }
+            if (!Edge.isDoor(e)) continue
+            touchesDoor[t] = true
+            if (u > t) { a += t; b += u; k += e }
+            if (view.roomAt[t] < 0 && view.roomAt[u] >= 0) doorIn[t] = true
+        }
+    }
+
+    /** What the map shows west of each puzzle column tile, into [colSide]. */
+    private fun colSides() {
+        for (k in colTiles.indices) {
+            val c = colTiles[k]
+            colSide[k] = when { view.roomAt[c] >= 0 || Edge.isDoor(view.edge(c - 1, c)) -> 1; view.edge(c - 1, c) == Edge.NONE -> 0; else -> -1 }
+        }
+    }
+
+    /** The rooms the map shows, counted: the column's specials, the big shapes, the specials, the first blood and fairy. */
+    private fun countKnown() {
+        for (i in 0 until nKnown) {
+            val shape = view.shapes[i]
+            if (!inMain(view.roomTiles[i][0])) {
+                // a room in the puzzle column (no part of the layout or the tree)
+                colKnown[when (view.kinds[i]) { Kind.TRAP -> T; Kind.YELLOW -> Y; Kind.PUZZLE -> P; else -> R }]++
+                continue
+            }
+            if (shape != Shape.ONE) knownBig[shape.ordinal]++
+            when (view.kinds[i]) {
+                Kind.TRAP -> knownSpecial[T]++
+                Kind.YELLOW -> knownSpecial[Y]++
+                Kind.PUZZLE -> knownSpecial[P]++
+                Kind.RARE -> knownSpecial[R]++
+                Kind.BLOOD -> if (knownBlood < 0) knownBlood = i
+                Kind.FAIRY -> if (knownFairy < 0) knownFairy = i
+                Kind.NORMAL -> if (shape == Shape.ONE && doorsOf(view.roomTiles[i][0]) == 1) knownSpecial[R]++
+                Kind.ENTRANCE -> {}
+            }
+        }
     }
 
     private fun doorsOf(t: Int) = nb[t].count { Edge.isDoor(view.edge(t, it)) }
@@ -831,6 +846,18 @@ internal class GameSampler(
         // (times, F4-F6, the chance of the column the map shows)
         val walk = rules.bloodWalk; val back = rules.fairyBeforeBlood
         val pb = ArrayList<Int>(); val pf = ArrayList<Int>(); val pw = ArrayList<Double>(); val pc = ArrayList<Col?>()
+        bloodFairyPicks(pt, dead, walk, back, owner, entR, rParent, rEntry, parent, deg, c, pb, pf, pw, pc)
+        if (pb.isEmpty()) return null
+
+        val names = secretsOn && secrets != null && !both && unnamedKnown.size + nr - nKnown + colRooms <= SecretNames.MAX_ROOMS
+        if (names) namesTried = true
+        return if (names) finishNamed(pt, deadU, left, pb, pf, pw, pc, colRooms, rParent, rEntry, wType)
+            else finishSummed(pt, deadU, left, pb, pf, pw, pc, both, rParent, rEntry, wType)
+    }
+
+    /** Each (blood, fairy) pick over the 2x2s' insides that fits the map, into [pb], [pf], [pw] (its share) and [pc] (its column). */
+    private fun bloodFairyPicks(pt: Particle, dead: List<Int>, walk: Int, back: Int, owner: IntArray, entR: Int, rParent: IntArray, rEntry: IntArray,
+                                parent: IntArray, deg: IntArray, c: Int, pb: ArrayList<Int>, pf: ArrayList<Int>, pw: ArrayList<Double>, pc: ArrayList<Col?>) {
         val fitsPath = HashMap<Int, Boolean>()
         val cols = HashMap<Int, Col?>()
         for (va in insides(pt)) {
@@ -854,12 +881,6 @@ internal class GameSampler(
             }
             for (i in start until pb.size) pw[i] = pw[i] / nAll
         }
-        if (pb.isEmpty()) return null
-
-        val names = secretsOn && secrets != null && !both && unnamedKnown.size + nr - nKnown + colRooms <= SecretNames.MAX_ROOMS
-        if (names) namesTried = true
-        return if (names) finishNamed(pt, deadU, left, pb, pf, pw, pc, colRooms, rParent, rEntry, wType)
-            else finishSummed(pt, deadU, left, pb, pf, pw, pc, both, rParent, rEntry, wType)
     }
 
     /** Adds the column's tiles of a sample with column [col] and chance [q] to [dist]: puzzles, or with [both] the specials [left]'s shares. */
