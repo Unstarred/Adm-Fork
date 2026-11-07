@@ -157,7 +157,7 @@ object GhostCapture {
 
     private fun secs(n: Int) = "%.2fs".format(Locale.ROOT, n / 20.0)
 
-    /** What you hold: the sim item's id (a bot shows it, [Party.setHeld]), "" for anything else. */
+    /** What you hold: the sim item's id (a bot shows it, [BotBody.setHeld]), "" for anything else. */
     fun heldKey(id: String?): String = id?.takeIf { it != "SKYBLOCK_MENU" } ?: ""
 
     /** In the core this long: done (the ghost stands there after). */
