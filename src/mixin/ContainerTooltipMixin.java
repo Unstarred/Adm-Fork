@@ -1,5 +1,6 @@
 package com.engineerclient.mixin;
 
+import com.engineerclient.EngineerClient;
 import com.engineerclient.pf.PartyFinderStats;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
@@ -27,6 +28,7 @@ public class ContainerTooltipMixin {
         try {
             replaced = PartyFinderStats.INSTANCE.decorate((AbstractContainerScreen<?>) (Object) this, itemStack, original);
         } catch (Throwable t) {
+            EngineerClient.warnOnce("party finder stats tooltip", t);
             return; // a broken tooltip is worse than a missing column
         }
         if (replaced != original) cir.setReturnValue(replaced);

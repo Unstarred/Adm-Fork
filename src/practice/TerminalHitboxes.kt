@@ -228,8 +228,10 @@ object TerminalHitboxes : Module(
         if (adopted) return
         adopted = true
         val file = mc.gameDirectory.toPath().resolve("config/odin/addons/adm.json")
-        val old = if (Files.exists(file)) JsonParser.parseString(Files.readString(file)).asJsonArray
-            .firstOrNull { it.asJsonObject.get("name")?.asString == "Term Info" }?.asJsonObject?.getAsJsonObject("settings") else null
+        // On a fresh install the file exists but holds no array yet (it parses as JsonNull): nothing to take over.
+        val saved = if (Files.exists(file)) JsonParser.parseString(Files.readString(file)) else null
+        val old = saved?.takeIf { it.isJsonArray }?.asJsonArray
+            ?.firstOrNull { it.asJsonObject.get("name")?.asString == "Term Info" }?.asJsonObject?.getAsJsonObject("settings")
         if (old != null) {
             for ((name, element) in old.entrySet()) {
                 if (!element.isJsonPrimitive) continue

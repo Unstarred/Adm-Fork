@@ -134,10 +134,14 @@ object OdinMapPrediction {
 
     private val question = Identifier.fromNamespaceAndPath("odin", "map/question.png")
 
-    @Volatile private var shown: Prediction? = null
-    @Volatile private var shownView: MapView? = null
-    /** Every unnamed room's names once the map is known for sure ([MapPredictor.certainNames]); null until then. */
-    @Volatile private var shownNames: List<NamedRoom>? = null
+    /**
+     * What the map draws, published by the worker as one: the prediction, the map it was made from, and every unnamed
+     * room's names once the map is known for sure ([MapPredictor.certainNames]; null until then). Three fields written
+     * one after another let a frame draw one map's prediction with another's view, which the secret split indexes by.
+     */
+    private class Shown(val prediction: Prediction?, val view: MapView?, val names: List<NamedRoom>?)
+
+    @Volatile private var shown: Shown? = null
     private var lastKey = ""
     private val generation = AtomicInteger()
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "engineerclient-map-prediction").apply { isDaemon = true; priority = Thread.MIN_PRIORITY } }
@@ -171,7 +175,7 @@ object OdinMapPrediction {
         generation.incrementAndGet()
         session.cancel()
         worker.execute { session.clear() }
-        shown = null; shownView = null; shownNames = null; lastKey = ""
+        shown = null; lastKey = ""
         lastDerived = null
         pathDoors.clear()
     }
@@ -273,10 +277,10 @@ object OdinMapPrediction {
                 // the names from the secret total once the map is known for sure, however many rooms are unnamed: a map
                 // all discovered at once, else once the prediction is sure of every room left
                 val namer = try { MapPredictor(v, gameProcess = false) } catch (_: Exception) { null }
-                shownNames = namer?.certainNames(null)
+                shown = Shown(shown?.prediction, shown?.view, namer?.certainNames(null))
                 do {
                     if (generation.get() != gen) return@safely
-                    session.prediction()?.let { shown = it; shownView = v; shownNames = namer?.certainNames(it) }
+                    session.prediction()?.let { shown = Shown(it, v, namer?.certainNames(it)) }
                 } while (session.step())
             }
         }
@@ -284,7 +288,7 @@ object OdinMapPrediction {
 
     /** True while ADM's prediction replaces Odin's "?" tiles (MapPathHintsMixin). */
     @JvmStatic
-    fun replacesOdin(): Boolean = on && DungeonMap.enabled && supported() && shown != null
+    fun replacesOdin(): Boolean = on && DungeonMap.enabled && supported() && shown?.prediction != null
 
     /** Unknown tiles behind a blood door the map shows: certain to be the blood room, nothing to predict. */
     private fun bloodTiles(known: BooleanArray): Set<Int> {
@@ -385,8 +389,9 @@ object OdinMapPrediction {
 
     private fun draw(g: GuiGraphicsExtractor): Boolean {
         if (!replacesOdin()) return drawWithoutPrediction(g)
-        val p = shown ?: return drawWithoutPrediction(g)
-        val v = shownView ?: return drawWithoutPrediction(g)
+        val now = shown
+        val p = now?.prediction ?: return drawWithoutPrediction(g)
+        val v = now.view ?: return drawWithoutPrediction(g)
         val known = knownTiles()
         // behind a blood door is the blood room: drawn as itself, never as a guess
         val blood = bloodTiles(known)
@@ -399,7 +404,7 @@ object OdinMapPrediction {
         // every tile behind a door the map shows is drawn anyway, never left blank
         val hints = hintTiles(known)
         val splits = p.splits.associateBy { it.tile }
-        val d = derived(p, v, shownNames, splitSecrets.value)
+        val d = derived(p, v, now.names, splitSecrets.value)
         secretsAt = d.secretsAt
         // the last rooms the secret total leaves only one size and place for: in full, named when only one name fits
         val exact = BooleanArray(W * W)

@@ -119,20 +119,37 @@ object TeamTpMaze {
             mc.execute { EngineerClient.safely("team tp maze teleport") { teleport(fromX, fromZ, x, y, z, yaw.toDouble(), exact = true) } }
         }
         // A teammate's teleport, seen in the world: one of these two packets, depending on how the server sends it.
+        // These arrive on the network thread, and the level's entities are the client thread's: the lookup is queued
+        // there from Odin's hook, which runs just before vanilla queues its own handling of the packet (Connection's
+        // genericsFtw, in 0.3.7 and 0.4.0), so it still finds the teammate where they were before it.
         onReceive<ClientboundTeleportEntityPacket> {
-            val e = teammate(id) ?: return@onReceive
-            val c = change
-            val x = if (Relative.X in relatives) e.x + c.position.x else c.position.x
-            val y = if (Relative.Y in relatives) e.y + c.position.y else c.position.y
-            val z = if (Relative.Z in relatives) e.z + c.position.z else c.position.z
-            val yaw = if (Relative.Y_ROT in relatives) e.yRot + c.yRot else c.yRot
-            seen(e, x, y, z, yaw)
+            // Only while the maze is up: every entity's moves come through here.
+            if (!active()) return@onReceive
+            val packet = this
+            mc.execute {
+                EngineerClient.safely("team tp maze teammate") {
+                    val e = teammate(packet.id) ?: return@safely
+                    val c = packet.change
+                    val relatives = packet.relatives
+                    val x = if (Relative.X in relatives) e.x + c.position.x else c.position.x
+                    val y = if (Relative.Y in relatives) e.y + c.position.y else c.position.y
+                    val z = if (Relative.Z in relatives) e.z + c.position.z else c.position.z
+                    val yaw = if (Relative.Y_ROT in relatives) e.yRot + c.yRot else c.yRot
+                    seen(e, x, y, z, yaw)
+                }
+            }
         }
         onReceive<ClientboundEntityPositionSyncPacket> {
-            if (!hasPosition() || !hasRotation()) return@onReceive
-            val e = teammate(id) ?: return@onReceive
+            if (!hasPosition() || !hasRotation() || !active()) return@onReceive
+            val id = id
             val to = position.endPosition()
-            seen(e, to.x, to.y, to.z, yRot)
+            val yaw = yRot
+            mc.execute {
+                EngineerClient.safely("team tp maze teammate") {
+                    val e = teammate(id) ?: return@safely
+                    seen(e, to.x, to.y, to.z, yaw)
+                }
+            }
         }
         on<TickEvent.End> { EngineerClient.safely("team tp maze tick") { tick() } }
         on<RenderExtractEvent> { EngineerClient.safely("team tp maze render") { render(this) } }
@@ -146,10 +163,13 @@ object TeamTpMaze {
         return e.takeIf { it !== mc.player && DungeonUtils.dungeonTeammatesNoSelf.any { t -> t.name == it.name.string } }
     }
 
-    /** A teammate's teleport from where the server last had them (the entity itself may still be drawn easing there) to (x, y, z). */
+    /**
+     * A teammate's teleport from where the server last had them (the entity itself may still be drawn easing there) to
+     * (x, y, z). Client thread.
+     */
     private fun seen(e: Player, x: Double, y: Double, z: Double, yaw: Float) {
         val from = e.positionCodec.base
-        mc.execute { EngineerClient.safely("team tp maze teammate") { teleport(from.x, from.z, x, y, z, yaw.toDouble(), exact = false) } }
+        teleport(from.x, from.z, x, y, z, yaw.toDouble(), exact = false)
     }
 
     /** Odin's own TP Maze boxes are left out (TpMazeRenderMixin) while this draws. */

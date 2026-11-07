@@ -198,7 +198,7 @@ class RunStatePack internal constructor(
     val chestClears: Map<String, ChestClear> = emptyMap(),
 ) {
     /** The tables for a room (in-game name, spaces; U+200B stripped); null when the pack has none. */
-    fun room(name: String): RoomRun? = rooms[name.replace("​", "")]
+    fun room(name: String): RoomRun? = rooms[name.replace("\u200b", "")]
 
     /** The chest that finishes the trap room [name], or null (not a trap room, or the pack has no rule for it). */
     fun chestClear(name: String): ChestClear? = chestClears[name.replace("\u200b", "")]
@@ -285,7 +285,7 @@ class RunStatePack internal constructor(
         private fun parseRooms(o: JsonObject, pct: DoubleArray): Map<String, RoomRun> =
             o.entrySet().mapNotNull { (name, v) ->
                 val r = v.asObj() ?: return@mapNotNull null
-                val key = name.replace("​", "")
+                val key = name.replace("\u200b", "")
                 key to RoomRun(
                     key, r.str("type") ?: "normal", r.str("shape") ?: "1x1", r.int("tiles") ?: 1, r.int("secretsMax") ?: 0, r.str("secretsMaxSource"),
                     r.int("secretsDb"), r.int("cryptsPotential"), r.str("clear"),

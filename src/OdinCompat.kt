@@ -13,7 +13,8 @@ import java.lang.invoke.MethodType
 object OdinCompat {
 
     /**
-     * Odin 0.4.0 made `batKilled` a Boolean and moved the count to `numBatsKilled`; up to 0.3.7 `batKilled` is the count.
+     * The count is `numBatsKilled` and `batKilled` a Boolean, in 0.3.7 and 0.4.0 alike (javap, 2026-11-06). The
+     * fallback, `batKilled` as the count, is for older Odin builds, which fabric.mod.json no longer lets load (>=0.3.7).
      * Looked up once, on DungeonStats (DungeonUtils' getters only forward to it).
      */
     private val batCount: MethodHandle by lazy {

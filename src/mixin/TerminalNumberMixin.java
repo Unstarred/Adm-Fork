@@ -1,5 +1,6 @@
 package com.engineerclient.mixin;
 
+import com.engineerclient.EngineerClient;
 import com.engineerclient.misc.RandomStuff;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -51,6 +52,7 @@ public class TerminalNumberMixin {
             if (slot != null && RandomStuff.hidesTerminalNumber(slot)) return;
         } catch (Throwable t) {
             // never cost someone their inventory counts over this
+            EngineerClient.warnOnce("terminal number hiding", t);
         }
         graphics.itemDecorations(font, itemStack, x, y, countText);
     }

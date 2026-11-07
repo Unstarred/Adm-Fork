@@ -1,5 +1,6 @@
 package com.engineerclient.mixin;
 
+import com.engineerclient.EngineerClient;
 import com.engineerclient.chat.ChatHider;
 import net.minecraft.client.gui.components.ChatComponent;
 import net.minecraft.client.multiplayer.chat.GuiMessageSource;
@@ -30,6 +31,7 @@ public class ChatComponentMixin {
             if (ChatHider.INSTANCE.shouldHide(contents)) ci.cancel();
         } catch (Throwable t) {
             // a broken rule must never eat the chat
+            EngineerClient.warnOnce("chat hider", t);
         }
     }
 }

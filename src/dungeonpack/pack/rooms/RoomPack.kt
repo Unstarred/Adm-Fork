@@ -221,7 +221,7 @@ class RoomPack internal constructor(
         const val SUPPORTED_VERSION = 1
 
         /** U+200B stripped (FORMAT-rooms 9). */
-        internal fun normalise(name: String): String = name.replace("​", "")
+        internal fun normalise(name: String): String = name.replace("\u200b", "")
 
         /**
          * Loads `rooms.index.json.gz` and opens `rooms.blocks.bin` from [dir]. Returns null, with the reason in

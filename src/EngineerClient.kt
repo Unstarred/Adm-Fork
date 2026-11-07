@@ -1,37 +1,13 @@
 package com.engineerclient
 
 import com.engineerclient.adr.ADR
-import com.engineerclient.misc.AgroSphere
-import com.engineerclient.misc.RandomStuff
-import com.engineerclient.rotation.EcLog
-import com.engineerclient.practice.SimonSaysPractice
-import com.engineerclient.pov.PovPreviews
-
-import com.engineerclient.splits.DungeonSplits
-import com.engineerclient.splits.OdinSplitsLook
-import com.engineerclient.waypoints.BrWaypoints2
-import com.mojang.brigadier.arguments.StringArgumentType
-import com.odtheking.odin.config.ModuleConfig
-import com.odtheking.odin.events.LevelEvent
-import com.odtheking.odin.events.core.EventBus
-import com.odtheking.odin.events.core.on
-import com.odtheking.odin.features.ModuleManager
-import net.fabricmc.api.ClientModInitializer
-import net.fabricmc.loader.api.FabricLoader
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback
-import net.fabricmc.fabric.api.client.command.v2.ClientCommands.argument
-import net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
-import net.minecraft.client.Minecraft
-import net.minecraft.network.chat.Component
-import org.slf4j.Logger
-import org.slf4j.LoggerFactory
 import com.engineerclient.adr.OnlineLink
 import com.engineerclient.clearbreakdown.ClearBreakdown
 import com.engineerclient.debug.MemReport
 import com.engineerclient.lcm.LcmMapInfo
 import com.engineerclient.lcm.LcmStyle
 import com.engineerclient.mappred.OdinMapPrediction
+import com.engineerclient.misc.AgroSphere
 import com.engineerclient.misc.HealthMana
 import com.engineerclient.misc.I4Complete
 import com.engineerclient.misc.LaunchStats
@@ -41,23 +17,47 @@ import com.engineerclient.misc.OdinClickLimit
 import com.engineerclient.misc.OdinHighlightLook
 import com.engineerclient.misc.OdinMasksUsed
 import com.engineerclient.misc.OdinTickTimers
+import com.engineerclient.misc.RandomStuff
 import com.engineerclient.misc.Timers
 import com.engineerclient.misc.Witherborn
 import com.engineerclient.p3sim.P3Sim
+import com.engineerclient.pov.PovPreviews
 import com.engineerclient.practice.InfNumbersSim
 import com.engineerclient.practice.OdinSimonSays
 import com.engineerclient.practice.OdinTermTimes
 import com.engineerclient.practice.Recore
+import com.engineerclient.practice.SimonSaysPractice
 import com.engineerclient.practice.TermInfo
 import com.engineerclient.practice.TerminalHitboxes
 import com.engineerclient.practice.TermsimExtras
+import com.engineerclient.rotation.EcLog
+import com.engineerclient.splits.DungeonSplits
+import com.engineerclient.splits.OdinSplitsLook
 import com.engineerclient.tpmaze.TeamTpMaze
+import com.engineerclient.waypoints.BrWaypoints2
+import com.mojang.brigadier.arguments.StringArgumentType
 import com.odtheking.odin.clickgui.ClickGUI
 import com.odtheking.odin.clickgui.settings.impl.SelectorSetting
+import com.odtheking.odin.config.ModuleConfig
+import com.odtheking.odin.events.LevelEvent
+import com.odtheking.odin.events.core.EventBus
+import com.odtheking.odin.events.core.on
+import com.odtheking.odin.features.ModuleManager
 import com.odtheking.odin.utils.sendCommand
+import net.fabricmc.api.ClientModInitializer
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands.argument
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents
+import net.fabricmc.loader.api.FabricLoader
+import net.minecraft.client.Minecraft
+import net.minecraft.network.chat.Component
 import org.lwjgl.sdl.SDLHints
 import org.lwjgl.sdl.SDLVideo
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+import java.util.concurrent.ConcurrentHashMap
 
 object EngineerClient : ClientModInitializer {
 
@@ -151,7 +151,7 @@ object EngineerClient : ClientModInitializer {
         safely("hover terms") { TermsimExtras.install() }
         safely("click limit") { OdinClickLimit.install() }
         safely("odin term times") { OdinTermTimes.install() }
-        runCatching { LaunchStats.install() }
+        safely("launch stats") { LaunchStats.install() }
         safely("leap order") { LeapOrder.install() }
         safely("p3sim") { P3Sim.init() }
 
@@ -173,13 +173,16 @@ object EngineerClient : ClientModInitializer {
             if (!exclusiveChecked) safely("exclusive fullscreen") { noExclusiveFullscreen() }
         }
 
-        DeadPlayers.register()
-        Witherborn.register()
-        I4Complete.register()
-        EcLog.open(mc.gameDirectory.toPath(), listOf(
-            "adm ${FabricLoader.getInstance().getModContainer("adm").map { it.metadata.version.friendlyString }.orElse("?")}" +
-                "  odin ${FabricLoader.getInstance().getModContainer("odin").map { it.metadata.version.friendlyString }.orElse("?")}",
-        ))
+        // Each on its own: a throw in one would otherwise end client init here, /adm included.
+        safely("dead players") { DeadPlayers.register() }
+        safely("witherborn") { Witherborn.register() }
+        safely("i4 complete") { I4Complete.register() }
+        safely("session log") {
+            EcLog.open(mc.gameDirectory.toPath(), listOf(
+                "adm ${FabricLoader.getInstance().getModContainer("adm").map { it.metadata.version.friendlyString }.orElse("?")}" +
+                    "  odin ${FabricLoader.getInstance().getModContainer("odin").map { it.metadata.version.friendlyString }.orElse("?")}",
+            ))
+        }
         // The player is not known until they log in; record who this client is once they are.
         ClientTickEvents.END_CLIENT_TICK.register(object : ClientTickEvents.EndTick {
             var done = false
@@ -203,6 +206,18 @@ object EngineerClient : ClientModInitializer {
         }
     }
 
+    /** What [warnOnce] has logged. */
+    private val warned = ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Logs [t] the first time [what] fails, for a hook that has to swallow its own failure and runs too often to log
+     * each one (per chat line, per item drawn, per click). A feature that broke still shows in the log, once.
+     */
+    @JvmStatic
+    fun warnOnce(what: String, t: Throwable) {
+        if (warned.add(what)) logger.error("[ec] $what failed (logged once)", t)
+    }
+
     fun chat(msg: String) {
         mc.schedule { mc.gui.hud.chat.addClientSystemMessage(Component.literal(msg)) }
     }
@@ -211,10 +226,10 @@ object EngineerClient : ClientModInitializer {
         mc.schedule { mc.gui.hud.chat.addClientSystemMessage(msg) }
     }
 
-    /** What every line the mod says in chat starts with. */
-    /** Engineer Client, the beta: true. promote.sh makes it false for ADM, the public build, which hides the unfinished ADS buttons (full run, GUI). */
+    /** Engineer Client's beta builds: true. False in ADM, the public build, which hides the unfinished ADS buttons (full run, GUI). */
     const val BETA = false
 
+    /** What every line the mod says in chat starts with. */
     const val PREFIX = "§8[§6ADM§8] "
 
     /** A line from the mod, with its [PREFIX]. Anything the mod says goes through here. */

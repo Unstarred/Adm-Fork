@@ -249,7 +249,8 @@ object Sim {
  * window, so each player in a party has their own. Alone it is one value, as before.
  */
 class PerPlayer<T>(private val init: () -> T) : ReadWriteProperty<Any?, T> {
-    private class Box<T>(var v: T)
+    /** Volatile: the sim's server thread writes a value that the client's HUDs read ([values]). */
+    private class Box<T>(@Volatile var v: T)
     private val map = ConcurrentHashMap<UUID, Box<T>>()
     init { all += this }
     private fun box(): Box<T> = map.getOrPut(Sim.player?.uuid ?: NOBODY) { Box(init()) }

@@ -159,7 +159,7 @@ class MobPack internal constructor(
      * (the sim then spawns nothing there and logs one line).
      */
     fun room(name: String, aliasOf: ((String) -> String?)? = null): RoomMobs? {
-        val n = name.replace("​", "")
+        val n = name.replace("\u200b", "")
         byRoomName[n]?.let { return it }
         byRoomAlias[n]?.let { return it }
         aliasOf?.invoke(n)?.let { a -> byRoomName[a]?.let { return it }; byRoomAlias[a]?.let { return it }; byNormRoomName[norm(a)]?.let { return it } }
@@ -175,7 +175,7 @@ class MobPack internal constructor(
         const val SUPPORTED_VERSION = 1
 
         /** FORMAT-mobs 1 fallback join key. */
-        fun norm(n: String): String = n.replace("​", "").replace(" ", "_").replace("-", "_")
+        fun norm(n: String): String = n.replace("\u200b", "").replace(" ", "_").replace("-", "_")
 
         /** Loads `mobs.json.gz` from [dir]. Null, with the reason in [report], when missing/unreadable/wrong format. Never throws. */
         fun load(dir: Path, report: PackReport = PackReport()): MobPack? = load(PackSource.ofDir(dir), report)
@@ -259,7 +259,7 @@ class MobPack internal constructor(
         }
 
         private fun parseRoom(r: JsonObject, archetypeCount: Int): RoomMobs {
-            val name = (r.str("name") ?: throw PackFormatException("no name")).replace("​", "")
+            val name = (r.str("name") ?: throw PackFormatException("no name")).replace("\u200b", "")
             val cells = r.arr("cells")?.mapNotNull { c ->
                 val a = c.asArr() ?: return@mapNotNull null
                 if (a.size() < 6) return@mapNotNull null

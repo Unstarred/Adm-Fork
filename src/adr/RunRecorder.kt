@@ -37,6 +37,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties
 import net.minecraft.world.level.chunk.status.ChunkStatus
 import net.minecraft.world.phys.Vec3
 import java.io.BufferedWriter
+import java.io.IOException
 import java.io.OutputStreamWriter
 import java.nio.file.Files
 import java.nio.file.Path
@@ -137,7 +138,7 @@ class RunRecorder(
             // Never the P3 Sim world as a Hypixel run: Odin is told it is in F7 there, and ADR would take it for one.
             abandon(); return
         } else if (!confirmed) {
-            if (DungeonUtils.inDungeons) confirm()
+            if (DungeonUtils.inDungeons && !confirm()) return
             // Area is known a second or two after load; anything that is known and not a dungeon is dropped
             // right away rather than buffered for the full timeout.
             else if (tick > ABANDON_AFTER_TICKS || !LocationUtils.isCurrentArea(Island.Unknown)) { abandon(); return }
@@ -379,12 +380,23 @@ class RunRecorder(
 
     // ------------------------------------------------------------------ lifecycle
 
-    private fun confirm() {
-        confirmed = true
-        Files.createDirectories(dir)
+    /**
+     * The run is a dungeon: its file opens and the backlog goes in. False, and the run abandoned, when the file can't
+     * be opened. It used to be marked confirmed first, so a failed open left a run that dropped every line quietly.
+     */
+    private fun confirm(): Boolean {
         val temp = dir.resolve("recording-${startedAt.format(STAMP)}.jsonl.gz.part")
+        val opened = try {
+            Files.createDirectories(dir)
+            BufferedWriter(OutputStreamWriter(GZIPOutputStream(Files.newOutputStream(temp)), Charsets.UTF_8), 1 shl 16)
+        } catch (e: IOException) {
+            EngineerClient.logger.warn("[ec] adr recording file could not be opened, run not recorded path={}", temp, e)
+            abandon()
+            return false
+        }
+        confirmed = true
         tempFile = temp
-        writer = BufferedWriter(OutputStreamWriter(GZIPOutputStream(Files.newOutputStream(temp)), Charsets.UTF_8), 1 shl 16)
+        writer = opened
         val self = EngineerClient.mc.player?.name?.string ?: "?"
         fun modVersion(id: String) = FabricLoader.getInstance().getModContainer(id)
             .map { it.metadata.version.friendlyString }.orElse("?")
@@ -395,6 +407,7 @@ class RunRecorder(
         backlog.forEach(::writeNow)
         backlog.clear()
         flushPending()
+        return true
     }
 
 

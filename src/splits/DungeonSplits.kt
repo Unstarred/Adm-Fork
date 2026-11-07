@@ -252,11 +252,16 @@ object DungeonSplits : Module(
             serverTicks = 0
         }
 
-        // Odin's server tick: the server's own clock, which falls behind when it lags.
+        // Odin's server tick: the server's own clock, which falls behind when it lags. Odin posts it from the network
+        // thread (Connection.channelRead0, on a ping packet, in 0.3.7 and 0.4.0), while everything it advances is the
+        // client thread's: so it is counted there, queued behind the packets that came before it. The lag sample keeps
+        // the time it arrived, so a slow frame on the client doesn't read as the server lagging.
         on<TickEvent.Server> {
-            serverTicks++; subs.onServerTick(); sampleLag()
-            val now = serverTicks
+            val arrived = System.currentTimeMillis()
             EngineerClient.mc.execute {
+                serverTicks++
+                val now = serverTicks
+                EngineerClient.safely("sub splits server tick") { subs.onServerTick(); sampleLag(Stamp(arrived, now)) }
                 EngineerClient.safely("storm detail") {
                     storm.onServerTick(now)
                     // Show Crush Info: each 20-tick crush check from his lightning until he dies.
@@ -752,9 +757,9 @@ object DungeonSplits : Module(
      */
     fun lag(): Long? = synchronized(lagSamples) { lagSamples.minOrNull()?.takeIf { lagShown } }
 
-    private fun sampleLag() {
+    private fun sampleLag(at: Stamp) {
         val splits = tracker.splits().takeIf { it.isNotEmpty() } ?: return
-        val ms = SplitPace.lag(splits, now())
+        val ms = SplitPace.lag(splits, at)
         synchronized(lagSamples) {
             lagSamples.addLast(ms)
             while (lagSamples.size > 20) lagSamples.removeFirst()

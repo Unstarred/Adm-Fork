@@ -132,7 +132,7 @@ class LayoutPack internal constructor(
     fun layout(id: String): Layout? = byId[id]
 
     /** The family a room name belongs to (this pack's `aliases`). */
-    fun familyOf(name: String): String? = aliases[name.replace("​", "")]
+    fun familyOf(name: String): String? = aliases[name.replace("\u200b", "")]
 
     /** The layouts that pass [filter], in id order. */
     fun pool(filter: (Layout) -> Boolean = DEFAULT_FILTER): List<Layout> = layouts.filter(filter)
@@ -184,7 +184,7 @@ class LayoutPack internal constructor(
             }
             layouts.sortBy { it.id }
             if (layouts.isEmpty()) report.warn("The layout pool has no layouts.")
-            val aliases = root.obj("aliases")?.entrySet()?.mapNotNull { (k, v) -> v.asStr()?.let { k.replace("​", "") to it } }?.toMap().orEmpty()
+            val aliases = root.obj("aliases")?.entrySet()?.mapNotNull { (k, v) -> v.asStr()?.let { k.replace("\u200b", "") to it } }?.toMap().orEmpty()
             return LayoutPack(root.int("version") ?: 1, rv, aliases, root.obj("stats"), layouts)
         }
 
@@ -193,7 +193,7 @@ class LayoutPack internal constructor(
             val rooms = o.arr("rooms").objects().map { r ->
                 LayoutRoom(
                     i = r.int("i") ?: throw PackFormatException("a room has no index"),
-                    name = (r.str("name") ?: "").replace("​", ""),
+                    name = (r.str("name") ?: "").replace("\u200b", ""),
                     family = r.str("family") ?: (r.str("name") ?: "").replace(' ', '_'),
                     design = r.str("design"),
                     designBy = r.str("designBy"),

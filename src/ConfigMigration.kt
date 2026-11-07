@@ -10,7 +10,7 @@ import java.nio.file.StandardCopyOption
 
 /** Settings kept across renames and moves; see [run]. Pure file work, so it tests without the game. */
 object ConfigMigration {
-    /** The name this build keeps its settings and files under: engineerclient here, adm in the public build (promote.sh). */
+    /** The name this build keeps its settings and files under, and [OLD], Engineer Client's, that they move from. */
     private const val NAME = "adm"
     private const val OLD = "engineerclient"
 

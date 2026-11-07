@@ -56,10 +56,17 @@ object P3Plan {
     // ------------------------------------------------------------------ the plan
 
     var skill = 1
-    /** Your jobs: station ids ("S1 T1", "S2 Lights", "S3 west lever"...) and "gate 1".."gate 3". */
-    private val mine = LinkedHashSet<String>()
-    /** Which skill/class [mine] was made for: a change of either starts again from that role. */
-    private var mineFor = ""
+    /**
+     * Your jobs ([jobs]: station ids, "S1 T1", "S2 Lights", "S3 west lever"..., and "gate 1".."gate 3") and the
+     * skill/class they were made for ([key]): a change of either starts again from that role.
+     */
+    private class Mine(val key: String, val jobs: Set<String>)
+
+    /**
+     * Replaced whole, never changed in place: the sim's server thread reads it ([isMine], from Party and SimParty)
+     * while the menu edits it on the client.
+     */
+    @Volatile private var mineNow = Mine("", emptySet())
     /** Random only: each bot job between these (seconds after its section starts). */
     var botMin = 1.0
     var botMax = 9.0
@@ -138,21 +145,25 @@ object P3Plan {
 
     fun mine(): Set<String> {
         val key = "$skill/${P3Sim.ownClass}"
-        if (mineFor != key) {
-            mineFor = key
-            mine.clear()
-            // Back on their own skill and class in a party: their own jobs, not the role's.
-            val own = ownMine
-            if (own != null && key == ownMineFor) mine += own else mine += plan().jobsOf[P3Sim.ownClass].orEmpty()
-        }
-        return mine
+        val now = mineNow
+        if (now.key == key) return now.jobs
+        // Back on their own skill and class in a party: their own jobs, not the role's.
+        val own = ownMine
+        val jobs = LinkedHashSet(if (own != null && key == ownMineFor) own else plan().jobsOf[P3Sim.ownClass].orEmpty())
+        mineNow = Mine(key, jobs)
+        return jobs
     }
 
     fun isMine(job: String) = job in mine()
-    fun toggle(job: String) { mine(); if (!mine.remove(job)) mine += job; save() }
+    fun toggle(job: String) {
+        val jobs = LinkedHashSet(mine())
+        if (!jobs.remove(job)) jobs += job
+        mineNow = Mine(mineNow.key, jobs)
+        save()
+    }
     /** Back to your class's role: your jobs, the bots picked and your stacks for this skill and class. */
     fun resetMine() {
-        mineFor = ""; mine()
+        mineNow = Mine("", emptySet()); mine()
         val prefix = "$skill/${P3Sim.ownClass?.name}/"
         pickMap().keys.removeIf { it.startsWith(prefix) }; stackSet().removeIf { it.startsWith(prefix) }
         save()
@@ -293,7 +304,7 @@ object P3Plan {
             val s = runCatching { gson.fromJson(f.readText(), Saved::class.java) }
                 .onFailure { PlayerFiles.setAside(f) }.getOrThrow() ?: return@safely
             s.skill?.let { skill = (if (it == PROTOTYPE_1) THEORETICAL else it).coerceIn(0, SKILLS.size - 1) }
-            if (s.mine != null && s.mineFor != null && s.skill != PROTOTYPE_1) { mine.clear(); mine += s.mine; mineFor = s.mineFor }
+            if (s.mine != null && s.mineFor != null && s.skill != PROTOTYPE_1) mineNow = Mine(s.mineFor, LinkedHashSet(s.mine))
             s.botMin?.let { botMin = it }
             s.botMax?.let { botMax = it }
             s.waitForYou?.let { waitForYou = it }
@@ -349,7 +360,7 @@ object P3Plan {
 
     /** A joiner's game: the host's shared parts arrived. */
     fun receiveShared(o: JsonObject) {
-        if (ownShared == null) { ownShared = sharedJson(); ownMine = mine().toList(); ownMineFor = mineFor }
+        if (ownShared == null) { ownShared = sharedJson(); ownMine = mine().toList(); ownMineFor = mineNow.key }
         applyShared(o, save = false)
         partyShared = sharedJson().toString()
     }
@@ -359,7 +370,7 @@ object P3Plan {
         ownShared?.let { applyShared(it, save = false) }
         // Their own jobs back, unless the party's were for the same skill and class (then their edits there stand).
         val om = ownMine; val omf = ownMineFor
-        if (om != null && omf != null && omf != mineFor) { mine.clear(); mine += om; mineFor = omf }
+        if (om != null && omf != null && omf != mineNow.key) mineNow = Mine(omf, LinkedHashSet(om))
         ownShared = null; partyShared = null; ownMine = null; ownMineFor = null
     }
 
@@ -367,7 +378,7 @@ object P3Plan {
     fun partyJson(): JsonObject = JsonObject().also { o ->
         val m = mine()
         o.add("mine", JsonArray().also { a -> m.forEach { a.add(it) } })
-        o.addProperty("mineFor", mineFor)
+        o.addProperty("mineFor", mineNow.key)
         o.add("order", JsonArray().also { a -> botOrder().forEach { a.add(it.name) } })
         o.add("stacks", JsonObject().also { st -> m.filter { isStacked(it) }.forEach { j -> helperOf(j)?.let { st.addProperty(j, it.name) } } })
         o.add("spots", JsonObject().also { s ->
@@ -388,8 +399,9 @@ object P3Plan {
             val helper = own?.get("helper")?.asBoolean ?: helper
             val leapGap = own?.get("leapGap")?.asDouble ?: leapGap
             // In a party with other jobs than their own: their own are what's kept.
-            val keepOwn = own != null && ownMineFor != null && ownMineFor != mineFor
-            val s = Saved(skill, if (keepOwn) ownMine.orEmpty() else mine.toList(), if (keepOwn) ownMineFor else mineFor, botMin, botMax, waitForYou, leapGap, botOrder().let { leapOrder.map { it.name } }, odinSort,
+            val mineThen = mineNow
+            val keepOwn = own != null && ownMineFor != null && ownMineFor != mineThen.key
+            val s = Saved(skill, if (keepOwn) ownMine.orEmpty() else mineThen.jobs.toList(), if (keepOwn) ownMineFor else mineThen.key, botMin, botMax, waitForYou, leapGap, botOrder().let { leapOrder.map { it.name } }, odinSort,
                 earlyEnters.associate { it.key to listOf(it.spot.x, it.spot.y, it.spot.z, it.yaw.toDouble(), it.pitch.toDouble()) }, helper, ghosts.toList(),
                 spots().mapValues { (_, p) -> listOf(p.x, p.y, p.z, p.yaw.toDouble(), p.pitch.toDouble()) }, HashMap(pickMap()), stackSet().toList())
             file.parentFile.mkdirs()
