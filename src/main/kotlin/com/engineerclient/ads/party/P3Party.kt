@@ -1,6 +1,8 @@
 package com.engineerclient.ads.party
 
 import com.engineerclient.EngineerClient
+import com.engineerclient.ads.core.SimServer
+import com.engineerclient.util.Http
 import com.google.gson.JsonParser
 import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.client.Minecraft
@@ -20,12 +22,10 @@ import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.WebSocket
 import java.nio.ByteBuffer
-import java.time.Duration
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionStage
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
-import com.engineerclient.ads.core.SimServer
 
 /**
  * P3 Sim parties: you host your sim and get a 4-letter code; friends type it in and join your arena.
@@ -57,7 +57,7 @@ object P3Party {
         FabricLoader.getInstance().getModContainer("adm").map { it.metadata.version.friendlyString }.orElse("?").substringBefore('+').substringBefore('-')
     }
 
-    private val http: HttpClient by lazy { HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build() }
+    private val http: HttpClient get() = Http.client
 
     // ------------------------------------------------------------------ hosting
 

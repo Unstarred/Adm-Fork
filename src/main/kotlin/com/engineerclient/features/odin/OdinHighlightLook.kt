@@ -1,5 +1,6 @@
 package com.engineerclient.features.odin
 
+import com.engineerclient.util.setting
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.ColorSetting
@@ -88,7 +89,7 @@ object OdinHighlightLook {
             p.getItemBySlot(EquipmentSlot.FEET).`is`(Items.LEATHER_BOOTS)
 
     private fun color(kind: Kind): Color = when (kind) {
-        Kind.STAR -> (Highlight.settings["Highlight color"] as? ColorSetting)?.value ?: Colors.WHITE
+        Kind.STAR -> Highlight.setting<ColorSetting>("Highlight color")?.value ?: Colors.WHITE
         Kind.TANK -> tankColor.value
         Kind.MINI -> miniColor.value
         Kind.FEL -> felColor.value
@@ -104,7 +105,7 @@ object OdinHighlightLook {
     }
 
     private fun active(): Boolean =
-        blade && Highlight.enabled && DungeonUtils.inClear && (Highlight.settings["Highlight Starred Mobs"] as? BooleanSetting)?.value != false
+        blade && Highlight.enabled && DungeonUtils.inClear && Highlight.setting<BooleanSetting>("Highlight Starred Mobs")?.value != false
 
     private fun scan() {
         val level = mc.level ?: return
@@ -136,7 +137,7 @@ object OdinHighlightLook {
         on<RenderExtractEvent> {
             if (!active()) return@on
             if (notWhileBlind.value && mc.player?.hasEffect(MobEffects.BLINDNESS) == true) return@on
-            val style = (Highlight.settings["Render Style"] as? SelectorSetting)?.value as? BoxStyle ?: BoxStyle.OUTLINE
+            val style = Highlight.setting<SelectorSetting<*>>("Render Style")?.value as? BoxStyle ?: BoxStyle.OUTLINE
             for ((e, kind) in found.values) {
                 if (!e.isAlive) continue
                 if (hideInvisible.value && e is Player && e.isInvisible) continue

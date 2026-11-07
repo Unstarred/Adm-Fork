@@ -1,6 +1,7 @@
 package com.engineerclient.adr
 
 import com.engineerclient.EngineerClient
+import com.engineerclient.util.Http
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
@@ -26,7 +27,7 @@ import java.util.concurrent.CompletionStage
  */
 object OnlineLink {
     private const val SITE = "undonecoffee.com"
-    private val http: HttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build()
+    private val http: HttpClient = Http.client
 
     @Volatile private var socket: WebSocket? = null
     @Volatile private var connecting = false

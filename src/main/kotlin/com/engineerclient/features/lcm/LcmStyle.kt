@@ -2,6 +2,7 @@ package com.engineerclient.features.lcm
 
 import com.engineerclient.EngineerClient
 import com.engineerclient.features.mapprediction.OdinMapPrediction
+import com.engineerclient.util.setting
 import com.odtheking.odin.OdinMod.mc
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
@@ -161,7 +162,7 @@ object LcmStyle {
         return width to height
     }
 
-    private fun disableInBoss(): Boolean = (DungeonMap.settings["Disable in Boss"] as? BooleanSetting)?.value ?: true
+    private fun disableInBoss(): Boolean = DungeonMap.setting<BooleanSetting>("Disable in Boss")?.value ?: true
 
     /** The floor's rooms across and down, as dtMap sizes its map. */
     internal fun mapSize(example: Boolean): Pair<Int, Int> {

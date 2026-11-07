@@ -1,8 +1,9 @@
 package com.engineerclient.adr
 
 import com.engineerclient.EngineerClient
-import com.engineerclient.mixin.ArrowInGroundInvoker
 import com.engineerclient.ads.P3Sim
+import com.engineerclient.mixin.ArrowInGroundInvoker
+import com.engineerclient.util.noFormatting
 import com.google.gson.JsonParser
 import com.mojang.authlib.properties.PropertyMap
 import com.odtheking.odin.features.impl.dungeon.map.DungeonScan
@@ -322,7 +323,7 @@ class RunRecorder(
         val tex = stack.get(DataComponents.PROFILE)?.let { texturesOf(it.partialProfile().properties()) }
         // [index, id, count, head skin or "", plain name, glint 0/1] - terminals are solved by names
         // and Hypixel marks clicked items with the enchantment glint.
-        val name = if (stack.isEmpty) "" else stack.hoverName.string.replace(FORMAT_CODES, "")
+        val name = if (stack.isEmpty) "" else stack.hoverName.string.noFormatting()
         val glint = if (!stack.isEmpty && (stack.has(DataComponents.ENCHANTMENT_GLINT_OVERRIDE) || stack.hasFoil())) 1 else 0
         return "[$i,${str(vanillaId(stack))},${if (stack.isEmpty) 0 else stack.count},${str(tex ?: "")},${str(name)},$glint]"
     }
@@ -744,7 +745,7 @@ class RunRecorder(
         // Falling blocks carry which block they are, so the viewer can draw it.
         val block = (e as? FallingBlockEntity)?.let { ",\"block\":" + str(BlockStateParser.serialize(it.blockState)) } ?: ""
         // Dropped items say what they are (secret items: Decoys, Spirit Leaps...).
-        val item = (e as? ItemEntity)?.item?.let { ",\"item\":" + str(it.hoverName.string.replace(FORMAT_CODES, "")) + ",\"itemId\":" + str(vanillaId(it)) } ?: ""
+        val item = (e as? ItemEntity)?.item?.let { ",\"item\":" + str(it.hoverName.string.noFormatting()) + ",\"itemId\":" + str(vanillaId(it)) } ?: ""
         // (no name: no "name" - the viewer takes it as "")
         val named = if (name.isEmpty()) "" else ",\"name\":${str(name)}$c"
         emit("""{"k":"spawn","t":$tick,"id":$id,"type":${str(typeOf(e))}$named,"x":${n(e.x)},"y":${n(e.y)},"z":${n(e.z)},"yaw":${w(e.yRot)}${if (e is LivingEntity) ",\"headYaw\":" + w(headYaw) else ""}${if (e is LivingEntity && e.isBaby) ",\"baby\":1" else ""}$block$item}""")
@@ -986,7 +987,6 @@ class RunRecorder(
         private const val ARROW = 1
         private const val POWERED = 2
         private val SKIN_HASH = Regex("[0-9a-f]{20,80}")
-        private val FORMAT_CODES = Regex("\u00a7.")
         // A little under 1/60 s, so a game running at 60 fps with uneven frame times keeps every frame.
         const val FRAME_NS = 16_000_000L
         /** Simon Says' start button and its 16 grid buttons. */

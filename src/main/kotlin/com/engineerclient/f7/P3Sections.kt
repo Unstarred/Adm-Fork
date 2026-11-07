@@ -33,5 +33,11 @@ object P3Sections {
     fun isInSection(section: Int, x: Double, y: Double, z: Double): Boolean =
         section in 1..BOXES.size && sectionAt(x, y, z) == section
 
+    /**
+     * Inside Goldor's core room (from the core door up, above the P3 floor): where a player stands once the core is
+     * open. Timers and Sub Splits read it; Recore keeps its own, which has no floor, and the sim's server its own box.
+     */
+    fun inCoreBox(x: Double, y: Double, z: Double): Boolean = x >= 39 && x < 71 && y >= 110 && y < 155.5 && z >= 54 && z < 118
+
     private fun within(v: Double, a: Double, b: Double) = v >= minOf(a, b) && v <= maxOf(a, b)
 }

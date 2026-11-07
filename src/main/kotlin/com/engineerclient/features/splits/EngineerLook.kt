@@ -1,5 +1,6 @@
 package com.engineerclient.features.splits
 
+import com.engineerclient.util.noFormatting
 import java.util.Locale
 
 /**
@@ -51,8 +52,7 @@ object EngineerLook {
     private const val BOSS_ENTRY = "§9Boss Entry"
     private const val LAG = "§8Lag"
 
-    private val CODES = Regex("§.")
-    private fun strip(s: String) = s.replace(CODES, "").trim()
+    private fun strip(s: String) = s.noFormatting().trim()
 
     /** A split's label in this look: the short Engineer name in a dungeon, Odin's own elsewhere. */
     fun label(odinName: String, place: Place, master: Boolean): String {

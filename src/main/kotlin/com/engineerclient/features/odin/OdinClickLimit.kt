@@ -1,6 +1,8 @@
 package com.engineerclient.features.odin
 
 import com.engineerclient.EngineerClient
+import com.engineerclient.util.noFormatting
+import com.engineerclient.util.setting
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.DropdownSetting
@@ -59,10 +61,9 @@ object OdinClickLimit {
     private const val OWED_NO_PING = 60_000_000L
 
     private val clickLimit = BooleanSetting("Click Limit", true, desc = "Hypixel takes at most 5 terminal clicks in any 500 ms and silently drops the rest. A click it would drop isn't sent, so the solver doesn't show it done; click again. Added by ADM.")
-        .withDependency { (TerminalSolver.settings["Solver Functionality"] as? DropdownSetting)?.value ?: true }
+        .withDependency { TerminalSolver.setting<DropdownSetting>("Solver Functionality")?.value ?: true }
 
     private val COMPLETION = Regex("^(?:.{1,16} (?:activated a (?:terminal|lever)|completed a device)! \\(\\d+/\\d+\\)|The gate has been destroyed!|The Core entrance is opening!)$")
-    private val CODES = Regex("§.")
 
     // All below under the object's lock: written on the network thread ([tap]) and the game thread.
     /** Send times of clicks with no pling yet, oldest first. */
@@ -105,7 +106,7 @@ object OdinClickLimit {
                 while (pings.size > 16) pings.removeFirst()
                 owed.clear()
             }
-            is ClientboundSystemChatPacket -> if (!p.overlay() && COMPLETION.matches(p.content().string.replace(CODES, "").trim())) synchronized(this) {
+            is ClientboundSystemChatPacket -> if (!p.overlay() && COMPLETION.matches(p.content().string.noFormatting().trim())) synchronized(this) {
                 owed.addLast(now)
             }
             is ClientboundSoundPacket -> if (p.sound.value() == SoundEvents.NOTE_BLOCK_PLING.value() && p.volume >= 7.9f && abs(p.pitch - 4.047619f) < 0.01f) synchronized(this) {

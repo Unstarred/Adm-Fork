@@ -1,6 +1,8 @@
 package com.engineerclient.features.splits
 
 import com.engineerclient.EngineerClient
+import com.engineerclient.util.noFormatting
+import com.engineerclient.util.setting
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.ActionSetting
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
@@ -34,8 +36,6 @@ import net.minecraft.client.gui.GuiGraphicsExtractor
  */
 object OdinSplitsLook {
 
-    /** Minecraft's § formatting codes. Compiled once: [grade] runs for every split row, every frame. */
-    private val FORMATTING = Regex("§.")
 
     private enum class Look(private val label: String) { ODIN_SPLITS("Odin"), ENGINEER_SPLITS("ADM"); override fun toString() = label }
     private enum class PaceFloor { F7, M7 }
@@ -165,10 +165,10 @@ object OdinSplitsLook {
     }
 
     /** Odin's two Splits HUDs, looked up once: a HUD setting's element is made once, with its module. */
-    private val displayHud by lazy { (Splits.settings["Splits Display HUD"] as? HUDSetting)?.value }
-    private val currentHud by lazy { (Splits.settings[CURRENT_SPLIT_HUD] as? HUDSetting)?.value }
+    private val displayHud by lazy { Splits.setting<HUDSetting>("Splits Display HUD")?.value }
+    private val currentHud by lazy { Splits.setting<HUDSetting>(CURRENT_SPLIT_HUD)?.value }
 
-    private fun bool(name: String, fallback: Boolean) = (Splits.settings[name] as? BooleanSetting)?.value ?: fallback
+    private fun bool(name: String, fallback: Boolean) = Splits.setting<BooleanSetting>(name)?.value ?: fallback
 
     private fun options() = EngineerLook.Options(
         bossEntry = bool("Boss Entry Split", true),
@@ -270,7 +270,7 @@ object OdinSplitsLook {
      * best (kept with the sub splits' bests), on M7 gold only.
      */
     private fun grade(name: String, ms: Long, ticks: Long, over: Boolean, master: Boolean): String? {
-        val id = SubSplitGrades.MAIN_SPLITS[name.replace(FORMATTING, "").trim()] ?: return null
+        val id = SubSplitGrades.MAIN_SPLITS[name.noFormatting().trim()] ?: return null
         val floor = if (master) "M7" else "F7"
         val value = SubSplitGrades.value(id, ms, ticks)
         DungeonSplits.recordBest(floor, id, value, over)

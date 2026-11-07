@@ -1,5 +1,7 @@
 package com.engineerclient.features.odin
 
+import com.engineerclient.f7.F7Chat.GOLDOR_START
+import com.engineerclient.util.setting
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.HUDSetting
@@ -21,10 +23,9 @@ import com.odtheking.odin.features.impl.boss.TickTimers
 object OdinTickTimers {
 
     private const val TICK_PREFIX = "§7Tick:"
-    private const val GOLDOR_START = "[BOSS] Goldor: Who dares trespass into my domain?"
 
     private val countUp = BooleanSetting("Goldor Count Up", false, desc = "The Goldor Hud's Tick timer counts up from Goldor's first line like a split, past 3 s; the colour still goes green / yellow / red with each tick. Added by ADM.")
-        .withDependency { (TickTimers.settings["Goldor Hud"] as? HUDSetting)?.value?.enabled ?: true }
+        .withDependency { TickTimers.setting<HUDSetting>("Goldor Hud")?.value?.enabled ?: true }
 
     private var serverTicks = 0
     private var goldorStart: Int? = null

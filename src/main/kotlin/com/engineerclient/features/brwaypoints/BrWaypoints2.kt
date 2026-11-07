@@ -2,6 +2,8 @@ package com.engineerclient.features.brwaypoints
 
 import com.engineerclient.EngineerClient
 import com.engineerclient.features.splits.DoorBlocks
+import com.engineerclient.util.noFormatting
+import com.engineerclient.util.setting
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonElement
 import com.google.gson.JsonParser
@@ -181,7 +183,6 @@ object BrWaypoints2 : Module(
     private val GOLD = Color(255, 170, 0, 1f)
     private val GREEN = Color(85, 255, 85, 1f)
 
-    private val CONTROL_CODES = Regex("\u00a7.")
     private const val MORT = "[NPC] Mort: Here, I found this map when I first entered the dungeon."
     private const val BLOOD_DOOR = "The BLOOD DOOR has been opened!"
     private val WITHER_DOOR = Regex("""^\w+ opened a WITHER door!$""")
@@ -210,7 +211,7 @@ object BrWaypoints2 : Module(
         // dungeon, each wither door starts falling on its line, and it ends at the blood door.
         onReceive<ClientboundSystemChatPacket>(priority = 1000, ignoreCancelled = true) {
             if (overlay) return@onReceive
-            val text = content.string.replace(CONTROL_CODES, "")
+            val text = content.string.noFormatting()
             mc.execute { if (!BrRoles.onChat(text)) onChat(text) }
         }
 
@@ -285,8 +286,8 @@ object BrWaypoints2 : Module(
         }
 
         if (spawnMarkers) {
-            val colour = (Highlight.settings["Highlight color"] as? ColorSetting)?.value ?: Colors.WHITE
-            val style = (Highlight.settings["Render Style"] as? SelectorSetting<*>)?.value as? BoxStyle ?: BoxStyle.OUTLINE
+            val colour = Highlight.setting<ColorSetting>("Highlight color")?.value ?: Colors.WHITE
+            val style = Highlight.setting<SelectorSetting<*>>("Render Style")?.value as? BoxStyle ?: BoxStyle.OUTLINE
             for (mob in mobs) {
                 // Flat on the floor, lifted a hair so it does not flicker into the block.
                 val y = mob.y + 0.02
@@ -623,7 +624,7 @@ object BrWaypoints2 : Module(
         /** The box in the world, where its label goes, and the label greyed for a done box: worked out once per tick. */
         val bb: AABB = box.aabb()
         val labelAt = Vec3((bb.minX + bb.maxX) / 2, bb.maxY + 0.6, (bb.minZ + bb.maxZ) / 2)
-        val doneLabel = "§7" + label.replace(CONTROL_CODES, "")
+        val doneLabel = "§7" + label.noFormatting()
     }
 
     /**

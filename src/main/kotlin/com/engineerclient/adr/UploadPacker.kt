@@ -1,5 +1,6 @@
 package com.engineerclient.adr
 
+import com.engineerclient.util.noFormatting
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
@@ -694,10 +695,9 @@ object UploadPacker {
     private fun plainChat(line: String): String = runCatching {
         val l = obj(line)
         val c = (l["c"] as? JsonPrimitive)?.asString ?: return line
-        if ((l["m"] as? JsonPrimitive)?.asString != c.replace(CODES, "")) return line
+        if ((l["m"] as? JsonPrimitive)?.asString != c.noFormatting()) return line
         l.remove("m"); l.toString()
     }.getOrDefault(line)
-    private val CODES = Regex("§.")
 
     /**
      * Whether this build packs the dictionary's text to exactly the bytes the site has for it (the

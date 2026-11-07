@@ -1,5 +1,6 @@
 package com.engineerclient.features.chat
 
+import com.engineerclient.util.noFormatting
 import com.google.gson.GsonBuilder
 import java.util.regex.Pattern
 import java.util.regex.PatternSyntaxException
@@ -51,7 +52,6 @@ class ChatRules(val custom: List<Custom>, val block: List<Block>) {
 
     companion object {
         private val gson = GsonBuilder().create()
-        private val formatting = Regex("§.")
         /** Compact-chat repeat counters, e.g. Devonian's " (3)" sibling on a stacked line. */
         private val repeatCounter = Regex("""\s\(\d+\)$""")
 
@@ -60,7 +60,7 @@ class ChatRules(val custom: List<Custom>, val block: List<Block>) {
          * centres many lines with leading spaces, and the rules were built from trimmed log lines
          * with compact-chat counters removed, so the counter comes off here too.
          */
-        fun strip(text: String): String = repeatCounter.replace(formatting.replace(text, "").trim(), "")
+        fun strip(text: String): String = repeatCounter.replace(text.noFormatting().trim(), "")
 
         fun parse(json: String): ChatRules {
             val file = gson.fromJson(json, RulesFile::class.java) ?: RulesFile()

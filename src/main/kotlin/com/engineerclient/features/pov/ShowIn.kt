@@ -1,5 +1,6 @@
 package com.engineerclient.features.pov
 
+import com.engineerclient.util.noFormatting
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
 import com.odtheking.odin.utils.skyblock.dungeon.M7Phases
 
@@ -17,14 +18,13 @@ object ShowIn {
         EVERYWHERE(null), ONLY_IN_BOSS(Place.BOSS), ONLY_IN_GOLDOR(Place.GOLDOR), ONLY_IN_BLOOD_RUSH(Place.BLOOD_RUSH)
     }
 
-    private val FORMATTING = Regex("§.")
 
     /** The blood door has opened this dungeon: blood rush is over. */
     private var bloodOpened = false
 
     /** A system chat line, straight off the network. */
     fun onChat(raw: String) {
-        if (raw.replace(FORMATTING, "") == "The BLOOD DOOR has been opened!") bloodOpened = true
+        if (raw.noFormatting() == "The BLOOD DOOR has been opened!") bloodOpened = true
     }
 
     /** A world load: a new dungeon (or none). */

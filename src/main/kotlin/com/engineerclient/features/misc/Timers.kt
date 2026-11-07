@@ -1,6 +1,15 @@
 package com.engineerclient.features.misc
 
 import com.engineerclient.core.DeadPlayers
+import com.engineerclient.f7.F7Chat.CORE_OPEN
+import com.engineerclient.f7.F7Chat.GOLDOR_START
+import com.engineerclient.f7.F7Chat.MAXOR_START
+import com.engineerclient.f7.F7Chat.NECRON_START
+import com.engineerclient.f7.F7Chat.STORM_CRUSHED
+import com.engineerclient.f7.F7Chat.STORM_DEAD
+import com.engineerclient.f7.F7Chat.STORM_LIGHTNING
+import com.engineerclient.f7.F7Chat.STORM_START
+import com.engineerclient.f7.P3Sections
 import com.engineerclient.features.practice.TermInfo
 import com.engineerclient.features.splits.StormCrush
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
@@ -112,18 +121,6 @@ object Timers : Module(
 
     private const val WATCHER = "[BOSS] The Watcher: "
     private const val WATCHER_DONE = "[BOSS] The Watcher: You have proven yourself. You may pass."
-    private const val MAXOR_START = "[BOSS] Maxor: WELL! WELL! WELL! LOOK WHO'S HERE!"
-    private const val STORM_START = "[BOSS] Storm: Pathetic Maxor, just like expected."
-    private const val STORM_DEAD = "[BOSS] Storm: I should have known that I stood no chance."
-    private val STORM_LIGHTNING = setOf("[BOSS] Storm: ENERGY HEED MY CALL!", "[BOSS] Storm: THUNDER LET ME BE YOUR CATALYST!")
-    private val STORM_CRUSHED = setOf("[BOSS] Storm: Oof", "[BOSS] Storm: Ouch, that hurt!")
-    private const val GOLDOR_START = "[BOSS] Goldor: Who dares trespass into my domain?"
-    private const val CORE_OPENING = "The Core entrance is opening!"
-    /** His first line: F7 and M7 alike since the boss update (the other, "Finally, I heard so much about you.", is rare). */
-    private val NECRON_START = setOf(
-        "[BOSS] Necron: You went further than any human before, congratulations.",
-        "[BOSS] Necron: Finally, I heard so much about you. The Eye likes you very much.",
-    )
 
     private var serverTicks = 0
     /** Server tick the Clear Countdown reaches 0 on; null when it isn't showing. */
@@ -221,7 +218,7 @@ object Timers : Module(
             message in STORM_LIGHTNING -> if (stormStart != null && lightningAt == null) lightningAt = serverTicks
             message in STORM_CRUSHED -> if (stormStart != null) crushes++
             message == GOLDOR_START -> stormStart = null
-            message == CORE_OPENING -> coreOpen = true
+            message == CORE_OPEN -> coreOpen = true
             message in NECRON_START -> if (necronDpsAt == null) necronDpsAt = serverTicks + NECRON_DPS
         }
     }
@@ -248,19 +245,18 @@ object Timers : Module(
         if (!coreOpen) return
         val level = mc.level ?: return
         val me = mc.player ?: return
-        if (!DeadPlayers.isDead(me.name.string) && !inCore(me.x, me.y, me.z)) return
+        if (!DeadPlayers.isDead(me.name.string) && !P3Sections.inCoreBox(me.x, me.y, me.z)) return
         for (mate in DungeonUtils.dungeonTeammates) {
             if (DeadPlayers.isDead(mate) || mate.name == me.name.string) continue
             val p = mate.entity?.takeIf { !it.isRemoved } ?: level.players().firstOrNull { it.name.string == mate.name } ?: return
             val at = p.positionCodec.base
-            if (!inCore(at.x, at.y, at.z)) return
+            if (!P3Sections.inCoreBox(at.x, at.y, at.z)) return
         }
         coreOpen = false
         exitCoreUntil = serverTicks + EXIT_CORE_TEXT
     }
 
     /** The inner chamber: the core and the space at its door (DungeonSplits' core box). */
-    private fun inCore(x: Double, y: Double, z: Double) = x >= 39 && x < 71 && y >= 110 && y < 155.5 && z >= 54 && z < 118
 
     private fun reset() {
         bossAt = null; bloodSeen = false; portalOpen = false; portalUntil = 0; coreOpen = false; exitCoreUntil = 0

@@ -2,11 +2,14 @@ package com.engineerclient.features.practice
 
 import com.engineerclient.EngineerClient
 import com.engineerclient.EngineerClient.mc
+import com.engineerclient.ads.P3Sim
+import com.engineerclient.ads.arena.Station
 import com.engineerclient.ads.fight.Fight
 import com.engineerclient.ads.fight.GoldorPhase
-import com.engineerclient.ads.P3Sim
 import com.engineerclient.ads.plan.Practice
-import com.engineerclient.ads.arena.Station
+import com.engineerclient.f7.F7Chat.CORE_OPEN
+import com.engineerclient.f7.F7Chat.GOLDOR_START
+import com.engineerclient.util.noFormatting
 import com.odtheking.odin.events.LevelEvent
 import com.odtheking.odin.events.TickEvent
 import com.odtheking.odin.events.core.EventBus
@@ -58,9 +61,6 @@ object TermInfo {
         return text.takeIf { System.currentTimeMillis() - at <= seconds * 1000 }
     }
 
-    private val CONTROL_CODES = Regex("§.")
-    private const val GOLDOR_START = "[BOSS] Goldor: Who dares trespass into my domain?"
-    private const val CORE_OPEN = "The Core entrance is opening!"
     private const val GATE = "The gate has been destroyed!"
     private val TASK = Regex("^(\\w+) (?:activated|completed) a (terminal|lever|device)! \\((\\d)/\\d\\)$")
     private val GATE_CORE_TITLE = Regex("gate (?:has been )?destroyed|core entrance is opening", RegexOption.IGNORE_CASE)
@@ -265,7 +265,7 @@ object TermInfo {
             while (seenChatOrder.size > 256) seenChat.remove(seenChatOrder.removeFirst())
         }
         // On the game thread, in the order they came, ahead of the game's own handling of each.
-        val msg = p.content().string.replace(CONTROL_CODES, "")
+        val msg = p.content().string.noFormatting()
         mc.execute { EngineerClient.safely("term info chat") { onChat(msg) } }
     }
 
@@ -301,7 +301,7 @@ object TermInfo {
      * Coffee Client's Hide Completion Titles.
      */
     fun isCompletionTitle(raw: String): Boolean {
-        val text = raw.replace(CONTROL_CODES, "")
+        val text = raw.noFormatting()
         // The gate and core titles: by their text, whenever (the core one comes as terminals end).
         if (GATE_CORE_TITLE.containsMatchIn(text)) return true
         return (active in 0..3 || simSection() != null) && TITLE.matches(text)

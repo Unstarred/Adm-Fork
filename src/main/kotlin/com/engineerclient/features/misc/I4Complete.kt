@@ -1,6 +1,8 @@
 package com.engineerclient.features.misc
 
 import com.engineerclient.EngineerClient.mc
+import com.engineerclient.f7.F7Chat.GOLDOR_START
+import com.engineerclient.util.noFormatting
 import com.odtheking.odin.events.LevelEvent
 import com.odtheking.odin.events.TickEvent
 import com.odtheking.odin.events.core.EventBus
@@ -29,7 +31,6 @@ object I4Complete {
 
     private val PLATE = BlockPos(63, 127, 35)
     private val STAND_BOX = AABB(62.5, 124.5, 33.5, 64.5, 127.5, 35.5)
-    private val CONTROL_CODES = Regex("§.")
     private val DEVICE_LINE = Regex("^(.{1,16}) completed a device! \\(\\d/\\d\\)$")
 
     private var tagWasActive: Boolean? = null
@@ -57,8 +58,8 @@ object I4Complete {
 
         onReceive<ClientboundSystemChatPacket>(priority = 1000, ignoreCancelled = true) {
             if (overlay) return@onReceive
-            val msg = content.string.replace(CONTROL_CODES, "")
-            if (msg == "[BOSS] Goldor: Who dares trespass into my domain?") { reset(); return@onReceive }
+            val msg = content.string.noFormatting()
+            if (msg == GOLDOR_START) { reset(); return@onReceive }
             val m = DEVICE_LINE.matchEntire(msg) ?: return@onReceive
             if (m.groupValues[1] == mc.player?.gameProfile?.name) done()
         }
@@ -66,7 +67,7 @@ object I4Complete {
         on<TickEvent.End> {
             val level = mc.level ?: return@on
             val active = level.getEntitiesOfClass(ArmorStand::class.java, STAND_BOX) { it.hasCustomName() }
-                .any { it.customName?.string?.replace(CONTROL_CODES, "") == "Active" }
+                .any { it.customName?.string?.noFormatting() == "Active" }
             val was = tagWasActive
             tagWasActive = active
             // Only the change counts: stepping onto the plate of a device done earlier shows nothing.

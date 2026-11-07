@@ -3,6 +3,7 @@ package com.engineerclient.features.odin
 import com.engineerclient.EngineerClient
 import com.engineerclient.ads.P3Sim
 import com.engineerclient.ads.party.PartyClient
+import com.engineerclient.util.setting
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.DropdownSetting
@@ -23,7 +24,7 @@ import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
 object OdinMasksUsed {
 
     private val onlyUsed = BooleanSetting("Only Used", false, desc = "Only show the masks and Phoenix that have saved you this run. Added by ADM.")
-        .withDependency { (InvincibilityTimer.settings["Displayed Items"] as? DropdownSetting)?.value ?: true }
+        .withDependency { InvincibilityTimer.setting<DropdownSetting>("Displayed Items")?.value ?: true }
 
     /** Same messages Odin procs on: Spirit, Bonzo, Phoenix. */
     private val PROCS = listOf(
@@ -59,7 +60,7 @@ object OdinMasksUsed {
     fun install() {
         InvincibilityTimer.registerSetting(onlyUsed)
         on<MessageEvent.Chat> {
-            if ((InvincibilityTimer.settings["Only In Dungeons"] as? BooleanSetting)?.value != false && !DungeonUtils.inDungeons) return@on
+            if (InvincibilityTimer.setting<BooleanSetting>("Only In Dungeons")?.value != false && !DungeonUtils.inDungeons) return@on
             PROCS.indexOfFirst { message.matches(it) }.takeIf { it >= 0 }?.let { used[it] = true }
         }
         on<LevelEvent.Load> { used.fill(false) }

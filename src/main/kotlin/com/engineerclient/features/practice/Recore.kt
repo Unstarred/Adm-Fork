@@ -1,11 +1,14 @@
 package com.engineerclient.features.practice
 
-import com.engineerclient.core.DeadPlayers
 import com.engineerclient.EngineerClient
-import com.engineerclient.features.odin.OdinLeapScale
+import com.engineerclient.ads.P3Sim
 import com.engineerclient.ads.fight.Fight
 import com.engineerclient.ads.fight.GoldorPhase
-import com.engineerclient.ads.P3Sim
+import com.engineerclient.core.DeadPlayers
+import com.engineerclient.f7.F7Chat.CORE_OPEN
+import com.engineerclient.f7.F7Chat.GOLDOR_START
+import com.engineerclient.features.odin.OdinLeapScale
+import com.engineerclient.util.noFormatting
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.ColorSetting
@@ -90,9 +93,6 @@ object Recore : Module(
     private enum class Fill(private val label: String) { SOLID("Solid"), TO_CENTRE("Fade To Crosshair"), TO_EDGE("Fade To Edge"); override fun toString() = label }
     private enum class NamePos(private val label: String) { AREA("Area Middle"), CROSSHAIR("By Crosshair"); override fun toString() = label }
 
-    private val CONTROL_CODES = Regex("§.")
-    private const val GOLDOR_START = "[BOSS] Goldor: Who dares trespass into my domain?"
-    private const val CORE_OPEN = "The Core entrance is opening!"
     private const val GATE = "The gate has been destroyed!"
     private val TASK_COUNT = Regex("^\\w+ (?:activated|completed) a (?:terminal|lever|device)! \\((\\d+)/(\\d+)\\)$")
 
@@ -189,7 +189,7 @@ object Recore : Module(
     /** In the P3 sim, a bot teammate: its Mannequin, by the name over it. */
     private fun simBot(level: ClientLevel, name: String): Entity? {
         if (!P3Sim.inSim) return null
-        return level.entitiesForRendering().firstOrNull { it is Mannequin && !it.isRemoved && it.customName?.string?.replace(CONTROL_CODES, "") == name }
+        return level.entitiesForRendering().firstOrNull { it is Mannequin && !it.isRemoved && it.customName?.string?.noFormatting() == name }
     }
 
     private fun isLeapScreen(screen: Screen) =
@@ -429,7 +429,7 @@ object Recore : Module(
 
         onReceive<ClientboundSystemChatPacket>(priority = 1000, ignoreCancelled = true) {
             if (overlay) return@onReceive
-            val msg = content.string.replace(CONTROL_CODES, "")
+            val msg = content.string.noFormatting()
             when {
                 // A lever can be flicked the tick before Goldor speaks: its message has started terminals already.
                 msg == GOLDOR_START -> if (!terms) { reset(); terms = true }

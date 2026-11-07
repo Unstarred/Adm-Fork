@@ -2,6 +2,8 @@ package com.engineerclient.adr
 
 import com.engineerclient.EngineerClient
 import com.engineerclient.mixin.ContainerScreenAccessor
+import com.engineerclient.util.Http
+import com.engineerclient.util.noFormatting
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
@@ -112,8 +114,7 @@ object ADR : Module(
 
     const val SITE = "undonecoffee.com"
     private const val RUNS_URL = "https://$SITE/adr/api/runs"
-    private val CONTROL_CODES = Regex("\u00a7.")
-    private val http: HttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build()
+    private val http: HttpClient = Http.client
 
     private var session: RunRecorder? = null
 
@@ -225,7 +226,7 @@ object ADR : Module(
         // device / gate messages the report needs). Handed to the client thread, where ticks happen.
         onReceive<ClientboundSystemChatPacket>(priority = 1000, ignoreCancelled = true) {
             if (overlay) { val c = content; EngineerClient.mc.execute { EngineerClient.safely("adr action bar") { session?.let { it.hud.actionBar(it.currentTick, c) } } }; return@onReceive }
-            val text = content.string.replace(CONTROL_CODES, "")
+            val text = content.string.noFormatting()
             val colored = legacyText(content)
             // The answer to a /p list ADR sent itself: read, and kept out of chat.
             var hide = false

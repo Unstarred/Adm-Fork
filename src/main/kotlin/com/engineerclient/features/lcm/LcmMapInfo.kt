@@ -30,6 +30,7 @@ package com.engineerclient.features.lcm
 import com.engineerclient.EngineerClient
 import com.engineerclient.core.OdinCompat
 import com.engineerclient.features.mapprediction.FloorRules
+import com.engineerclient.util.setting
 import com.odtheking.odin.OdinMod.mc
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
@@ -64,7 +65,7 @@ object LcmMapInfo {
 
     private val style = BooleanSetting("LCM Style", false,
         desc = "Draws the Full Hud like LCM's map (dtMap) draws its score, with dtMap's score calculator: secrets found, missing and total, the unknown secrets (in rooms nobody in the party has walked into yet, teammates' from Odin's map websocket), the score, then what's still missing from the bonus (deaths, Mimic, Prince, bats, crypts). Added by ADM.")
-        .withDependency { (MapInfo.settings["Full Hud"] as? HUDSetting)?.value?.enabled ?: true }
+        .withDependency { MapInfo.setting<HUDSetting>("Full Hud")?.value?.enabled ?: true }
 
     private var failed = false
 
@@ -92,7 +93,7 @@ object LcmMapInfo {
         }
     }
 
-    private fun disableInBoss(): Boolean = (MapInfo.settings["Disable in boss"] as? BooleanSetting)?.value ?: true
+    private fun disableInBoss(): Boolean = MapInfo.setting<BooleanSetting>("Disable in boss")?.value ?: true
 
     /** dtMap's score text (its Score.actualRender): one line if it's narrower than the map, else two. */
     private fun lines(): List<String> {

@@ -1,5 +1,6 @@
 package com.engineerclient.adr
 
+import com.engineerclient.util.noFormatting
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonNull
@@ -472,11 +473,10 @@ internal class MobWriter(private val plan: MobPlan, private val dropped: (MobPla
 
     companion object {
         private val PLACE = setOf("k", "t", "id", "x", "y", "z", "yaw", "headYaw")
-        private val CODES = Regex("§.")
         /** "name" left out where it is "c" without its colour codes (the viewer works it out). */
         fun plainName(o: JsonObject) {
             val c = o["c"]?.takeIf { !it.isJsonNull }?.asString ?: return
-            if (o["name"]?.takeIf { !it.isJsonNull }?.asString == c.replace(CODES, "")) o.remove("name")
+            if (o["name"]?.takeIf { !it.isJsonNull }?.asString == c.noFormatting()) o.remove("name")
         }
     }
 }

@@ -3,6 +3,8 @@ package com.engineerclient.features.misc
 import com.engineerclient.EngineerClient
 import com.engineerclient.EngineerClient.mc
 import com.engineerclient.adr.PartyTracker
+import com.engineerclient.features.odin.OdinLeapScale
+import com.engineerclient.util.setting
 import com.mojang.blaze3d.platform.InputConstants
 import com.mojang.brigadier.Command
 import com.mojang.brigadier.arguments.StringArgumentType
@@ -47,7 +49,6 @@ import java.util.Locale
 import java.util.Optional
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
-import com.engineerclient.features.odin.OdinLeapScale
 
 /**
  * Odin's custom leap order (`/od leaporder a b c d`, Leap Menu sorting Custom), kept across restarts: Odin holds
@@ -169,7 +170,7 @@ object LeapOrder {
         DungeonUtils.customLeapOrder = names.filter { it.isNotBlank() }.map { it.lowercase(Locale.ROOT) }
     }
 
-    private val sorting get() = LeapMenu.settings["Sorting"] as? SelectorSetting<LeapMenu.Sorting>
+    private val sorting get() = LeapMenu.setting<SelectorSetting<LeapMenu.Sorting>>("Sorting")
 
     /** Whether Odin's Leap Menu sorts by the order (sorting Custom). */
     val custom get() = sorting?.value == LeapMenu.Sorting.CUSTOM

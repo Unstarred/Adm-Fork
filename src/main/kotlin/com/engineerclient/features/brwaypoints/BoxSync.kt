@@ -2,6 +2,7 @@ package com.engineerclient.features.brwaypoints
 
 import com.engineerclient.EngineerClient
 import com.engineerclient.adr.ADR
+import com.engineerclient.util.Http
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -15,7 +16,7 @@ import java.time.Duration
 object BoxSync {
 
     private const val URL = "https://${ADR.SITE}/adr/api/brboxes"
-    private val http: HttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
+    private val http: HttpClient = Http.client
 
     /** Fetches the site's copy; [done] gets its JSON, off the game thread, or nothing if it failed. */
     fun pull(done: (String) -> Unit) {

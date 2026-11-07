@@ -2,8 +2,30 @@ package com.engineerclient.ads
 
 import com.engineerclient.EngineerClient
 import com.engineerclient.EngineerClient.mc
-import com.engineerclient.index
+import com.engineerclient.ads.bots.GhostGuard
+import com.engineerclient.ads.bots.Party
+import com.engineerclient.ads.core.LagBurst
+import com.engineerclient.ads.core.LagPreset
+import com.engineerclient.ads.core.Sim
+import com.engineerclient.ads.core.SimServer
+import com.engineerclient.ads.core.SimWorld
+import com.engineerclient.ads.fight.Fight
+import com.engineerclient.ads.fight.Terminals
+import com.engineerclient.ads.items.Loadouts
+import com.engineerclient.ads.items.Masks
+import com.engineerclient.ads.items.SimItems
+import com.engineerclient.ads.party.P3Party
+import com.engineerclient.ads.party.PartyClient
+import com.engineerclient.ads.party.PartyServer
+import com.engineerclient.ads.party.Players
+import com.engineerclient.ads.party.SimActions
+import com.engineerclient.ads.party.SimNet
+import com.engineerclient.ads.plan.P3Plan
+import com.engineerclient.ads.plan.Practice
+import com.engineerclient.ads.ui.SimRestartScreen
 import com.engineerclient.features.misc.RandomStuff
+import com.engineerclient.index
+import com.engineerclient.util.setting
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonPrimitive
@@ -44,27 +66,6 @@ import net.minecraft.world.entity.decoration.Mannequin
 import net.minecraft.world.phys.BlockHitResult
 import net.minecraft.world.phys.HitResult
 import java.util.Locale
-import com.engineerclient.ads.bots.GhostGuard
-import com.engineerclient.ads.bots.Party
-import com.engineerclient.ads.core.LagBurst
-import com.engineerclient.ads.core.LagPreset
-import com.engineerclient.ads.core.Sim
-import com.engineerclient.ads.core.SimServer
-import com.engineerclient.ads.core.SimWorld
-import com.engineerclient.ads.fight.Fight
-import com.engineerclient.ads.fight.Terminals
-import com.engineerclient.ads.items.Loadouts
-import com.engineerclient.ads.items.Masks
-import com.engineerclient.ads.items.SimItems
-import com.engineerclient.ads.party.P3Party
-import com.engineerclient.ads.party.PartyClient
-import com.engineerclient.ads.party.PartyServer
-import com.engineerclient.ads.party.Players
-import com.engineerclient.ads.party.SimActions
-import com.engineerclient.ads.party.SimNet
-import com.engineerclient.ads.plan.P3Plan
-import com.engineerclient.ads.plan.Practice
-import com.engineerclient.ads.ui.SimRestartScreen
 
 /**
  * ADS (Advanced Dungeon Simulator, once P3 Sim): F7's boss fight in a singleplayer world of its own ("p3sim"), to
@@ -240,8 +241,8 @@ object P3Sim : Module(
     fun hideBot(e: Entity): Boolean {
         if (e !is Mannequin || !hidePlayers || !inSim) return false
         val hp = HidePlayers
-        if ((hp.settings["Hide all"] as? BooleanSetting)?.value == true) return true
-        val d = (hp.settings["Distance"] as? NumberSetting<*>)?.value?.toDouble() ?: 3.0
+        if (hp.setting<BooleanSetting>("Hide all")?.value == true) return true
+        val d = hp.setting<NumberSetting<*>>("Distance")?.value?.toDouble() ?: 3.0
         val me = mc.player ?: return false
         return e.distanceToSqr(me) <= d * d
     }

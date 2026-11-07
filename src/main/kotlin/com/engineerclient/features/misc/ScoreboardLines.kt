@@ -1,5 +1,6 @@
 package com.engineerclient.features.misc
 
+import com.engineerclient.util.noFormatting
 import net.minecraft.network.chat.Component
 import net.minecraft.world.scores.Objective
 import net.minecraft.world.scores.PlayerScoreEntry
@@ -157,7 +158,7 @@ object ScoreboardLines {
         val raw = line.string
         if (kindMemo.containsKey(raw)) return kindMemo[raw]
         if (kindMemo.size >= KIND_MEMO_MAX) kindMemo.clear()
-        return kindOf(raw.replace(FORMATTING, "").trim(), null).also { kindMemo[raw] = it }
+        return kindOf(raw.noFormatting().trim(), null).also { kindMemo[raw] = it }
     }
 
     /** [contextFreeKind]'s memo, render thread only. A null kind is a line none of the patterns know. */
@@ -167,16 +168,6 @@ object ScoreboardLines {
     // --- text helpers --------------------------------------------------------------------------
 
     /** Codes stripped, ends trimmed: the form every pattern above is written against. */
-    internal fun plain(component: Component): String = component.string.replace(FORMATTING, "").trim()
+    internal fun plain(component: Component): String = component.string.noFormatting().trim()
 
-    /**
-     * Every § and the character after it, not just the legacy colour and format codes.
-     *
-     * A scoreboard cannot hold two identical lines, so Hypixel makes each one unique by salting it
-     * with a § followed by some letter outside the legacy set — and it lands mid-word, so a real
-     * sidebar says "Early Summer 19§wth" and "The Catac§uombs (F7)". Stripping only the legacy
-     * codes would leave that salt in place and every pattern here would miss. One line is nothing but salt,
-     * "§j", which is how Hypixel draws a blank spacer.
-     */
-    private val FORMATTING = Regex("§.")
 }

@@ -2,6 +2,7 @@ package com.engineerclient.core
 
 import com.engineerclient.EngineerClient
 import com.engineerclient.adr.ADR
+import com.engineerclient.util.Http
 import com.google.gson.JsonObject
 import com.odtheking.odin.clickgui.settings.RenderableSetting
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
@@ -12,7 +13,6 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
 import net.fabricmc.loader.api.FabricLoader
 import java.net.URI
-import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.file.Files
@@ -91,7 +91,7 @@ object LaunchStats {
         val body = report().toString()
         Thread.ofVirtual().name("engineerclient-launch-stats").start {
             runCatching {
-                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build().send(
+                Http.client.send(
                     HttpRequest.newBuilder(URI.create(URL)).timeout(Duration.ofSeconds(20))
                         .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build(),
                     HttpResponse.BodyHandlers.discarding(),

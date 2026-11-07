@@ -1,14 +1,18 @@
 package com.engineerclient.features.splits
 
-import com.engineerclient.core.DeadPlayers
 import com.engineerclient.EngineerClient
-import com.engineerclient.features.misc.Witherborn
 import com.engineerclient.ads.P3Sim
-import com.engineerclient.ads.plan.Practice
 import com.engineerclient.ads.fight.StormEnd
+import com.engineerclient.ads.plan.Practice
+import com.engineerclient.core.DeadPlayers
+import com.engineerclient.f7.F7Chat.CORE_OPEN
+import com.engineerclient.f7.F7Chat.NECRON
+import com.engineerclient.f7.P3Sections
+import com.engineerclient.features.misc.Witherborn
 import com.engineerclient.features.practice.Recore
 import com.engineerclient.features.splits.StormCrush
 import com.engineerclient.features.splits.StormCrushView
+import com.engineerclient.util.noFormatting
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.ColorSetting
@@ -69,7 +73,6 @@ object DungeonSplits : Module(
     key = null,
 ) {
 
-    private val CONTROL_CODES = Regex("§.")
     private val tracker = SplitTracker()
     private val subs = SubSplitTracker()
     private val blood = BloodRunDetail()
@@ -317,7 +320,7 @@ object DungeonSplits : Module(
     /** A chat line in a dungeon, timed as it arrived and handed to the trackers on the client thread. */
     private fun ClientboundSystemChatPacket.onSystemChat() {
         if (overlay) return
-        val text = content.string.replace(CONTROL_CODES, "")
+        val text = content.string.noFormatting()
         val at = now()
         EngineerClient.mc.execute {
             EngineerClient.safely("splits chat") {
@@ -330,7 +333,7 @@ object DungeonSplits : Module(
                 blood.onChat(text, at)
                 storm.onChat(text, at.tick, DungeonUtils.floor?.name == "M7")
                 if (text == CORE_OPEN) core.onCoreOpen(at.tick)
-                else if (text.startsWith(NECRON_LINE)) core.onNecron()
+                else if (text.startsWith(NECRON)) core.onNecron()
             }
         }
     }
@@ -446,12 +449,12 @@ object DungeonSplits : Module(
         if (core.look(serverTicks)) {
             val me = mc.player
             val alive = aliveNames()
-            if (me != null && me.name.string in alive) core.observe(me.name.string, inCoreBox(me.x, me.y, me.z), serverTicks)
+            if (me != null && me.name.string in alive) core.observe(me.name.string, P3Sections.inCoreBox(me.x, me.y, me.z), serverTicks)
             for (mate in DungeonUtils.dungeonTeammates) {
                 if (mate.name !in alive || mate.name == me?.name?.string) continue
                 val p = mate.entity?.takeIf { !it.isRemoved } ?: level.players().firstOrNull { it.name.string == mate.name }
                 val at = p?.positionCodec?.base
-                core.observe(mate.name, at?.let { inCoreBox(it.x, it.y, it.z) }, serverTicks)
+                core.observe(mate.name, at?.let { P3Sections.inCoreBox(it.x, it.y, it.z) }, serverTicks)
             }
             // Dying after S4's start counts as getting in, at the death (DeadPlayers has it before the tab list).
             for (mate in DungeonUtils.dungeonTeammates) if (DeadPlayers.isDead(mate)) core.onDeath(mate.name, serverTicks)
@@ -503,7 +506,6 @@ object DungeonSplits : Module(
      * before the core opened. Its floor is y 115 (nobody below 110 before Goldor set off); under it
      * is the drop to Necron, which a wipe can put people in.
      */
-    private fun inCoreBox(x: Double, y: Double, z: Double) = x >= 39 && x < 71 && y >= 110 && y < 155.5 && z >= 54 && z < 118
 
     /** The TNT seen in the last 2 server ticks of Necron's fight, for his death's burst. */
     private val necronTnt = ArrayDeque<Stamp>()
@@ -618,8 +620,6 @@ object DungeonSplits : Module(
     private val NECRON_MID = Vec3(54.0, 66.0, 76.0)
     /** Blocks a tick: faster is Goldor setting off for the core (he creeps at ~0.05, goes at ~0.65). */
     private const val GOLDOR_GO = 0.25
-    private const val CORE_OPEN = "The Core entrance is opening!"
-    private const val NECRON_LINE = "[BOSS] Necron: "
     private val KEY = Regex("""(?:Wither|Blood) Key""")
 
     /** The Watcher: his id and where he was last tick. */

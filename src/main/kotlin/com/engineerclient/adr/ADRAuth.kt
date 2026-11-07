@@ -1,6 +1,7 @@
 package com.engineerclient.adr
 
 import com.engineerclient.EngineerClient
+import com.engineerclient.util.Http
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import java.net.URI
@@ -28,7 +29,7 @@ object ADRAuth {
     private const val RENEW_MS = 2 * 86_400_000L
     /** After a failed sign-in, uploads go without one for this long before it is tried again. */
     private const val RETRY_MS = 10 * 60_000L
-    private val http: HttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build()
+    private val http: HttpClient = Http.client
     private val file get() = EngineerClient.mc.gameDirectory.toPath().resolve("config").resolve("adm").resolve("adr").resolve("auth.json")
 
     private class Token(val name: String, val token: String, val exp: Long)

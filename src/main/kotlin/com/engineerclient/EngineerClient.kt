@@ -2,25 +2,31 @@ package com.engineerclient
 
 import com.engineerclient.adr.ADR
 import com.engineerclient.adr.OnlineLink
-import com.engineerclient.features.clearbreakdown.ClearBreakdown
+import com.engineerclient.ads.P3Sim
+import com.engineerclient.core.ClassDetect
+import com.engineerclient.core.ConfigMigration
+import com.engineerclient.core.DeadPlayers
+import com.engineerclient.core.EcConfig
+import com.engineerclient.core.EcLog
+import com.engineerclient.core.LaunchStats
 import com.engineerclient.core.MemReport
+import com.engineerclient.features.brwaypoints.BrWaypoints2
+import com.engineerclient.features.clearbreakdown.ClearBreakdown
 import com.engineerclient.features.lcm.LcmMapInfo
+import com.engineerclient.features.lcm.LcmMeleeWarning
 import com.engineerclient.features.lcm.LcmStyle
 import com.engineerclient.features.mapprediction.OdinMapPrediction
 import com.engineerclient.features.misc.AgroSphere
 import com.engineerclient.features.misc.HealthMana
 import com.engineerclient.features.misc.I4Complete
-import com.engineerclient.core.LaunchStats
-import com.engineerclient.features.lcm.LcmMeleeWarning
 import com.engineerclient.features.misc.LeapOrder
+import com.engineerclient.features.misc.RandomStuff
+import com.engineerclient.features.misc.Timers
+import com.engineerclient.features.misc.Witherborn
 import com.engineerclient.features.odin.OdinClickLimit
 import com.engineerclient.features.odin.OdinHighlightLook
 import com.engineerclient.features.odin.OdinMasksUsed
 import com.engineerclient.features.odin.OdinTickTimers
-import com.engineerclient.features.misc.RandomStuff
-import com.engineerclient.features.misc.Timers
-import com.engineerclient.features.misc.Witherborn
-import com.engineerclient.ads.P3Sim
 import com.engineerclient.features.pov.PovPreviews
 import com.engineerclient.features.practice.InfNumbersSim
 import com.engineerclient.features.practice.OdinSimonSays
@@ -30,11 +36,10 @@ import com.engineerclient.features.practice.SimonSaysPractice
 import com.engineerclient.features.practice.TermInfo
 import com.engineerclient.features.practice.TerminalHitboxes
 import com.engineerclient.features.practice.TermsimExtras
-import com.engineerclient.core.EcLog
 import com.engineerclient.features.splits.DungeonSplits
 import com.engineerclient.features.splits.OdinSplitsLook
 import com.engineerclient.features.tpmaze.TeamTpMaze
-import com.engineerclient.features.brwaypoints.BrWaypoints2
+import com.engineerclient.util.noFormatting
 import com.mojang.brigadier.arguments.StringArgumentType
 import com.odtheking.odin.clickgui.ClickGUI
 import com.odtheking.odin.clickgui.settings.impl.SelectorSetting
@@ -58,10 +63,6 @@ import org.lwjgl.sdl.SDLVideo
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.util.concurrent.ConcurrentHashMap
-import com.engineerclient.core.ClassDetect
-import com.engineerclient.core.ConfigMigration
-import com.engineerclient.core.DeadPlayers
-import com.engineerclient.core.EcConfig
 
 object EngineerClient : ClientModInitializer {
 
@@ -261,7 +262,7 @@ object EngineerClient : ClientModInitializer {
 
     private fun mark(note: String) {
         EcLog.log("MARK", note.ifBlank { "(no note)" })
-        markLines.forEach { lines -> lines().forEach { EcLog.log("MARK", "  " + it.replace(Regex("§."), "")) } }
+        markLines.forEach { lines -> lines().forEach { EcLog.log("MARK", "  " + it.noFormatting()) } }
     }
 
     private fun registerCommand() {

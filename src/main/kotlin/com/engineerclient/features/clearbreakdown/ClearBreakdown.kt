@@ -6,6 +6,7 @@ import com.engineerclient.adr.OnlineLink
 import com.engineerclient.ads.P3Sim
 import com.engineerclient.ads.plan.Practice
 import com.engineerclient.features.splits.SplitTracker
+import com.engineerclient.util.noFormatting
 import com.odtheking.odin.OdinMod
 import com.odtheking.odin.events.BlockInteractEvent
 import com.odtheking.odin.events.BlockUpdateEvent
@@ -66,7 +67,6 @@ object ClearBreakdown : Module(
     description = "At the end of a finished run, everyone's rooms (cleared alone - cleared) and secrets; hover for the rooms in order and the secrets room by room. Replaces Odin's Secrets Counter lines while on.",
     key = null,
 ) {
-    private val CONTROL_CODES = Regex("§.")
     /** Rooms that don't count as clears: fairy rooms and the green start room. */
     private val NOT_CLEARS = setOf(RoomType.FAIRY, RoomType.ENTRANCE)
     /** Every so often the party hears everything this client sees, not just changes: a lost frame heals. */
@@ -121,7 +121,7 @@ object ClearBreakdown : Module(
         // Chat straight off the network, as Splits takes it: a chat cleaner can't hide the run's lines.
         onReceive<ClientboundSystemChatPacket>(priority = 1000, ignoreCancelled = true) {
             if (overlay) return@onReceive
-            val text = content.string.replace(CONTROL_CODES, "")
+            val text = content.string.noFormatting()
             mc.execute { EngineerClient.safely("clear breakdown chat") { onChat(text) } }
         }
 

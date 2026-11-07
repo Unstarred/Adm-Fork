@@ -2,7 +2,11 @@ package com.engineerclient.features.practice
 
 import com.engineerclient.EngineerClient
 import com.engineerclient.EngineerClient.mc
+import com.engineerclient.f7.F7Chat.GOLDOR_START
+import com.engineerclient.f7.F7Chat.STORM_DEAD
 import com.engineerclient.mixin.MinecraftAccessor
+import com.engineerclient.util.noFormatting
+import com.engineerclient.util.setting
 import com.mojang.blaze3d.platform.InputConstants
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
@@ -198,9 +202,6 @@ object SimonSaysPractice : Module(
         EngineerClient.msg("§7SS Practice: summoned. Press the start button §8(left of the grid)§7 to begin, 3 times for the skip. The others are signed. The keybind again takes it away.")
     }
 
-    private const val STORM_DEAD = "[BOSS] Storm: I should have known that I stood no chance."
-    private const val GOLDOR_START = "[BOSS] Goldor: Who dares trespass into my domain?"
-    private val CONTROL_CODES = Regex("§.")
 
     /** Nothing in the world to put back: it's no longer drawn, and that's all. */
     private fun remove() {
@@ -826,7 +827,7 @@ object SimonSaysPractice : Module(
         if (!isStart && (pos.x != 110 || pos.y !in 120..123 || pos.z !in 92..95)) return
         val state = mc.level?.getBlockState(pos) ?: return
         if (state.block !is ButtonBlock || state.getValue(BlockStateProperties.POWERED)) return
-        (SimonSays.settings["Custom Click Sounds"] as? BooleanSetting)?.let { if (it.value) it.value = false }
+        SimonSays.setting<BooleanSetting>("Custom Click Sounds")?.let { if (it.value) it.value = false }
         if (blocked) { playSoundSettings(WRONG_SOUND); return }
         if (isStart) { playSoundSettings(CORRECT_SOUND); return }
 
@@ -978,7 +979,7 @@ object SimonSaysPractice : Module(
         // The terminals start countdown (Storm dying; Goldor's first line if that was missed): the practice device goes away.
         onReceive<ClientboundSystemChatPacket>(priority = 1000, ignoreCancelled = true) {
             if (overlay) return@onReceive
-            val msg = content.string.replace(CONTROL_CODES, "")
+            val msg = content.string.noFormatting()
             if (msg != STORM_DEAD && msg != GOLDOR_START) return@onReceive
             mc.execute { if (placed != null) EngineerClient.safely("ss practice countdown") { remove(); EngineerClient.msg("§7SS Practice: removed (terminals starting).") } }
         }

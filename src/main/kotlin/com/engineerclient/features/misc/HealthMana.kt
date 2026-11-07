@@ -1,5 +1,6 @@
 package com.engineerclient.features.misc
 
+import com.engineerclient.util.setting
 import com.odtheking.odin.clickgui.settings.RenderableSetting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.ColorSetting
@@ -76,14 +77,14 @@ object HealthMana : Module(
     }
 
     /** Odin's Health HUD and Mana HUD. A HUD setting's element is made once, with its module (as OdinHuds relies on). */
-    private val healthHud by lazy { (PlayerDisplay.settings["Health HUD"] as? HUDSetting)?.value }
-    private val manaHud by lazy { (PlayerDisplay.settings["Mana HUD"] as? HUDSetting)?.value }
+    private val healthHud by lazy { PlayerDisplay.setting<HUDSetting>("Health HUD")?.value }
+    private val manaHud by lazy { PlayerDisplay.setting<HUDSetting>("Mana HUD")?.value }
 
     private fun aboveThreshold(current: Int, max: Int): Boolean =
         hideUnlessLow && max > 0 && current.toFloat() / max >= threshold / 100f
 
     private fun playerDisplayColor(name: String, fallback: Color): Color =
-        (PlayerDisplay.settings[name] as? ColorSetting)?.value ?: fallback
+        PlayerDisplay.setting<ColorSetting>(name)?.value ?: fallback
 
     /** A bar filled to [current]/[max] over a dark background. */
     private fun GuiGraphicsExtractor.statBar(current: Int, max: Int, color: Color, width: Int, height: Int): Pair<Int, Int> {

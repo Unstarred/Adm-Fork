@@ -2,6 +2,7 @@ package com.engineerclient.features.partyfinder
 
 import com.engineerclient.core.ClassDetect
 import com.engineerclient.features.misc.RandomStuff
+import com.engineerclient.util.noFormatting
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonClass
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
 import net.minecraft.network.chat.Component
@@ -29,7 +30,6 @@ object PartyFinderStats {
     private val PLAYABLE = DungeonClass.entries.filter { it != DungeonClass.EMPTY }
 
     private val memberLine = Regex("^(\\w{1,16}): (\\w+) \\((\\d+)\\)$")
-    private val formatting = Regex("§.")
 
     /** Returns [lines] untouched (same instance) when this is not a Party Finder party item. */
     fun decorate(screen: AbstractContainerScreen<*>, stack: ItemStack, lines: List<Component>): List<Component> {
@@ -95,5 +95,5 @@ object PartyFinderStats {
         it.name.equals(text, ignoreCase = true) || (it == DungeonClass.BERSERK && text.equals("Berserker", ignoreCase = true))
     }
 
-    private fun clean(s: String) = formatting.replace(s, "")
+    private fun clean(s: String) = s.noFormatting()
 }
