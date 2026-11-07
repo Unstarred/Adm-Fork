@@ -1,5 +1,6 @@
 package com.engineerclient.features.pov
 
+import com.engineerclient.ads.P3Sim
 import com.engineerclient.EngineerClient
 import com.engineerclient.core.OdinHuds
 import com.engineerclient.mixin.CameraAccessor
@@ -415,7 +416,8 @@ object PovCapture {
         val loaded: Player? = (slot.entity?.takeIf { !it.isRemoved } ?: findByName(slot.name))?.takeIf { !it.isRemoved }
         if (loaded != null) seenAs[slot.name] = loaded.uuid
         val target: Entity? = when {
-            loaded == null -> recentStandIn(slot) ?: mapStandIn(slot)
+            // In ADS a teammate may be a bot: a Mannequin, not a player, so the lookup above never finds one.
+            loaded == null -> P3Sim.botNamed(slot.name)?.takeIf { !slot.isDead } ?: recentStandIn(slot) ?: mapStandIn(slot)
             loaded === mc.player || !loaded.isAlive -> null
             else -> loaded
         }

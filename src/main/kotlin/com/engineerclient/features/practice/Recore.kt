@@ -33,12 +33,10 @@ import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.PlayerFaceExtractor
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
-import net.minecraft.client.multiplayer.ClientLevel
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket
 import net.minecraft.resources.Identifier
 import net.minecraft.util.ARGB
 import net.minecraft.world.entity.Entity
-import net.minecraft.world.entity.decoration.Mannequin
 import net.minecraft.world.entity.player.PlayerSkin
 
 /**
@@ -177,19 +175,13 @@ object Recore : Module(
         val now = System.currentTimeMillis()
         for (m in DungeonUtils.leapTeammates) {
             if (m.name == "Empty") continue
-            val p = m.entity?.takeIf { !it.isRemoved } ?: level.players().firstOrNull { it.name.string == m.name } ?: simBot(level, m.name)
+            val p = m.entity?.takeIf { !it.isRemoved } ?: level.players().firstOrNull { it.name.string == m.name } ?: P3Sim.botNamed(m.name)
             // Unseen (out of render distance) keeps its place; dead or out of the box loses it. Passing
             // through on a leap's drag is neither: not in, and whatever was known stays.
             if (p == null) continue
             if (DeadPlayers.isDead(m) || !inCore(p)) inCoreSince.remove(m.name)
             else if (!inFlight(p)) inCoreSince.putIfAbsent(m.name, now)
         }
-    }
-
-    /** In the P3 sim, a bot teammate: its Mannequin, by the name over it. */
-    private fun simBot(level: ClientLevel, name: String): Entity? {
-        if (!P3Sim.inSim) return null
-        return level.entitiesForRendering().firstOrNull { it is Mannequin && !it.isRemoved && it.customName?.string?.noFormatting() == name }
     }
 
     private fun isLeapScreen(screen: Screen) =

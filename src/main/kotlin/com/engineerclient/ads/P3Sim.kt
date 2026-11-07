@@ -1,5 +1,6 @@
 package com.engineerclient.ads
 
+import com.engineerclient.util.noFormatting
 import com.engineerclient.EngineerClient
 import com.engineerclient.EngineerClient.mc
 import com.engineerclient.ads.bots.GhostGuard
@@ -246,6 +247,23 @@ object P3Sim : Module(
         val me = mc.player ?: return false
         return e.distanceToSqr(me) <= d * d
     }
+
+    /**
+     * The bot teammate named [name] in the sim, client side: its Mannequin, by the name over it (the bots aren't
+     * players, so a lookup among players never finds one). Null outside the sim. Read every frame by the leap previews
+     * and every tick by Recore, so each find is kept until its entity goes.
+     */
+    fun botNamed(name: String): Entity? {
+        if (!inSim) return null
+        val level = mc.level ?: return null
+        botByName[name]?.takeIf { !it.isRemoved && it.level() === level }?.let { return it }
+        return level.entitiesForRendering().firstOrNull { it is Mannequin && !it.isRemoved && it.customName?.string?.noFormatting() == name }
+            ?.also { botByName[name] = it }
+    }
+
+    /** [botNamed]'s finds, client thread only. */
+    private val botByName = HashMap<String, Entity>()
+
     val breakerRefill: Int get() = breakerRefillS.value.toInt()
     val breakerRegen: Double get() = breakerRegenS.value.toDouble()
     // Null-safe: a hotswapped game has new settings null until it is relaunched.
