@@ -140,13 +140,7 @@ object BotLegs {
                 "move" -> {
                     if (p.frames.isEmpty()) {
                         // Never recorded: straight onto where it's going (its job's stand, its early-enter spot).
-                        when (val nx = lg.pieces.getOrNull(lg.i + 1)) {
-                            null -> {}
-                            else -> when (nx.type) {
-                                "job" -> b.pos = spotOf(nx.id)
-                                "ee" -> eeOf(nx.k)?.let { b.pos = it.spot }
-                            }
-                        }
+                        ontoNext(b, lg)
                         lg.i++; continue
                     }
                     if (lg.from == null) lg.from = b.pos
@@ -175,21 +169,37 @@ object BotLegs {
                     if (om != null) { if (ontoTarget(om) == null) break } else if (!leapReady(c, phase)) break
                     lg.i++
                     val to = Players.playerOf(c)?.position() ?: botOf(c)?.pos ?: continue
-                    b.pos = to; b.to = null; b.vy = 0.0; b.leaptAt = n
-                    lg.leaptOnto += c.name
-                    setHeld(b, "leap")
-                    Sim.sound(SoundEvents.ENDERMAN_TELEPORT, 1f, 1f, to)
-                    val name = Players.playerOf(c)?.gameProfile?.name ?: Roles.label(c)
-                    if (name == Sim.hostName) GhostCapture.event("landed", b.clazz.name)
-                    val gen = generation
-                    Fight.later(1, "leap announce") { if (gen == generation) Sim.chat(partyLine(b, "Leaped to $name!")) }
-                    place(b)
+                    landLeap(b, lg, c, to, n)
                     return
                 }
                 else -> lg.i++
             }
         }
         settle(b, lg)
+        place(b)
+    }
+
+    /** [b] straight onto where the piece after its unrecorded move goes: its job's stand, or its early-enter spot. */
+    private fun ontoNext(b: Bot, lg: Legs) {
+        when (val nx = lg.pieces.getOrNull(lg.i + 1)) {
+            null -> {}
+            else -> when (nx.type) {
+                "job" -> b.pos = spotOf(nx.id)
+                "ee" -> eeOf(nx.k)?.let { b.pos = it.spot }
+            }
+        }
+    }
+
+    /** [b] lands its leap onto [c] at [to]: holding the leap, the sound, and "Leaped to" in party chat a tick later. */
+    private fun landLeap(b: Bot, lg: Legs, c: DungeonClass, to: Vec3, n: Int) {
+        b.pos = to; b.to = null; b.vy = 0.0; b.leaptAt = n
+        lg.leaptOnto += c.name
+        setHeld(b, "leap")
+        Sim.sound(SoundEvents.ENDERMAN_TELEPORT, 1f, 1f, to)
+        val name = Players.playerOf(c)?.gameProfile?.name ?: Roles.label(c)
+        if (name == Sim.hostName) GhostCapture.event("landed", b.clazz.name)
+        val gen = generation
+        Fight.later(1, "leap announce") { if (gen == generation) Sim.chat(partyLine(b, "Leaped to $name!")) }
         place(b)
     }
 

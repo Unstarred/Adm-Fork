@@ -153,7 +153,20 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
         goldor.spawn(startN, bar = !(from == 1 && arrived))
         Party.startP3(this)
         GhostCapture.start(this)
-        // Everyone on their own spawn (a joiner's: their plan's), with the P3 bar.
+        everyoneToSpawn()
+        // From StormEnd the phase starts LEAD_IN ticks before the line, so S1 levers work then (the first credit can come 1-2
+        // ticks before it). Fight.later(LEAD_IN) fires before the phase's tick with t = LEAD_IN - 1, so this offset puts "Who dares"
+        // at n = 0 (its phase ticks run n = -2, -1, 0, ...): death ticks then land at line + 59 as on main (sometimes 58).
+        if (from == 1 && arrived) nOffset = -(LEAD_IN - 1)
+        startLines(startN)
+        if (practice) {
+            Practice.begin(from, t)
+            if (count(from) >= Station.total(from)) sectionDone(from)
+        }
+    }
+
+    /** Everyone on their own spawn (a joiner's: their plan's), with the P3 bar. */
+    private fun everyoneToSpawn() {
         Sim.forEachPlayer { player ->
             if (!arrived) {
                 if (!held || !Sim.isHost(player)) {
@@ -174,10 +187,10 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
                 }
             }
         }
-        // From StormEnd the phase starts LEAD_IN ticks before the line, so S1 levers work then (the first credit can come 1-2
-        // ticks before it). Fight.later(LEAD_IN) fires before the phase's tick with t = LEAD_IN - 1, so this offset puts "Who dares"
-        // at n = 0 (its phase ticks run n = -2, -1, 0, ...): death ticks then land at line + 59 as on main (sometimes 58).
-        if (from == 1 && arrived) nOffset = -(LEAD_IN - 1)
+    }
+
+    /** The start: from S1 Goldor's first line (after the lead-in, from Storm), from the core its opening, else the section's start. */
+    private fun startLines(startN: Int) {
         if (from == 1) {
           val opening = {
             // The bar turns to Goldor's with this line, not with his spawn ticks before it.
@@ -199,10 +212,6 @@ class GoldorPhase(val from: Int, val arrived: Boolean = false) : Fight.Phase("P3
             PartyClient.send("termStart", from)
             maybeTaunt()
             if (!practice) Sim.note("Starting at §fS$from§7 (n = $startN, the median fast run's).")
-        }
-        if (practice) {
-            Practice.begin(from, t)
-            if (count(from) >= Station.total(from)) sectionDone(from)
         }
     }
 

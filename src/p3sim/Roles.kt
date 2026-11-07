@@ -360,6 +360,13 @@ object Roles {
             jobsOf.getValue(c) += "gate $s"
             owners.getOrPut("gate $s") { ArrayList() } += c
         }
+        val times = parseTimes(p)
+        val moves = parseMoves(p)
+        return Plan(owners, jobsOf, ee, times, moves)
+    }
+
+    /** [p]'s times lines: each job's (section it's done in, seconds into it). */
+    private fun parseTimes(p: Preset): HashMap<String, Pair<Int, Double>> {
         val times = HashMap<String, Pair<Int, Double>>()
         p.times.forEachIndexed { i, line ->
             val s = i + 1
@@ -369,6 +376,11 @@ object Roles {
                 ts.dropLast(1).flatMap { jobs(it, s) }.forEach { times[it] = s to at }
             }
         }
+        return times
+    }
+
+    /** [p]'s moves lines: a [Move] per group. */
+    private fun parseMoves(p: Preset): ArrayList<Move> {
         val moves = ArrayList<Move>()
         p.moves.forEachIndexed { i, line ->
             val s = i + 1
@@ -381,7 +393,7 @@ object Roles {
                 }
             }
         }
-        return Plan(owners, jobsOf, ee, times, moves)
+        return moves
     }
 
     /** "ee2" / "ee3" / "core" / "i4" / "ss"... -> the class it's about in [plan]. */

@@ -500,6 +500,12 @@ object Party {
             jobs += Job(job, bot, ts, sec)
         }
         spread(plan)
+        helperJobs(phase, from, plan)
+        placeBots(phase, from, walked)
+    }
+
+    /** Helper on: the bots do your stacks, a joiner's stacks and the preset's helps too, from section [from] on (whoever's first). */
+    private fun helperJobs(phase: GoldorPhase, from: Int, plan: Roles.Plan) {
         // Helper: your jobs you made stacks (right click) are done by their bot too, at the plan's time (whoever's first).
         if (P3Plan.helper) for (job in P3Plan.allJobs()) {
             if (!P3Plan.isMine(job) || !P3Plan.isStacked(job)) continue
@@ -541,6 +547,10 @@ object Party {
                 dbg("helper: §e${bot.name}§7 gets $j by ${h.at}s into S${h.section}")
             }
         }
+    }
+
+    /** Each bot where it starts P3 from [from]: a ghost where you stood, legs where they start, else its first job or early enter, or where its lead-in got to ([walked]). */
+    private fun placeBots(phase: GoldorPhase, from: Int, walked: Map<DungeonClass, Pair<Vec3, Vec3>>) {
         for (b in bots) {
             b.inSection = from
             b.dig = null
@@ -652,7 +662,30 @@ object Party {
         }
         beaten.filter { b -> leaps.none { it.bot === b } }.forEach { walkOn(it, n) }
         youAtEarlyEnter(phase)
-        // Leaps that are due.
+        dueLeaps(n)
+        dueJobs(phase, n, s)
+        ghosts(phase)
+        earlyEnterBots(phase)
+        preleaps(phase)
+        ontoLeapsTick(phase)
+        releaseEarlyEnterers(phase)
+        recoreAfterJobs(phase)
+        intoCoreWhenRecored(phase)
+        for (b in bots) when { b.legs != null -> legTick(b, phase); b.ghost == null -> move(b, n); else -> place(b) }
+        i4Bot(phase)
+        ssBot(phase)
+        // Working: at its terminal for the last 2 s before it's done (opening it swings: a right click on its stand).
+        for (b in bots) {
+            if (b.ghost != null) continue
+            val was = b.working
+            b.working = next(b)?.takeIf { it.at >= 0 && it.at - n <= 40 && b.pos.distanceTo(spotOf(it.job)) <= 2.5 }?.let { j -> phase.stations.firstOrNull { it.id == j.job && it.kind == Station.Kind.TERMINAL } }
+            if (b.working != null && b.working !== was) swing(b)
+            if (b.legs == null) hold(b, n)
+        }
+    }
+
+    /** Leaps that are due. */
+    private fun dueLeaps(n: Int) {
         leaps.filter { n >= it.at }.forEach { l ->
             // Onto you at your early enter: only while you're in position.
             if (l.youAt != null && Sim.players().none { it.position().distanceTo(l.youAt) <= 3.0 }) return@forEach
@@ -661,7 +694,10 @@ object Party {
             if (l.bot.legs != null) return@forEach
             l.onto()?.let { dbg("§e${l.bot.name}§7 leaps (${it.pos.short()})"); leapTo(l.bot, it, n); walkOn(l.bot, n) }
         }
-        // Jobs that are due (a section's last held while you're on your way to your early enter).
+    }
+
+    /** Jobs that are due (a section's last held while you're on your way to your early enter). */
+    private fun dueJobs(phase: GoldorPhase, n: Int, s: Int) {
         val held = holding(phase)
         val finished = ArrayList<Bot>()
         jobs.removeAll { j ->
@@ -690,24 +726,6 @@ object Party {
             true
         }
         finished.forEach { walkOn(it, n) }
-        ghosts(phase)
-        earlyEnterBots(phase)
-        preleaps(phase)
-        ontoLeapsTick(phase)
-        releaseEarlyEnterers(phase)
-        recoreAfterJobs(phase)
-        intoCoreWhenRecored(phase)
-        for (b in bots) when { b.legs != null -> legTick(b, phase); b.ghost == null -> move(b, n); else -> place(b) }
-        i4Bot(phase)
-        ssBot(phase)
-        // Working: at its terminal for the last 2 s before it's done (opening it swings: a right click on its stand).
-        for (b in bots) {
-            if (b.ghost != null) continue
-            val was = b.working
-            b.working = next(b)?.takeIf { it.at >= 0 && it.at - n <= 40 && b.pos.distanceTo(spotOf(it.job)) <= 2.5 }?.let { j -> phase.stations.firstOrNull { it.id == j.job && it.kind == Station.Kind.TERMINAL } }
-            if (b.working != null && b.working !== was) swing(b)
-            if (b.legs == null) hold(b, n)
-        }
     }
 
     /**

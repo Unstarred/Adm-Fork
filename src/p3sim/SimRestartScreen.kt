@@ -70,42 +70,9 @@ class SimRestartScreen : Screen(Component.literal(P3Sim.FULL_NAME)) {
         tabButton(Tab.PLAN, "Plan", "The section plan: each section's jobs and who does them (yours, a bot's), with Advanced under it.", left, restartY - ROW, Tab.ADVANCED)
         tabButton(Tab.PRACTICE, "Practice", "Practice: a section (your role's part of it), or your own custom one; timed.", left, restartY)
 
-        // Right: the skill level, the chosen one highlighted (its P3 time on hover). Shown names only: the presets keep theirs.
-        title("§eSkill Level", right, SIDE_W, skillY)
-        val skills = listOf(
-            Triple(0, "Normal PF", "The bots play at a normal party finder pace: P3 in about 34 s."),
-            Triple(1, "Quality PF", "The bots play at a quality party finder pace: P3 in about 28 s."),
-            Triple(2, "Advanced PF", "The bots play at an advanced party finder pace: P3 in about 22 s."),
-            Triple(P3Plan.NEAR_OPTIMAL, "Near Optimal", "Nearly the fastest terms: the archer pre-does S3's device, the tank holds the high EE3, the mage holds by the core for S4 and recores after its 4th."),
-            Triple(P3Plan.THEORETICAL, "Theoretical", "The fastest terms, in theory: a far EE2, a high EE3, an EE4 by the core."),
-        )
-        for ((k, s) in skills.withIndex()) {
-            val (i, name, about) = s
-            addRenderableWidget(Button.builder(Component.literal(if (i == P3Plan.skill) "§a§n$name" else name)) {
-                P3Plan.chooseSkill(i)
-                rebuildWidgets()
-            }.tooltip(tip("$about Your jobs become your class's role in it.")).bounds(right, skillY + k * ROW, SIDE_W, 20).build())
-        }
+        skillColumn(right, skillY)
 
-        // Right of it: your role (class), one above the other; a bot plays each of the others (in a party: the
-        // classes nobody plays). A class another player has is shown with their name: taking it swaps you.
-        title("§eRole", roleX, CLASS_W, roleY)
-        val roles = P3Plan.preset().roles
-        Party.CLASSES.forEachIndexed { i, c ->
-            val other = PartyClient.team.firstOrNull { it.player && it.clazz == c }
-            val text = when {
-                c == P3Sim.myClass -> "§a§n${Roles.label(c)}"
-                other != null -> "§b${Roles.label(c).take(4)} §7${other.name.take(6)}"
-                else -> Roles.label(c)
-            }
-            addRenderableWidget(Button.builder(Component.literal(text)) {
-                P3Sim.classS.index = i
-                ModuleManager.saveConfigurations()
-                rebuildWidgets()
-            }.tooltip(tip(if (other != null) "${other.name} plays the ${Roles.label(c)}. Click: you take it and they get yours (${Roles.label(P3Sim.myClass)})."
-                else "Play as ${Roles.label(c)}: your jobs become its ${P3Plan.skillName()} role (${roles[c] ?: "none"}); a bot plays each class no player plays."))
-                .bounds(roleX, roleY + i * ROW, CLASS_W, 20).build())
-        }
+        roleColumn(roleX, roleY)
 
         // The bottom half: the tab.
         panel = LinearLayout.vertical().spacing(2)
@@ -126,6 +93,49 @@ class SimRestartScreen : Screen(Component.literal(P3Sim.FULL_NAME)) {
         if (tab == Tab.PLAN || tab == Tab.ADVANCED)
             addRenderableWidget(tabCell(Tab.ADVANCED, "Advanced", if (tab == Tab.ADVANCED) "Back to the section plan." else "Spawn and early-enter spots, the leap menu, the bots' options.")
                 .also { it.setPosition(cx - it.width / 2, top + PANEL_H) })
+    }
+
+    /** Right: the skill level, the chosen one highlighted (its P3 time on hover). Shown names only: the presets keep theirs. */
+    private fun skillColumn(right: Int, skillY: Int) {
+        title("§eSkill Level", right, SIDE_W, skillY)
+        val skills = listOf(
+            Triple(0, "Normal PF", "The bots play at a normal party finder pace: P3 in about 34 s."),
+            Triple(1, "Quality PF", "The bots play at a quality party finder pace: P3 in about 28 s."),
+            Triple(2, "Advanced PF", "The bots play at an advanced party finder pace: P3 in about 22 s."),
+            Triple(P3Plan.NEAR_OPTIMAL, "Near Optimal", "Nearly the fastest terms: the archer pre-does S3's device, the tank holds the high EE3, the mage holds by the core for S4 and recores after its 4th."),
+            Triple(P3Plan.THEORETICAL, "Theoretical", "The fastest terms, in theory: a far EE2, a high EE3, an EE4 by the core."),
+        )
+        for ((k, s) in skills.withIndex()) {
+            val (i, name, about) = s
+            addRenderableWidget(Button.builder(Component.literal(if (i == P3Plan.skill) "§a§n$name" else name)) {
+                P3Plan.chooseSkill(i)
+                rebuildWidgets()
+            }.tooltip(tip("$about Your jobs become your class's role in it.")).bounds(right, skillY + k * ROW, SIDE_W, 20).build())
+        }
+    }
+
+    /**
+     * Right of it: your role (class), one above the other; a bot plays each of the others (in a party: the
+     * classes nobody plays). A class another player has is shown with their name: taking it swaps you.
+     */
+    private fun roleColumn(roleX: Int, roleY: Int) {
+        title("§eRole", roleX, CLASS_W, roleY)
+        val roles = P3Plan.preset().roles
+        Party.CLASSES.forEachIndexed { i, c ->
+            val other = PartyClient.team.firstOrNull { it.player && it.clazz == c }
+            val text = when {
+                c == P3Sim.myClass -> "§a§n${Roles.label(c)}"
+                other != null -> "§b${Roles.label(c).take(4)} §7${other.name.take(6)}"
+                else -> Roles.label(c)
+            }
+            addRenderableWidget(Button.builder(Component.literal(text)) {
+                P3Sim.classS.index = i
+                ModuleManager.saveConfigurations()
+                rebuildWidgets()
+            }.tooltip(tip(if (other != null) "${other.name} plays the ${Roles.label(c)}. Click: you take it and they get yours (${Roles.label(P3Sim.myClass)})."
+                else "Play as ${Roles.label(c)}: your jobs become its ${P3Plan.skillName()} role (${roles[c] ?: "none"}); a bot plays each class no player plays."))
+                .bounds(roleX, roleY + i * ROW, CLASS_W, 20).build())
+        }
     }
 
     override fun isPauseScreen(): Boolean = false
@@ -222,30 +232,7 @@ class SimRestartScreen : Screen(Component.literal(P3Sim.FULL_NAME)) {
                 "${ee.label} (${who}) stands where you stand now, facing as you are (as $me in $skill). Now: ${at(P3Plan.eeSpot(ee))}.") { here()?.let { P3Plan.setCustomSpot(ee.key, it) } }
         } + change("Defaults", 56, "Every early enter back to its default spot (Normal PF's) for $me in $skill.") { P3Plan.earlyEnters.forEach { P3Plan.setCustomSpot(it.key, null) } })
 
-        // The leap menu as it opens: slots 1 2 over 3 4. Left click: the next class; right click: the one before.
-        val order = P3Plan.botOrder()
-        val grid = LinearLayout.vertical().spacing(2)
-        for (r in 0..1) {
-            val line = LinearLayout.horizontal().spacing(2)
-            for (k in 0..1) {
-                val slot = r * 2 + k + 1
-                val c = order.getOrNull(slot - 1)
-                line.addChild(ClickButton(LEAP_W, "§7$slot: §f${c?.let { Roles.label(it) } ?: "-"}",
-                    tip("Leap menu slot $slot: ${c?.let { Roles.label(it) } ?: "nobody"}. Left click: swap with the next slot's class; right click: with the one before. (Your own order: Leap Sort goes to Custom.)"),
-                    left = { P3Plan.cycleSlot(slot); P3Plan.save(); rebuildWidgets() },
-                    right = { P3Plan.cycleSlot(slot, back = true); P3Plan.save(); rebuildWidgets() }))
-            }
-            grid.addChild(line)
-        }
-        val side = LinearLayout.vertical().spacing(2)
-        side.addChild(change("Leap Sort: " + if (P3Plan.odinSort) "§aOdin" else "Custom", 100,
-            "The leap menu's order. Odin (green): as Odin's Leap Menu sorts it (by class). Custom: your own, set with the slots.") { P3Plan.odinSort = !P3Plan.odinSort; P3Plan.save() })
-        val gap = LinearLayout.horizontal().spacing(2)
-        gap.addChild(change("-", 16, "Bots leap 0.25 s closer together.") { P3Plan.leapGap = (P3Plan.leapGap - 0.25).coerceAtLeast(0.05); P3Plan.save() })
-        gap.addChild(label("§f${"%.2f".format(Locale.ROOT, P3Plan.leapGap)}s apart", 64, "How far apart the bots' leaps onto an early enterer come."))
-        gap.addChild(change("+", 16, "Bots leap 0.25 s further apart.") { P3Plan.leapGap = (P3Plan.leapGap + 0.25).coerceAtMost(5.0); P3Plan.save() })
-        side.addChild(gap)
-        row(listOf(label("§eLeaps", LABEL_W, "The leap menu (2x2 as it opens in game) and the bots' leaps."), grid, side))
+        leapsRow()
 
         row(listOf(
             toggle("Helpers", P3Plan.helper, 64, "On (green): the bots help with your stacks: a stacked job of yours (right click it in the plan) and the preset's stacks are done by their bot too, whoever gets there first.") { P3Plan.helper = !P3Plan.helper; P3Plan.save() },
@@ -274,6 +261,33 @@ class SimRestartScreen : Screen(Component.literal(P3Sim.FULL_NAME)) {
         row(listOf<LayoutElement>(label("§dYour best", LABEL_W, "A bot plays your fastest run as its class.")) + ghosts + times)
     }
 
+    /** The leap menu as it opens: slots 1 2 over 3 4. Left click: the next class; right click: the one before. */
+    private fun leapsRow() {
+        val order = P3Plan.botOrder()
+        val grid = LinearLayout.vertical().spacing(2)
+        for (r in 0..1) {
+            val line = LinearLayout.horizontal().spacing(2)
+            for (k in 0..1) {
+                val slot = r * 2 + k + 1
+                val c = order.getOrNull(slot - 1)
+                line.addChild(ClickButton(LEAP_W, "§7$slot: §f${c?.let { Roles.label(it) } ?: "-"}",
+                    tip("Leap menu slot $slot: ${c?.let { Roles.label(it) } ?: "nobody"}. Left click: swap with the next slot's class; right click: with the one before. (Your own order: Leap Sort goes to Custom.)"),
+                    left = { P3Plan.cycleSlot(slot); P3Plan.save(); rebuildWidgets() },
+                    right = { P3Plan.cycleSlot(slot, back = true); P3Plan.save(); rebuildWidgets() }))
+            }
+            grid.addChild(line)
+        }
+        val side = LinearLayout.vertical().spacing(2)
+        side.addChild(change("Leap Sort: " + if (P3Plan.odinSort) "§aOdin" else "Custom", 100,
+            "The leap menu's order. Odin (green): as Odin's Leap Menu sorts it (by class). Custom: your own, set with the slots.") { P3Plan.odinSort = !P3Plan.odinSort; P3Plan.save() })
+        val gap = LinearLayout.horizontal().spacing(2)
+        gap.addChild(change("-", 16, "Bots leap 0.25 s closer together.") { P3Plan.leapGap = (P3Plan.leapGap - 0.25).coerceAtLeast(0.05); P3Plan.save() })
+        gap.addChild(label("§f${"%.2f".format(Locale.ROOT, P3Plan.leapGap)}s apart", 64, "How far apart the bots' leaps onto an early enterer come."))
+        gap.addChild(change("+", 16, "Bots leap 0.25 s further apart.") { P3Plan.leapGap = (P3Plan.leapGap + 0.25).coerceAtMost(5.0); P3Plan.save() })
+        side.addChild(gap)
+        row(listOf(label("§eLeaps", LABEL_W, "The leap menu (2x2 as it opens in game) and the bots' leaps."), grid, side))
+    }
+
     /** Where you stand and look now (a tenth of a block; y to the hundredth, so a slab's height stays). */
     private fun here(): Spots.Spot? = mc.player?.let {
         Spots.Spot("set", Math.round(it.x * 10) / 10.0, Math.floor(it.y * 100) / 100.0, Math.round(it.z * 10) / 10.0, it.yRot, it.xRot)
@@ -295,14 +309,7 @@ class SimRestartScreen : Screen(Component.literal(P3Sim.FULL_NAME)) {
         val saved = HotbarLayout.has(p3Part)
         val who = Roles.label(P3Sim.myClass)
         row(listOf(
-            stack("§eDeath Ticks", 84, P3Sim.deathTicksS.description, DEATH_TICKS.mapIndexed { i, (name, about) ->
-                change(pick(name, P3Sim.deathTicks == i), 84, about) { P3Sim.deathTicksS.index = i }
-            } + listOf(
-                // Your own (the server puts them on you the moment they change: PartyServer.tick).
-                toggle("Real Masks", P3Sim.realMasksS.value, 84, P3Sim.realMasksS.description) { P3Sim.realMasksS.value = !P3Sim.realMasksS.value },
-                change("Mask: ${if (P3Sim.wornMaskS.index == 0) "Spirit" else "Bonzo"}", 84, P3Sim.wornMaskS.description) { P3Sim.wornMaskS.index = 1 - P3Sim.wornMaskS.index },
-                change("Pet: ${if (P3Sim.phoenixS.value) "Phoenix" else "Black Cat"}", 84, P3Sim.phoenixS.description) { P3Sim.phoenixS.value = !P3Sim.phoenixS.value },
-            )),
+            deathTicksColumn(),
             // Terminals: random or one type for all.
             stack("§eTerminals", 66, P3Sim.terminalS.description, listOf(
                 change(pick("Random", forced == null), 66, "Each terminal a random type, as on Hypixel.") { P3Sim.terminalS.index = 0 },
@@ -320,26 +327,8 @@ class SimRestartScreen : Screen(Component.literal(P3Sim.FULL_NAME)) {
                 LuckSlider(110, "SS Luck", P3Sim.ssLuckS),
                 toggle("1st Click Melody", P3Sim.firstClickMelody, 110, "Always First Click Melody: " + P3Sim.firstClickMelodyS.description) { P3Sim.firstClickMelodyS.value = !P3Sim.firstClickMelody },
             )),
-            stack("§eTimings", 106, "The fight's numbers.", listOf(
-                stepper("Goldor kill", "${P3Sim.goldorKill}t", P3Sim.goldorKillS.description, { P3Sim.goldorKillS.value = (P3Sim.goldorKill - 1).coerceAtLeast(10) }, { P3Sim.goldorKillS.value = (P3Sim.goldorKill + 1).coerceAtMost(120) }),
-                stepper("Shortbow", "${P3Sim.shortbowCooldown}t", P3Sim.shortbowCooldownS.description, { P3Sim.shortbowCooldownS.value = (P3Sim.shortbowCooldown - 1).coerceAtLeast(1) }, { P3Sim.shortbowCooldownS.value = (P3Sim.shortbowCooldown + 1).coerceAtMost(20) }),
-                stepper("Hydra", "${P3Sim.hydraStart}", P3Sim.hydraStartS.description, { P3Sim.hydraStartS.value = (P3Sim.hydraStart - 1).coerceAtLeast(0) }, { P3Sim.hydraStartS.value = (P3Sim.hydraStart + 1).coerceAtMost(10) }),
-                toggle("Mage On All", P3Sim.mageAll, 106, "Mage Beam On All Classes: " + P3Sim.mageAllS.description) { P3Sim.mageAllS.value = !P3Sim.mageAll },
-                toggle("Infinite Charges", P3Sim.breakerInfinite, 106, "On (green): the Dungeonbreaker never runs out of charges.") { P3Sim.toggleBreakerInfinite() },
-                toggle("Perma Break", P3Sim.breakerPerma, 106, "On (green): blocks the Dungeonbreaker breaks stay broken (through restarts too) until you turn it off; then they all come back.") {
-                    // Off: the server brings the blocks back (PartyServer.tick).
-                    P3Sim.toggleBreakerPerma()
-                },
-            )),
-            stack("§eFight", 92, "How the fight goes on.", listOf(
-                toggle("Lava Bounce", P3Sim.lava, 92, P3Sim.lavaS.description) { P3Sim.lavaS.value = !P3Sim.lava },
-                toggle("Start On Join", P3Sim.autoStart, 92, P3Sim.autoStartS.description) { P3Sim.autoStartS.value = !P3Sim.autoStart },
-                toggle("Terror At Terms", P3Sim.terrorAtTerms, 92, P3Sim.terrorAtTermsS.description) { P3Sim.toggleTerrorAtTerms() },
-                toggle("Black Cat Start", P3Sim.blackCatAtStart, 92, "Black Cat At Start: " + P3Sim.blackCatS.description) { P3Sim.toggleBlackCatAtStart() },
-                toggle("Section Times", P3Sim.showTimes, 92, P3Sim.showTimesS.description) { P3Sim.showTimesS.value = !P3Sim.showTimes },
-                toggle("Hide Players", P3Sim.hidePlayers, 92, "On (green): other players out of sight.") { P3Sim.toggleHidePlayers() },
-                toggle("Debug Bots", P3Sim.debugBots, 92, P3Sim.debugBotsS.description) { P3Sim.debugBotsS.value = !P3Sim.debugBots },
-            )),
+            timingsColumn(),
+            fightColumn(),
             stack("§eOther", 100, "Your hotbar, recording, leaving.", listOf(
                 act(if (saved) "§aSave $part Hotbar" else "Save $part Hotbar", 100, "Saves where your items are right now (hotbar and inventory), the slot you hold, what you wear and your pet, for the $who ($part), on every skill. " +
                     "Every start and restart lays it out (without one, your items stay as you left them).") {
@@ -354,6 +343,43 @@ class SimRestartScreen : Screen(Component.literal(P3Sim.FULL_NAME)) {
             )),
         ))
     }
+
+    /** The Death Ticks column, your masks and pet under it. */
+    private fun deathTicksColumn(): LayoutElement =
+        stack("§eDeath Ticks", 84, P3Sim.deathTicksS.description, DEATH_TICKS.mapIndexed { i, (name, about) ->
+            change(pick(name, P3Sim.deathTicks == i), 84, about) { P3Sim.deathTicksS.index = i }
+        } + listOf(
+            // Your own (the server puts them on you the moment they change: PartyServer.tick).
+            toggle("Real Masks", P3Sim.realMasksS.value, 84, P3Sim.realMasksS.description) { P3Sim.realMasksS.value = !P3Sim.realMasksS.value },
+            change("Mask: ${if (P3Sim.wornMaskS.index == 0) "Spirit" else "Bonzo"}", 84, P3Sim.wornMaskS.description) { P3Sim.wornMaskS.index = 1 - P3Sim.wornMaskS.index },
+            change("Pet: ${if (P3Sim.phoenixS.value) "Phoenix" else "Black Cat"}", 84, P3Sim.phoenixS.description) { P3Sim.phoenixS.value = !P3Sim.phoenixS.value },
+        ))
+
+    /** The Timings column: the fight's numbers. */
+    private fun timingsColumn(): LayoutElement =
+        stack("§eTimings", 106, "The fight's numbers.", listOf(
+            stepper("Goldor kill", "${P3Sim.goldorKill}t", P3Sim.goldorKillS.description, { P3Sim.goldorKillS.value = (P3Sim.goldorKill - 1).coerceAtLeast(10) }, { P3Sim.goldorKillS.value = (P3Sim.goldorKill + 1).coerceAtMost(120) }),
+            stepper("Shortbow", "${P3Sim.shortbowCooldown}t", P3Sim.shortbowCooldownS.description, { P3Sim.shortbowCooldownS.value = (P3Sim.shortbowCooldown - 1).coerceAtLeast(1) }, { P3Sim.shortbowCooldownS.value = (P3Sim.shortbowCooldown + 1).coerceAtMost(20) }),
+            stepper("Hydra", "${P3Sim.hydraStart}", P3Sim.hydraStartS.description, { P3Sim.hydraStartS.value = (P3Sim.hydraStart - 1).coerceAtLeast(0) }, { P3Sim.hydraStartS.value = (P3Sim.hydraStart + 1).coerceAtMost(10) }),
+            toggle("Mage On All", P3Sim.mageAll, 106, "Mage Beam On All Classes: " + P3Sim.mageAllS.description) { P3Sim.mageAllS.value = !P3Sim.mageAll },
+            toggle("Infinite Charges", P3Sim.breakerInfinite, 106, "On (green): the Dungeonbreaker never runs out of charges.") { P3Sim.toggleBreakerInfinite() },
+            toggle("Perma Break", P3Sim.breakerPerma, 106, "On (green): blocks the Dungeonbreaker breaks stay broken (through restarts too) until you turn it off; then they all come back.") {
+                // Off: the server brings the blocks back (PartyServer.tick).
+                P3Sim.toggleBreakerPerma()
+            },
+        ))
+
+    /** The Fight column: how the fight goes on. */
+    private fun fightColumn(): LayoutElement =
+        stack("§eFight", 92, "How the fight goes on.", listOf(
+            toggle("Lava Bounce", P3Sim.lava, 92, P3Sim.lavaS.description) { P3Sim.lavaS.value = !P3Sim.lava },
+            toggle("Start On Join", P3Sim.autoStart, 92, P3Sim.autoStartS.description) { P3Sim.autoStartS.value = !P3Sim.autoStart },
+            toggle("Terror At Terms", P3Sim.terrorAtTerms, 92, P3Sim.terrorAtTermsS.description) { P3Sim.toggleTerrorAtTerms() },
+            toggle("Black Cat Start", P3Sim.blackCatAtStart, 92, "Black Cat At Start: " + P3Sim.blackCatS.description) { P3Sim.toggleBlackCatAtStart() },
+            toggle("Section Times", P3Sim.showTimes, 92, P3Sim.showTimesS.description) { P3Sim.showTimesS.value = !P3Sim.showTimes },
+            toggle("Hide Players", P3Sim.hidePlayers, 92, "On (green): other players out of sight.") { P3Sim.toggleHidePlayers() },
+            toggle("Debug Bots", P3Sim.debugBots, 92, P3Sim.debugBotsS.description) { P3Sim.debugBotsS.value = !P3Sim.debugBots },
+        ))
 
     /** A column: its title, then [items] one under another. */
     private fun stack(title: String, w: Int, about: String, items: List<LayoutElement>): LayoutElement {
@@ -487,6 +513,44 @@ class SimRestartScreen : Screen(Component.literal(P3Sim.FULL_NAME)) {
         val cw = maxOf(100, listOf("Start Custom", "Start Position", "Checkpoint §7($cps)", "Leap Waypoint §7(4/4)", "Clear")
             .maxOf { font.width(it) } + 10)
         val custom = ArrayList<LayoutElement>()
+        customColumn(custom, cw, start, cps)
+        val io = stack("", 64, "Your custom practice as a short code, to send to someone or take theirs.", listOf(
+            change("Export", 64, "Copies the custom practice as a short code (start, jobs, checkpoints, leap waypoints, start timer) to send to someone.") {
+                val code = Practice.exportCode()
+                mc.keyboardHandler.clipboard = code
+                EngineerClient.msg("§7Custom practice code copied: §f$code")
+            },
+            change("Import", 64, "Replaces your custom practice with the code on your clipboard.") {
+                if (Practice.importCode(mc.keyboardHandler.clipboard)) EngineerClient.msg("§7Custom practice imported (S${Practice.customSection}, ${Practice.customJobs.size} job(s), ${Practice.checkpoints.size} checkpoint(s), ${Practice.leapWaypoints.size} leap waypoint(s)).")
+                else EngineerClient.msg("§cYour clipboard doesn't hold a custom practice code.")
+            },
+        ))
+        val others = (1..4).filter { it != sec }.mapNotNull { s -> Practice.customJobsIn(s).takeIf { it.isNotEmpty() }?.let { j -> "S$s ${j.joinToString(" ") { COLUMNS[column(it)].first }}" } }.joinToString(", ")
+        // The section's jobs, in the plan's column order, 6 a column.
+        val jobs = P3Plan.jobsIn(sec).sortedBy { column(it) }
+        jobs.chunked(6).forEachIndexed { i, part ->
+            custom += stack(if (i == 0) "§6§lS$sec" else "", JOB_W, "The section you're in: go to another to pick its jobs too (the picks of every section stay)." +
+                    (others.takeIf { it.isNotEmpty() }?.let { " Picked elsewhere: $it." } ?: ""), part.map { job ->
+                val on = job in picked
+                change((if (on) "§a" else "§8") + COLUMNS[column(job)].first, JOB_W, "${jobName(job)}: ${if (on) "yours to do in the custom practice" else "done at its start"}. Click: ${if (on) "done at the start" else "yours"}.") { Practice.toggleJob(job) }
+            })
+        }
+        val secCols = sectionColumns()
+        val cols = ArrayList<LayoutElement>()
+        cols += io
+        cols += label("", 8)
+        cols += custom.drop(1).reversed()  // the overflow jobs (past 6: D, G, 5...) on the left
+        cols += custom.first()
+        cols += label("", 16)
+        cols += secCols
+        val r = LinearLayout.horizontal().spacing(2)
+        r.defaultCellSetting().alignVerticallyTop()
+        panel.addChild(r)
+        cols.forEach { r.addChild(it) }
+    }
+
+    /** The Custom column, into [custom]: start, position, checkpoints, leap waypoints, the start timer and Clear, all [cw] wide. */
+    private fun customColumn(custom: ArrayList<LayoutElement>, cw: Int, start: Spots.Spot?, cps: Int) {
         custom += stack("§eCustom", cw, "Your own practice: a start position (its section is where you stand), that section's jobs you pick and checkpoints to reach in order (within 1 block, the same height), all timed.", listOf(
             act(if (start != null) "§aStart Custom" else "§8Start Custom", cw,
                 if (start != null) "Starts the custom practice from your start position: your jobs (every section's picks) then the $cps checkpoint(s), timed." else "Set the Start Position first.") { SimActions.send("practiceCustom") }
@@ -524,27 +588,10 @@ class SimRestartScreen : Screen(Component.literal(P3Sim.FULL_NAME)) {
             DelaySlider(cw),
             change("§cClear", cw, "Clears the custom practice: start, jobs, checkpoints and leap waypoints; the timer back to 0.") { Practice.clearCustom(); EngineerClient.msg("§7Custom practice cleared.") },
         ))
-        val io = stack("", 64, "Your custom practice as a short code, to send to someone or take theirs.", listOf(
-            change("Export", 64, "Copies the custom practice as a short code (start, jobs, checkpoints, leap waypoints, start timer) to send to someone.") {
-                val code = Practice.exportCode()
-                mc.keyboardHandler.clipboard = code
-                EngineerClient.msg("§7Custom practice code copied: §f$code")
-            },
-            change("Import", 64, "Replaces your custom practice with the code on your clipboard.") {
-                if (Practice.importCode(mc.keyboardHandler.clipboard)) EngineerClient.msg("§7Custom practice imported (S${Practice.customSection}, ${Practice.customJobs.size} job(s), ${Practice.checkpoints.size} checkpoint(s), ${Practice.leapWaypoints.size} leap waypoint(s)).")
-                else EngineerClient.msg("§cYour clipboard doesn't hold a custom practice code.")
-            },
-        ))
-        val others = (1..4).filter { it != sec }.mapNotNull { s -> Practice.customJobsIn(s).takeIf { it.isNotEmpty() }?.let { j -> "S$s ${j.joinToString(" ") { COLUMNS[column(it)].first }}" } }.joinToString(", ")
-        // The section's jobs, in the plan's column order, 6 a column.
-        val jobs = P3Plan.jobsIn(sec).sortedBy { column(it) }
-        jobs.chunked(6).forEachIndexed { i, part ->
-            custom += stack(if (i == 0) "§6§lS$sec" else "", JOB_W, "The section you're in: go to another to pick its jobs too (the picks of every section stay)." +
-                    (others.takeIf { it.isNotEmpty() }?.let { " Picked elsewhere: $it." } ?: ""), part.map { job ->
-                val on = job in picked
-                change((if (on) "§a" else "§8") + COLUMNS[column(job)].first, JOB_W, "${jobName(job)}: ${if (on) "yours to do in the custom practice" else "done at its start"}. Click: ${if (on) "done at the start" else "yours"}.") { Practice.toggleJob(job) }
-            })
-        }
+    }
+
+    /** The section tabs and the open section's page: its presets, each group its own column(s). */
+    private fun sectionColumns(): ArrayList<LayoutElement> {
         val secCols = ArrayList<LayoutElement>()
         // The section tabs, and the open section's page (S1 when the menu opens).
         val s = practiceSec.takeIf { it in 1..4 } ?: 1
@@ -566,17 +613,7 @@ class SimRestartScreen : Screen(Component.literal(P3Sim.FULL_NAME)) {
                     (p.delay?.let { ". Start timer ${"%.1f".format(Locale.ROOT, it)}s." } ?: ". Start timer: the slider's.")) { SimActions.send("practicePreset", "name" to p.name) }
             })
         }
-        val cols = ArrayList<LayoutElement>()
-        cols += io
-        cols += label("", 8)
-        cols += custom.drop(1).reversed()  // the overflow jobs (past 6: D, G, 5...) on the left
-        cols += custom.first()
-        cols += label("", 16)
-        cols += secCols
-        val r = LinearLayout.horizontal().spacing(2)
-        r.defaultCellSetting().alignVerticallyTop()
-        panel.addChild(r)
-        cols.forEach { r.addChild(it) }
+        return secCols
     }
 
     /** Practice's section tabs: [open]'s page shows beside them (one always open). */

@@ -32,6 +32,7 @@ import net.fabricmc.fabric.api.client.screen.v1.Screens
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.PauseScreen
+import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.TitleScreen
 import net.minecraft.client.player.AbstractClientPlayer
 import net.minecraft.commands.Commands
@@ -316,43 +317,46 @@ object P3Sim : Module(
             EngineerClient.safely("p3sim party client") { PartyClient.tick() }
             EngineerClient.safely("p3sim ghost guard") { GhostGuard.clientTick() }
         }
-        ScreenEvents.AFTER_INIT.register { _, screen, w, _ ->
-            // The title screen: ADS above Singleplayer, the same size; the Minecraft Realms button becomes Join Hypixel.
-            // No Singleplayer button (another mod's menu): a small ADS button in the corner.
-            if (screen is TitleScreen) EngineerClient.safely("ads title button") {
-                val widgets = Screens.getWidgets(screen)
-                fun key(b: Button) = (b.message.contents as? TranslatableContents)?.key
-                val buttons = widgets.filterIsInstance<Button>()
-                val single = buttons.firstOrNull { key(it) == "menu.singleplayer" }
-                val ads = Button.builder(Component.literal(FULL_NAME)) { SimWorld.open() }.let {
-                    if (single != null) it.bounds(single.x, single.y - single.height - 4, single.width, single.height) else it.bounds(w - 164, 4, 160, 16)
-                }.build()
-                widgets.add(ads)
-                val realms = buttons.firstOrNull { key(it) == "menu.online" } ?: return@safely
-                widgets.remove(realms)
-                widgets.add(Button.builder(Component.literal("Join Hypixel")) { RandomStuff.joinHypixel(screen) }
-                    .bounds(realms.x, realms.y, realms.width, realms.height).build())
-            }
-            // In the sim, Esc's ADS Menu takes Open to LAN's place (right under Save and Quit if that
-            // isn't there), and the whole menu shifts so the cursor, which opening it puts in the middle of
-            // the screen, is already on it.
-            if (screen is PauseScreen && inSim) EngineerClient.safely("p3sim pause button") {
-                val widgets = Screens.getWidgets(screen)
-                val buttons = widgets.filterIsInstance<Button>()
-                fun key(b: Button) = (b.message.contents as? TranslatableContents)?.key
-                val lan = buttons.firstOrNull { key(it) in LAN_KEYS }
-                val quit = buttons.firstOrNull { key(it) in QUIT_KEYS } ?: buttons.maxByOrNull { it.y }
-                val main = Button.builder(Component.literal("§6$NAME Menu")) { mc.gui.setScreen(SimRestartScreen()) }
-                val b = when {
-                    lan != null -> { widgets.remove(lan); main.bounds(lan.x, lan.y, lan.width, lan.height) }
-                    quit != null -> main.bounds(quit.x, quit.y + quit.height + 4, quit.width, 20)
-                    else -> main.bounds(4, 4, 110, 20)
-                }.build()
-                widgets.add(b)
-                if (lan != null || quit != null) {
-                    val dy = screen.height / 2 - (b.y + b.height / 2)
-                    for (w in widgets) w.y += dy
-                }
+        ScreenEvents.AFTER_INIT.register { _, screen, w, _ -> afterScreenInit(screen, w) }
+    }
+
+    /** A screen just built ([w] wide): the title screen's ADS and Join Hypixel buttons, and in the sim the Esc menu's ADS Menu. */
+    private fun afterScreenInit(screen: Screen, w: Int) {
+        // The title screen: ADS above Singleplayer, the same size; the Minecraft Realms button becomes Join Hypixel.
+        // No Singleplayer button (another mod's menu): a small ADS button in the corner.
+        if (screen is TitleScreen) EngineerClient.safely("ads title button") {
+            val widgets = Screens.getWidgets(screen)
+            fun key(b: Button) = (b.message.contents as? TranslatableContents)?.key
+            val buttons = widgets.filterIsInstance<Button>()
+            val single = buttons.firstOrNull { key(it) == "menu.singleplayer" }
+            val ads = Button.builder(Component.literal(FULL_NAME)) { SimWorld.open() }.let {
+                if (single != null) it.bounds(single.x, single.y - single.height - 4, single.width, single.height) else it.bounds(w - 164, 4, 160, 16)
+            }.build()
+            widgets.add(ads)
+            val realms = buttons.firstOrNull { key(it) == "menu.online" } ?: return@safely
+            widgets.remove(realms)
+            widgets.add(Button.builder(Component.literal("Join Hypixel")) { RandomStuff.joinHypixel(screen) }
+                .bounds(realms.x, realms.y, realms.width, realms.height).build())
+        }
+        // In the sim, Esc's ADS Menu takes Open to LAN's place (right under Save and Quit if that
+        // isn't there), and the whole menu shifts so the cursor, which opening it puts in the middle of
+        // the screen, is already on it.
+        if (screen is PauseScreen && inSim) EngineerClient.safely("p3sim pause button") {
+            val widgets = Screens.getWidgets(screen)
+            val buttons = widgets.filterIsInstance<Button>()
+            fun key(b: Button) = (b.message.contents as? TranslatableContents)?.key
+            val lan = buttons.firstOrNull { key(it) in LAN_KEYS }
+            val quit = buttons.firstOrNull { key(it) in QUIT_KEYS } ?: buttons.maxByOrNull { it.y }
+            val main = Button.builder(Component.literal("§6$NAME Menu")) { mc.gui.setScreen(SimRestartScreen()) }
+            val b = when {
+                lan != null -> { widgets.remove(lan); main.bounds(lan.x, lan.y, lan.width, lan.height) }
+                quit != null -> main.bounds(quit.x, quit.y + quit.height + 4, quit.width, 20)
+                else -> main.bounds(4, 4, 110, 20)
+            }.build()
+            widgets.add(b)
+            if (lan != null || quit != null) {
+                val dy = screen.height / 2 - (b.y + b.height / 2)
+                for (w in widgets) w.y += dy
             }
         }
     }
